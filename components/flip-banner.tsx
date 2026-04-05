@@ -14,6 +14,7 @@ interface FlipBannerProps {
   phrases: string[];
   className?: string;
   hotColor?: string;
+  warmColor?: string;
   coldColor?: string;
 }
 
