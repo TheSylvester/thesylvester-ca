@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import DotGridBackground from "@/components/dot-grid-background";
+import { FlipBanner } from "@/components/flip-banner";
 
 const NAV_ITEMS = ["About", "Projects", "Contact"];
 
@@ -37,50 +38,56 @@ export default function Home() {
             <div className="absolute -inset-4 rounded-full bg-gradient-to-t from-[#F97316]/15 via-[#D4A574]/20 to-transparent blur-xl" />
           </div>
 
-          {/* Circle ring — behind image */}
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-72 h-72 rounded-full border-2 border-[#D4A574]/30 z-[5] pointer-events-none" />
+          {/* Circle ring — behind image (temporarily hidden) */}
+          {/* <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-72 h-72 rounded-full border-2 border-[#D4A574]/30 z-[5] pointer-events-none" /> */}
 
-          {/* Image — big, with gradient fade at bottom */}
-          <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[480px] z-10 pointer-events-none" style={{ maskImage: "linear-gradient(to bottom, black 70%, transparent 95%)", WebkitMaskImage: "linear-gradient(to bottom, black 70%, transparent 95%)" }}>
+          {/* Image with gradient fade at bottom */}
+          <div className="absolute bottom-6 left-1/2 -translate-x-[52%] w-[560px] z-10 pointer-events-none" style={{ maskImage: "linear-gradient(to bottom, black 60%, transparent 90%)", WebkitMaskImage: "linear-gradient(to bottom, black 60%, transparent 90%)" }}>
             <Image
               src="/images/sylvester-suit-800w-bw-clean.png"
               alt="Sylvester Wong"
               width={800}
               height={800}
               className="w-full h-auto"
+              style={{ filter: "sepia(0.3) brightness(0.85) hue-rotate(5deg) saturate(0.7)" }}
               priority
             />
           </div>
         </div>
 
-        {/* Name */}
-        <h1 className="text-4xl md:text-6xl font-bold tracking-tight mb-4 bg-gradient-to-r from-[#D4A574] to-[#F97316] bg-clip-text text-transparent">
-          Sylvester Wong
-        </h1>
-
-        {/* Tagline */}
-        <p className="text-lg md:text-xl text-stone-400 mb-6 text-center max-w-xl">
-          Agentic Engineering Leader
-        </p>
-
-        {/* Subtitle pill */}
-        <div className="px-5 py-2 rounded-full border border-[#D4A574]/25 bg-[#D4A574]/5 text-[#D4A574] text-sm md:text-base backdrop-blur-sm mb-12">
-          Supercharging dev teams with autonomous coding tools
+        {/* Name + Tagline group */}
+        <div className="flex flex-col items-center gap-0 mb-8">
+          <h1 className="font-[family-name:var(--font-bebas)] text-6xl md:text-8xl tracking-wide bg-gradient-to-r from-[#D4A574] to-[#F97316] bg-clip-text text-transparent" style={{ lineHeight: "89%" }}>
+            SYLVESTER WONG
+          </h1>
+          <div className="text-center max-w-xl h-10 md:h-12 flex items-center justify-center">
+            <FlipBanner
+              phrases={[
+                "Agentic AI Leader",
+                "Agentic Harness Engineer",
+                "Full Stack Developer",
+                "AI Solutions Architect",
+              ]}
+            />
+          </div>
         </div>
+
+        {/* Subtitle */}
+        <p className="text-stone-500 text-sm md:text-base mb-10 tracking-wide">
+          Supercharging dev teams with autonomous coding tools
+        </p>
 
         {/* CTA buttons */}
         <div className="flex gap-4">
           <a
-            href="https://github.com/TheSylvester"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-6 py-3 rounded-full bg-[#D4A574] text-[#1C1917] font-medium text-sm hover:bg-[#E8C4A0] transition-colors duration-200"
+            href="#projects"
+            className="group relative px-7 py-3 rounded-full bg-gradient-to-r from-[#D4A574] to-[#F97316] text-[#1C1917] font-semibold text-sm overflow-hidden transition-all duration-300 hover:shadow-[0_0_24px_rgba(249,115,22,0.3)]"
           >
             View Projects
           </a>
           <a
             href="#contact"
-            className="px-6 py-3 rounded-full border border-stone-700 text-stone-400 text-sm hover:border-stone-500 hover:text-stone-200 transition-colors duration-200"
+            className="px-7 py-3 rounded-full border border-[#D4A574]/30 text-[#D4A574] text-sm font-medium hover:bg-[#D4A574]/10 hover:border-[#D4A574]/50 transition-all duration-300"
           >
             Get in Touch
           </a>
@@ -131,25 +138,16 @@ export default function Home() {
           {/* Bento grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {/* Main feature — spans 2 cols */}
-            <div className="md:col-span-2 rounded-2xl border border-stone-800/60 bg-stone-900/40 backdrop-blur-sm p-8 flex flex-col justify-between min-h-[260px]">
-              <div>
-                <div className="text-xs font-medium text-[#F97316] uppercase tracking-wide mb-3">The Problem</div>
-                <h3 className="text-xl font-semibold text-stone-100 mb-3">
-                  Terminal agents are powerful but blind
-                </h3>
-                <p className="text-stone-400 leading-relaxed max-w-lg">
-                  No way to fork a conversation, no visibility into what tools are doing,
-                  and no way for your agent to remember what you worked on last week.
-                  So I built a control plane.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2 mt-6">
-                {["VS Code Extension", "Standalone Browser", "Windows Desktop", "Discord Bot"].map((platform) => (
-                  <span key={platform} className="px-3 py-1 rounded-full bg-stone-800/60 text-stone-400 text-xs">
-                    {platform}
-                  </span>
-                ))}
-              </div>
+            <div className="md:col-span-2 rounded-2xl border border-stone-800/60 bg-stone-900/40 backdrop-blur-sm p-10 flex flex-col justify-center min-h-[220px]">
+              <div className="text-xs font-medium text-[#F97316] uppercase tracking-widest mb-3">Claude Code &amp; Codex deserve a better UI</div>
+              <p className="text-base text-stone-500 leading-relaxed mb-4 max-w-lg">
+                No way to fork conversations side by side. No semantic search for previous sessions.
+                No way to orchestrate agents from different models. Discord bots that couldn&apos;t resume past conversations.
+              </p>
+              <p className="text-2xl md:text-3xl font-bold tracking-tight text-stone-100 leading-snug">
+                So I built one GUI to control<br />
+                <span className="bg-gradient-to-r from-[#D4A574] to-[#F97316] bg-clip-text text-transparent">all my agents.</span>
+              </p>
             </div>
 
             {/* Download links card */}
@@ -159,8 +157,8 @@ export default function Home() {
                 <a href="https://www.npmjs.com/package/crispy-code" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 text-sm text-stone-400 hover:text-stone-100 transition-colors group">
                   <span className="w-7 h-7 rounded-md bg-stone-800/80 flex items-center justify-center text-[10px] font-bold text-[#CB3837] group-hover:bg-stone-700/80">npm</span>
                   <div>
-                    <div className="text-stone-300 group-hover:text-stone-100">npx crispy-code</div>
-                    <div className="text-xs text-stone-600">Standalone browser</div>
+                    <div className="text-stone-300 group-hover:text-stone-100">npm i -g crispy-code</div>
+                    <div className="text-xs text-stone-600">Standalone browser &amp; CLI</div>
                   </div>
                 </a>
                 <a href="https://open-vsx.org/extension/the-sylvester/crispy" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 text-sm text-stone-400 hover:text-stone-100 transition-colors group">
@@ -195,10 +193,10 @@ export default function Home() {
 
             {/* Feature cards with hoverable screenshots */}
             {[
-              { title: "Discord Remote", desc: "Control your agents from your phone. Live session monitor with inline approvals.", img: "/images/discord.png", color: "#D4A574" },
+              { title: "Discord Remote", desc: "Control your agents from your phone — and pick up any past conversation where you left off.", img: "/images/discord.png", color: "#D4A574" },
               { title: "Agent Recall", desc: "Full-text and semantic search across every session. Your agent remembers past work.", img: "/images/agent-memory-recall.png", color: "#F97316" },
-              { title: "Fork & Rewind", desc: "Fork from any message to explore a different approach. Side-by-side session view.", img: "/images/fork.gif", color: "#D4A574" },
-              { title: "Multi-Agent Orchestration", desc: "Pit Claude and Codex against each other to catch bugs a single model misses.", img: "/images/models.gif", color: "#F97316" },
+              { title: "Multi-Agent Orchestration", desc: "Pit Claude and Codex against each other to catch bugs a single model misses.", img: "/images/models.gif", color: "#D4A574" },
+              { title: "Fork & Rewind", desc: "Fork from any message to explore a different approach. Side-by-side session view.", img: "/images/fork.gif", color: "#F97316" },
             ].map((feature) => (
               <div key={feature.title} className="rounded-2xl border border-stone-800/60 bg-stone-900/40 backdrop-blur-sm p-6 group relative overflow-hidden">
                 <h3 className="text-base font-semibold text-stone-100 mb-2">{feature.title}</h3>
@@ -238,8 +236,7 @@ export default function Home() {
             Get in Touch
           </h2>
           <p className="text-stone-400 mb-10 leading-relaxed">
-            Open to AI infrastructure, agentic dev lead, and startup tech lead roles.
-            Remote preferred. Let&apos;s talk.
+            Open to opportunities. Remote preferred.
           </p>
           <button
             onClick={() => {

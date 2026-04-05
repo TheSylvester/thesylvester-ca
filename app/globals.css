@@ -23,3 +23,51 @@ body {
 html {
   scroll-behavior: smooth;
 }
+
+/* FlipBanner */
+.fb-anchor {
+  position: relative;
+}
+.fb-wrapper {
+  display: flex;
+  justify-content: center;
+}
+.fb-container {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+  --fs: 0;
+}
+.fb-char {
+  position: relative;
+  color: transparent;
+  width: auto;
+  min-width: 0;
+  transition: min-width 0.5s cubic-bezier(1, 0, 0, 1);
+}
+.fb-spacer {
+  font-size: var(--fs);
+  line-height: 1.2;
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  white-space: pre;
+}
+.fb-pillar {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  transition: 1s all 0.3s ease;
+}
+.fb-letter {
+  height: calc(var(--fs) * 1.2);
+  font-size: var(--fs);
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  text-align: center;
+}
