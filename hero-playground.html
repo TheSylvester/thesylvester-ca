@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hero Background Playground</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #111;
+    color: #e0e0e0;
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .panel {
+    width: 320px; min-width: 320px; background: #1a1a1f;
+    border-right: 1px solid #2a2a30; overflow-y: auto;
+    padding: 20px; display: flex; flex-direction: column; gap: 20px;
+  }
+  .panel h1 { font-size: 16px; font-weight: 700; color: #fff; letter-spacing: -0.3px; }
+  .panel h2 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: #888; margin-bottom: 8px; }
+  .section { display: flex; flex-direction: column; gap: 6px; }
+
+  .bg-options { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .bg-option {
+    padding: 10px 8px; background: #222228; border: 2px solid transparent;
+    border-radius: 8px; cursor: pointer; font-size: 11px; font-weight: 500;
+    color: #bbb; transition: all 0.15s; text-align: center;
+  }
+  .bg-option:hover { background: #2a2a32; color: #ddd; }
+  .bg-option.active { border-color: var(--accent, #635BFF); color: #fff; background: #2a2a32; }
+  .bg-option .bg-desc { font-size: 9px; color: #666; margin-top: 3px; font-weight: 400; }
+
+  .theme-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .theme-card {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    background: #222228; border: 2px solid transparent; border-radius: 8px;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .theme-card:hover { background: #2a2a32; }
+  .theme-card.active { border-color: #fff; background: #2a2a32; }
+  .theme-swatch { width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; }
+  .theme-name { font-size: 11px; color: #bbb; font-weight: 500; line-height: 1.2; }
+  .theme-card.active .theme-name { color: #fff; }
+
+  .slider-group { display: flex; flex-direction: column; gap: 12px; }
+  .slider-row { display: flex; flex-direction: column; gap: 4px; }
+  .slider-label { display: flex; justify-content: space-between; font-size: 12px; color: #999; }
+  .slider-label span:last-child { font-family: 'SF Mono', 'Fira Code', monospace; color: #ccc; }
+  input[type="range"] { -webkit-appearance: none; width: 100%; height: 4px; background: #333; border-radius: 2px; outline: none; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--accent, #635BFF); cursor: pointer; }
+
+  .toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; }
+  .toggle-row label { font-size: 12px; color: #999; }
+  .toggle { width: 36px; height: 20px; background: #333; border-radius: 10px; cursor: pointer; position: relative; transition: background 0.2s; }
+  .toggle.on { background: var(--accent, #635BFF); }
+  .toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: transform 0.2s; }
+  .toggle.on::after { transform: translateX(16px); }
+
+  .presets { display: flex; flex-wrap: wrap; gap: 6px; }
+  .preset-btn { padding: 6px 12px; background: #222228; border: 1px solid #333; border-radius: 6px; color: #bbb; font-size: 11px; cursor: pointer; transition: all 0.15s; }
+  .preset-btn:hover { background: #2a2a32; color: #fff; border-color: #555; }
+
+  .preview-area { flex: 1; position: relative; overflow: hidden; }
+  #bgCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+
+  .hero-overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; pointer-events: none; z-index: 2;
+  }
+  .profile-ring { width: 160px; height: 160px; border-radius: 50%; padding: 4px; margin-bottom: 28px; position: relative; }
+  .profile-ring::before {
+    content: ''; position: absolute; inset: -4px; border-radius: 50%;
+    background: conic-gradient(var(--accent), var(--accent2), var(--accent));
+    opacity: 0.6; filter: blur(6px);
+  }
+  .profile-inner {
+    width: 100%; height: 100%; border-radius: 50%;
+    background: linear-gradient(135deg, #2a2a2a, #444);
+    position: relative; z-index: 1; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 48px; color: #777; font-weight: 300;
+  }
+  .hero-name {
+    font-size: 52px; font-weight: 800; letter-spacing: -1.5px; margin-bottom: 12px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  .hero-tagline { font-size: 18px; color: rgba(255,255,255,0.7); margin-bottom: 16px; }
+  .hero-pill {
+    padding: 8px 24px; border-radius: 999px; border: 1px solid var(--accent-dim);
+    background: var(--accent-bg); color: var(--accent); font-size: 14px; margin-bottom: 36px;
+  }
+  .hero-buttons { display: flex; gap: 12px; }
+  .btn-primary { padding: 12px 28px; border-radius: 999px; background: var(--accent); color: #000; font-weight: 600; font-size: 14px; border: none; }
+  .btn-secondary { padding: 12px 28px; border-radius: 999px; background: transparent; color: rgba(255,255,255,0.65); font-size: 14px; border: 1px solid rgba(255,255,255,0.15); }
+
+  .prompt-bar {
+    position: fixed; bottom: 0; left: 320px; right: 0;
+    background: #1a1a1f; border-top: 1px solid #2a2a30;
+    padding: 12px 20px; display: flex; align-items: center; gap: 12px; z-index: 10;
+  }
+  .prompt-text { flex: 1; font-size: 13px; font-family: 'SF Mono', 'Fira Code', monospace; color: #ccc; line-height: 1.5; max-height: 60px; overflow-y: auto; }
+  .copy-btn { padding: 8px 16px; background: var(--accent); color: #000; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .copy-btn:hover { opacity: 0.85; }
+</style>
+</head>
+<body>
+
+<div class="panel">
+  <h1>Hero Background Playground</h1>
+
+  <div class="section">
+    <h2>Presets</h2>
+    <div class="presets" id="presets"></div>
+  </div>
+
+  <div class="section">
+    <h2>Background</h2>
+    <div class="bg-options" id="bgOptions"></div>
+  </div>
+
+  <div class="section">
+    <h2>Color Theme</h2>
+    <div class="theme-grid" id="themeGrid"></div>
+  </div>
+
+  <div class="section">
+    <h2>Controls</h2>
+    <div class="slider-group">
+      <div class="slider-row">
+        <div class="slider-label"><span>Density</span><span id="densityVal">50</span></div>
+        <input type="range" id="density" min="10" max="100" value="50">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label"><span>Speed</span><span id="speedVal">40</span></div>
+        <input type="range" id="speed" min="10" max="100" value="40">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label"><span>Mouse Radius</span><span id="radiusVal">180</span></div>
+        <input type="range" id="radius" min="50" max="400" value="180">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label"><span>Vector Length</span><span id="vecLenVal">12</span></div>
+        <input type="range" id="vecLen" min="0" max="30" value="12">
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Effects</h2>
+    <div class="toggle-row">
+      <label>Glow Effects</label>
+      <div class="toggle on" id="toggleGlow" data-key="glow"></div>
+    </div>
+  </div>
+</div>
+
+<div class="preview-area" id="previewArea">
+  <canvas id="bgCanvas"></canvas>
+  <div class="hero-overlay">
+    <div class="profile-ring"><div class="profile-inner">SW</div></div>
+    <div class="hero-name">Sylvester Wong</div>
+    <div class="hero-tagline">AI Solutions Architect & Agentic Engineering Leader</div>
+    <div class="hero-pill">Building high-performance, modern AI solutions</div>
+    <div class="hero-buttons">
+      <button class="btn-primary">View Projects</button>
+      <button class="btn-secondary">Get in Touch</button>
+    </div>
+  </div>
+  <div class="prompt-bar">
+    <div class="prompt-text" id="promptText"></div>
+    <button class="copy-btn" id="copyBtn">Copy Prompt</button>
+  </div>
+</div>
+
+<script>
+// ── Perlin noise ──
+const PERM = new Uint8Array(512);
+const GRAD = [[1,1],[-1,1],[1,-1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]];
+(function() {
+  const p = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  for (let i = 255; i > 0; i--) { const j = Math.floor(Math.random() * (i+1)); [p[i],p[j]] = [p[j],p[i]]; }
+  for (let i = 0; i < 512; i++) PERM[i] = p[i & 255];
+})();
+function fade(t) { return t*t*t*(t*(t*6-15)+10); }
+function lerp(a,b,t) { return a+t*(b-a); }
+function perlin(x,y) {
+  const xi=Math.floor(x)&255, yi=Math.floor(y)&255, xf=x-Math.floor(x), yf=y-Math.floor(y);
+  const u=fade(xf), v=fade(yf);
+  const g=(h,fx,fy)=>{const g2=GRAD[h&7];return g2[0]*fx+g2[1]*fy;};
+  const aa=PERM[PERM[xi]+yi],ab=PERM[PERM[xi]+yi+1],ba=PERM[PERM[xi+1]+yi],bb=PERM[PERM[xi+1]+yi+1];
+  return lerp(lerp(g(aa,xf,yf),g(ba,xf-1,yf),u),lerp(g(ab,xf,yf-1),g(bb,xf-1,yf-1),u),v);
+}
+
+// ── Config ──
+const BACKGROUNDS = [
+  { id: 'breathe',  name: 'Breathing Grid', desc: 'Perlin drift, soft glow' },
+  { id: 'vector',   name: 'Vector Field',   desc: 'Force vectors from cursor' },
+  { id: 'compass',  name: 'Flow Field',     desc: 'Velocity trail vectors' },
+  { id: 'magnetic', name: 'Magnetic',        desc: 'Iron filing alignment' },
+];
+
+const THEMES = [
+  { id: 'vault',     name: 'Midnight Vault',    accent: '#635BFF', accent2: '#1CA8FF', bg: '#0A2540', swatch: 'linear-gradient(135deg,#635BFF,#1CA8FF)' },
+  { id: 'void',      name: 'Void Precision',    accent: '#0070F3', accent2: '#EDEDED', bg: '#000000', swatch: 'linear-gradient(135deg,#0070F3,#555)' },
+  { id: 'aurora',    name: 'Aurora Command',    accent: '#5E6AD2', accent2: '#22D3EE', bg: '#0B0D11', swatch: 'linear-gradient(135deg,#5E6AD2,#22D3EE)' },
+  { id: 'ember',     name: 'Ember Luxe',        accent: '#D4A574', accent2: '#F97316', bg: '#1C1917', swatch: 'linear-gradient(135deg,#D4A574,#F97316)' },
+  { id: 'neon',      name: 'Neon Surgical',     accent: '#22C55E', accent2: '#10B981', bg: '#0E0E0E', swatch: 'linear-gradient(135deg,#22C55E,#10B981)' },
+  { id: 'horizon',   name: 'Deep Horizon',      accent: '#FF5C8A', accent2: '#C084FC', bg: '#191919', swatch: 'linear-gradient(135deg,#FF5C8A,#C084FC)' },
+  { id: 'obsidian',  name: 'Obsidian Signal',   accent: '#8B5CF6', accent2: '#F59E0B', bg: '#020617', swatch: 'linear-gradient(135deg,#8B5CF6,#F59E0B)' },
+  { id: 'carbon',    name: 'Carbon Zero',       accent: '#38BDF8', accent2: '#E2E8F0', bg: '#0F172A', swatch: 'linear-gradient(135deg,#38BDF8,#64748B)' },
+];
+
+const PRESETS = [
+  { name: 'Clean',       bg: 'breathe',  theme: 'void',     density: 40, speed: 30, radius: 160, vecLen: 0,  glow: false },
+  { name: 'Wind Map',    bg: 'vector',   theme: 'vault',    density: 50, speed: 40, radius: 200, vecLen: 14, glow: true },
+  { name: 'Flow',        bg: 'compass',  theme: 'aurora',   density: 45, speed: 35, radius: 220, vecLen: 16, glow: true },
+  { name: 'Filings',     bg: 'magnetic', theme: 'horizon',  density: 55, speed: 30, radius: 250, vecLen: 12, glow: true },
+  { name: 'Luxe',        bg: 'breathe',  theme: 'ember',    density: 40, speed: 25, radius: 180, vecLen: 6,  glow: true },
+];
+
+const DEFAULTS = { bg: 'breathe', theme: 'vault', density: 50, speed: 40, radius: 180, vecLen: 12, glow: true };
+const state = { ...DEFAULTS };
+
+// ── Mouse ──
+let mouse = { x: -1000, y: -1000 };
+let mouseVel = { x: 0, y: 0 };
+// Smoothed velocity for flow field
+let smoothVel = { x: 0, y: 0 };
+const previewArea = document.getElementById('previewArea');
+previewArea.addEventListener('mousemove', e => {
+  const rect = previewArea.getBoundingClientRect();
+  const nx = e.clientX - rect.left, ny = e.clientY - rect.top;
+  mouseVel.x = nx - mouse.x;
+  mouseVel.y = ny - mouse.y;
+  mouse.x = nx; mouse.y = ny;
+});
+previewArea.addEventListener('mouseleave', () => { mouse.x = -1000; mouse.y = -1000; });
+
+// ── Canvas ──
+const canvas = document.getElementById('bgCanvas');
+const ctx = canvas.getContext('2d');
+let W, H;
+function resizeCanvas() {
+  const rect = previewArea.getBoundingClientRect();
+  W = canvas.width = rect.width;
+  H = canvas.height = rect.height;
+}
+window.addEventListener('resize', () => { resizeCanvas(); initBackground(); });
+resizeCanvas();
+
+function hexToRgb(hex) {
+  return { r: parseInt(hex.slice(1,3),16), g: parseInt(hex.slice(3,5),16), b: parseInt(hex.slice(5,7),16) };
+}
+function getTheme() { return THEMES.find(t => t.id === state.theme); }
+
+// ── Background state ──
+let bgState = {};
+let time = 0;
+
+function initBackground() {
+  bgState = {};
+  const d = state.density / 50;
+  const spacing = Math.max(22, 38 - d * 10);
+  const dots = [];
+  const cols = Math.ceil(W / spacing) + 4;
+  const rows = Math.ceil(H / spacing) + 4;
+  const ox = (W - (cols - 1) * spacing) / 2;
+  const oy = (H - (rows - 1) * spacing) / 2;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      dots.push({
+        bx: ox + c * spacing, by: oy + r * spacing,
+        x: ox + c * spacing, y: oy + r * spacing,
+        vx: 0, vy: 0,
+        phase: Math.random() * Math.PI * 2,
+        // Store last force vector for each dot
+        fx: 0, fy: 0
+      });
+    }
+  }
+  bgState = { dots, spacing };
+}
+
+function renderBackground() {
+  const theme = getTheme();
+  const rgb = hexToRgb(theme.accent);
+  const rgb2 = hexToRgb(theme.accent2);
+  const speedFactor = state.speed / 50;
+  const mouseR = state.radius;
+  const vecLen = state.vecLen;
+
+  ctx.fillStyle = theme.bg;
+  ctx.fillRect(0, 0, W, H);
+  time += 0.006 * speedFactor;
+
+  // Smooth the mouse velocity
+  smoothVel.x = smoothVel.x * 0.85 + mouseVel.x * 0.15;
+  smoothVel.y = smoothVel.y * 0.85 + mouseVel.y * 0.15;
+
+  const { dots, spacing } = bgState;
+  if (!dots) return;
+
+  const mode = state.bg;
+
+  for (let i = 0; i < dots.length; i++) {
+    const dot = dots[i];
+
+    // Perlin noise ambient drift (shared across all modes)
+    const nx = perlin(dot.bx * 0.004 + time * 0.4, dot.by * 0.004 + time * 0.2) * 5;
+    const ny = perlin(dot.bx * 0.004 + 100 + time * 0.3, dot.by * 0.004 + 100 + time * 0.25) * 5;
+
+    const breathe = Math.sin(time * 2 + dot.phase) * 0.06;
+
+    // Distance to mouse
+    const dx = dot.bx - mouse.x, dy = dot.by - mouse.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const mouseInfluence = dist < mouseR ? Math.exp(-dist * 3 / mouseR) : 0;
+
+    // Subtle position displacement (same for all modes — gentle)
+    if (mouseInfluence > 0.01) {
+      const angle = Math.atan2(dy, dx);
+      dot.vx += Math.cos(angle) * mouseInfluence * 1.2;
+      dot.vy += Math.sin(angle) * mouseInfluence * 1.2;
+    }
+
+    // Spring to noise-offset home
+    dot.vx += (dot.bx + nx - dot.x) * 0.015;
+    dot.vy += (dot.by + ny - dot.y) * 0.015;
+    dot.vx *= 0.92; dot.vy *= 0.92;
+    dot.x += dot.vx; dot.y += dot.vy;
+
+    // Compute force vector direction based on mode
+    let fAngle = 0;
+    let fMag = 0;
+
+    switch (mode) {
+      case 'breathe':
+        // No vector, just dots
+        fMag = 0;
+        break;
+
+      case 'vector':
+        // Vector points in direction of force FROM cursor (radial)
+        if (mouseInfluence > 0.02) {
+          fAngle = Math.atan2(dy, dx);
+          fMag = mouseInfluence;
+        }
+        break;
+
+      case 'compass':
+        // Vector follows cursor's velocity direction (flow field)
+        if (mouseInfluence > 0.02) {
+          const velMag = Math.sqrt(smoothVel.x * smoothVel.x + smoothVel.y * smoothVel.y);
+          if (velMag > 0.5) {
+            fAngle = Math.atan2(smoothVel.y, smoothVel.x);
+            fMag = mouseInfluence * Math.min(velMag / 8, 1);
+          }
+        }
+        // Also add ambient noise-driven vectors for dots far from mouse
+        if (fMag < 0.05) {
+          fAngle = perlin(dot.bx * 0.006 + time * 0.5, dot.by * 0.006 + time * 0.3) * Math.PI * 2;
+          fMag = 0.05 + Math.abs(perlin(dot.bx * 0.003 + time * 0.2, dot.by * 0.003)) * 0.1;
+        }
+        break;
+
+      case 'magnetic':
+        // Always point toward/away from cursor (iron filings)
+        if (mouse.x > 0) {
+          fAngle = Math.atan2(-dy, -dx); // toward mouse
+          // Near mouse: perpendicular (like field lines curving around poles)
+          if (mouseInfluence > 0.3) {
+            fAngle += Math.PI * 0.5 * (mouseInfluence - 0.3) / 0.7;
+          }
+          fMag = 0.05 + mouseInfluence * 0.8;
+        } else {
+          // Ambient: slight noise orientation
+          fAngle = perlin(dot.bx * 0.005 + time * 0.2, dot.by * 0.005) * Math.PI;
+          fMag = 0.04;
+        }
+        break;
+    }
+
+    // Smooth the force vector per dot
+    const targetFx = Math.cos(fAngle) * fMag;
+    const targetFy = Math.sin(fAngle) * fMag;
+    dot.fx = dot.fx * 0.88 + targetFx * 0.12;
+    dot.fy = dot.fy * 0.88 + targetFy * 0.12;
+
+    // ── Render ──
+    const prox = dist < mouseR * 1.5 ? Math.exp(-dist * 2.5 / (mouseR * 1.5)) : 0;
+    const mixT = prox;
+    const cr = Math.floor(rgb.r + (rgb2.r - rgb.r) * mixT);
+    const cg = Math.floor(rgb.g + (rgb2.g - rgb.g) * mixT);
+    const cb = Math.floor(rgb.b + (rgb2.b - rgb.b) * mixT);
+
+    const baseAlpha = 0.1 + breathe;
+    const alpha = Math.min(baseAlpha + prox * 0.5, 0.75);
+
+    if (state.glow && prox > 0.15) {
+      ctx.shadowBlur = 6 * prox;
+      ctx.shadowColor = `rgba(${cr},${cg},${cb},0.4)`;
+    } else {
+      ctx.shadowBlur = 0;
+    }
+
+    // Draw dot
+    const dotRadius = 1.1 + prox * 0.6;
+    ctx.beginPath();
+    ctx.arc(dot.x, dot.y, dotRadius, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${cr},${cg},${cb},${alpha})`;
+    ctx.fill();
+
+    // Draw force vector
+    const currentFMag = Math.sqrt(dot.fx * dot.fx + dot.fy * dot.fy);
+    if (vecLen > 0 && currentFMag > 0.01 && mode !== 'breathe') {
+      const normFx = dot.fx / currentFMag;
+      const normFy = dot.fy / currentFMag;
+      const drawLen = vecLen * Math.min(currentFMag / 0.3, 1);
+
+      if (drawLen > 1) {
+        const endX = dot.x + normFx * drawLen;
+        const endY = dot.y + normFy * drawLen;
+        const vecAlpha = Math.min(alpha * 0.8, 0.5) * Math.min(currentFMag / 0.1, 1);
+
+        ctx.beginPath();
+        ctx.moveTo(dot.x, dot.y);
+        ctx.lineTo(endX, endY);
+        ctx.strokeStyle = `rgba(${cr},${cg},${cb},${vecAlpha})`;
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+      }
+    }
+  }
+  ctx.shadowBlur = 0;
+}
+
+// ── UI ──
+const bgOptionsEl = document.getElementById('bgOptions');
+BACKGROUNDS.forEach(bg => {
+  const el = document.createElement('div');
+  el.className = 'bg-option' + (bg.id === state.bg ? ' active' : '');
+  el.innerHTML = `${bg.name}<div class="bg-desc">${bg.desc}</div>`;
+  el.dataset.id = bg.id;
+  el.onclick = () => {
+    state.bg = bg.id;
+    document.querySelectorAll('.bg-option').forEach(e => e.classList.remove('active'));
+    el.classList.add('active');
+    initBackground();
+    updateAll();
+  };
+  bgOptionsEl.appendChild(el);
+});
+
+const themeGridEl = document.getElementById('themeGrid');
+THEMES.forEach(t => {
+  const el = document.createElement('div');
+  el.className = 'theme-card' + (t.id === state.theme ? ' active' : '');
+  el.innerHTML = `<div class="theme-swatch" style="background:${t.swatch}"></div><div class="theme-name">${t.name}</div>`;
+  el.onclick = () => {
+    state.theme = t.id;
+    document.querySelectorAll('.theme-card').forEach(e => e.classList.remove('active'));
+    el.classList.add('active');
+    applyTheme();
+    updateAll();
+  };
+  themeGridEl.appendChild(el);
+});
+
+const presetsEl = document.getElementById('presets');
+PRESETS.forEach(p => {
+  const btn = document.createElement('button');
+  btn.className = 'preset-btn';
+  btn.textContent = p.name;
+  btn.onclick = () => {
+    Object.assign(state, p);
+    document.getElementById('density').value = p.density;
+    document.getElementById('speed').value = p.speed;
+    document.getElementById('radius').value = p.radius;
+    document.getElementById('vecLen').value = p.vecLen;
+    document.getElementById('densityVal').textContent = p.density;
+    document.getElementById('speedVal').textContent = p.speed;
+    document.getElementById('radiusVal').textContent = p.radius;
+    document.getElementById('vecLenVal').textContent = p.vecLen;
+    document.querySelectorAll('.bg-option').forEach(e => e.classList.toggle('active', e.dataset.id === p.bg));
+    document.querySelectorAll('.theme-card').forEach((e, i) => e.classList.toggle('active', THEMES[i].id === p.theme));
+    document.getElementById('toggleGlow').classList.toggle('on', p.glow);
+    applyTheme(); initBackground(); updateAll();
+  };
+  presetsEl.appendChild(btn);
+});
+
+['density', 'speed', 'radius', 'vecLen'].forEach(key => {
+  const slider = document.getElementById(key);
+  slider.oninput = () => {
+    state[key] = parseInt(slider.value);
+    document.getElementById(key + 'Val').textContent = slider.value;
+    if (key === 'density') initBackground();
+    updateAll();
+  };
+});
+
+document.querySelectorAll('.toggle').forEach(el => {
+  el.onclick = () => {
+    const key = el.dataset.key;
+    state[key] = !state[key];
+    el.classList.toggle('on', state[key]);
+    updateAll();
+  };
+});
+
+function applyTheme() {
+  const theme = getTheme();
+  const root = document.documentElement;
+  root.style.setProperty('--accent', theme.accent);
+  root.style.setProperty('--accent2', theme.accent2);
+  root.style.setProperty('--accent-dim', theme.accent + '40');
+  root.style.setProperty('--accent-bg', theme.accent + '0d');
+  previewArea.style.background = theme.bg;
+}
+
+function updatePrompt() {
+  const bg = BACKGROUNDS.find(b => b.id === state.bg);
+  const theme = getTheme();
+  const parts = [];
+
+  parts.push(`Use a "${bg.name}" animated dot grid canvas background with the "${theme.name}" color theme (accent: ${theme.accent}, secondary: ${theme.accent2}, page background: ${theme.bg}).`);
+  parts.push('Dots drift organically via Perlin noise with subtle mouse-proximity brightening.');
+
+  if (state.bg === 'vector') parts.push('Each dot extends a small vector line pointing radially away from the cursor, creating a force-field visualization.');
+  if (state.bg === 'compass') parts.push('Each dot extends a vector following the cursor velocity direction, creating a flow/wind-map effect. Ambient dots show subtle noise-driven orientation.');
+  if (state.bg === 'magnetic') parts.push('Each dot extends a vector pointing toward the cursor (like iron filings), with near-cursor dots curving perpendicular to simulate magnetic field lines.');
+
+  if (state.density !== DEFAULTS.density) parts.push(`Density: ${state.density}%.`);
+  if (state.speed !== DEFAULTS.speed) parts.push(`Speed: ${state.speed}%.`);
+  if (state.radius !== DEFAULTS.radius) parts.push(`Mouse radius: ${state.radius}px.`);
+  if (state.vecLen !== DEFAULTS.vecLen) parts.push(`Vector length: ${state.vecLen}px.`);
+  if (!state.glow) parts.push('Disable glow.');
+
+  document.getElementById('promptText').textContent = parts.join(' ');
+}
+
+function updateAll() { updatePrompt(); }
+
+document.getElementById('copyBtn').onclick = () => {
+  navigator.clipboard.writeText(document.getElementById('promptText').textContent);
+  const btn = document.getElementById('copyBtn');
+  btn.textContent = 'Copied!';
+  setTimeout(() => btn.textContent = 'Copy Prompt', 1500);
+};
+
+function loop() { resizeCanvas(); renderBackground(); requestAnimationFrame(loop); }
+
+applyTheme(); initBackground(); updateAll(); loop();
+</script>
+</body>
+</html>
