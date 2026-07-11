@@ -9,12 +9,12 @@
 :root {
   --dur-1: 120ms; /* hover attack: color/border micro */
   --dur-2: 200ms; /* background fills, focus surfaces */
-  --dur-3: 450ms; /* scroll reveals */
+  --dur-3: 600ms; /* scroll reveals */
   --dur-attack: 150ms; /* hover attack — fast enough to feel terminal-crisp */
   --dur-release: 450ms; /* hover release — the slow, felt half of the asymmetry */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-io: cubic-bezier(0.65, 0, 0.35, 1);
-  --rise: 10px;
+  --rise: 16px;
   --stagger: 80ms;
 }
 
@@ -149,7 +149,8 @@ a:hover {
     transition:
       opacity var(--dur-3) var(--ease-out),
       transform var(--dur-3) var(--ease-out);
-    transition-delay: calc(var(--d, 0) * var(--stagger));
+    /* 60ms base beat before anything prints — reads as intent, not lag */
+    transition-delay: calc(60ms + var(--d, 0) * var(--stagger));
   }
   html.js [data-reveal].is-in {
     opacity: 1;
@@ -165,9 +166,10 @@ a:hover {
 
 /* Screen-2 choreography — the git-log gag types itself (the ONE typewriter on
    the site; only prompt-prefixed text may type), then pipeline chips and
-   track-record rows print as discrete tokens (opacity only — printed output
-   doesn't move). Every hidden state lives inside this gated block so no-JS
-   and reduced-motion visitors always see the full static page. */
+   track-record rows print as discrete tokens (fade + a small rise — kept
+   shallower than --rise so output still reads as printing, not flying in).
+   Every hidden state lives inside this gated block so no-JS and
+   reduced-motion visitors always see the full static page. */
 .pipe-t,
 .row-t {
   opacity: 1;
@@ -195,19 +197,49 @@ a:hover {
   }
   html.js [data-reveal] .pipe-t {
     opacity: 0;
+    transform: translateY(6px);
   }
   html.js [data-reveal].is-in .pipe-t {
-    transition: opacity 250ms var(--ease-out);
+    transition:
+      opacity 250ms var(--ease-out),
+      transform 250ms var(--ease-out);
     transition-delay: calc(250ms + var(--p) * 70ms);
     opacity: 1;
+    transform: none;
   }
   html.js [data-reveal] .row-t {
     opacity: 0;
+    transform: translateY(8px);
   }
   html.js [data-reveal].is-in .row-t {
-    transition: opacity 350ms var(--ease-out);
+    transition:
+      opacity 350ms var(--ease-out),
+      transform 350ms var(--ease-out);
     transition-delay: calc(150ms + var(--p) * 80ms);
     opacity: 1;
+    transform: none;
+  }
+}
+
+/* Reload / restored scroll: anything already on screen when RevealInit runs
+   gets .is-instant and prints with no entrance — the animation is reserved
+   for content the user scrolls to, so reveals never read as load lag.
+   Cards re-declare their hover eases since `transition: none` would
+   otherwise clobber them. */
+@media (prefers-reduced-motion: no-preference) {
+  html.js [data-reveal].is-in.is-instant,
+  html.js [data-reveal].is-in.is-instant .pipe-t,
+  html.js [data-reveal].is-in.is-instant .row-t {
+    transition: none;
+  }
+  html.js [data-reveal].is-in.is-instant .cmd-type {
+    animation: none;
+    width: 35ch;
+  }
+  html.js .hov-card[data-reveal].is-in.is-instant {
+    transition:
+      border-color 180ms var(--ease-out),
+      background-color 180ms var(--ease-out);
   }
 }
 
@@ -312,12 +344,14 @@ a:hover {
   transition: color 180ms var(--ease-out);
 }
 /* transition shorthands don't merge across rules — the reveal transition and
-   the hover transition must share ONE declaration or one clobbers the other */
+   the hover transition must share ONE declaration or one clobbers the other.
+   The reveal stagger delay rides per-property on opacity/transform only, so
+   hover feedback (border/background) stays immediate. */
 @media (prefers-reduced-motion: no-preference) {
   html.js .hov-card[data-reveal] {
     transition:
-      opacity var(--dur-3) var(--ease-out),
-      transform var(--dur-3) var(--ease-out),
+      opacity var(--dur-3) var(--ease-out) calc(60ms + var(--d, 0) * var(--stagger)),
+      transform var(--dur-3) var(--ease-out) calc(60ms + var(--d, 0) * var(--stagger)),
       border-color 180ms var(--ease-out),
       background-color 180ms var(--ease-out);
   }
