@@ -235,7 +235,15 @@ export default function Home() {
               </div>
               <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
                 <span aria-hidden="true" style={{ color: "#d97757", fontSize: 14, lineHeight: 1.5 }}>
-                  ⚡
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    style={{ display: "block", marginTop: 3 }}
+                  >
+                    <path d="M13 2 6 13h4.5L9 22l9-11h-4.5L16 2z" />
+                  </svg>
                 </span>
                 <div>
                   <div style={{ fontSize: "12.5px", color: "#e6e9ee", fontWeight: 500 }}>Engineering Impact</div>
