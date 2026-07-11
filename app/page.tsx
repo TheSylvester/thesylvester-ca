@@ -365,7 +365,7 @@ export default function Home() {
                 </div>
                 <div style={{ marginTop: 3, color: "#c8ccd4" }}>
                   <a
-                    href="https://github.com/TheSylvester/crispy-recall"
+                    href="https://recall.thesylvester.ca"
                     className="hov-card-link"
                     style={{ color: "#c8ccd4" }}
                   >
@@ -484,7 +484,10 @@ export default function Home() {
                   color: "#8a93a3",
                 }}
               >
-                <span style={{ color: "#d97757" }}>▤</span> TheSylvester/crispy-recall
+                <span style={{ color: "#d97757" }}>▤</span>{" "}
+                <a href="https://github.com/TheSylvester/crispy-recall" style={{ color: "#8a93a3" }}>
+                  TheSylvester/crispy-recall
+                </a>
                 <span
                   style={{
                     marginLeft: "auto",
@@ -520,12 +523,8 @@ export default function Home() {
                   </span>
                   <span style={{ border: "1px solid #313a4e", borderRadius: 5, padding: "4px 9px" }}>llama.cpp</span>
                 </div>
-                <a
-                  href="https://github.com/TheSylvester/crispy-recall"
-                  className="hov-underline"
-                  style={{ fontSize: 13 }}
-                >
-                  github.com/TheSylvester/crispy-recall →
+                <a href="https://recall.thesylvester.ca" className="hov-underline" style={{ fontSize: 13 }}>
+                  recall.thesylvester.ca →
                 </a>
               </div>
             </article>
