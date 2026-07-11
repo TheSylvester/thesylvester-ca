@@ -1,26 +1,26 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Bebas_Neue } from "next/font/google";
+import { JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains-mono",
   subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
-const bebasNeue = Bebas_Neue({
-  variable: "--font-bebas",
-  weight: "400",
-  subsets: ["latin"],
+  weight: ["400", "500", "700", "800"],
 });
 
 export const metadata: Metadata = {
-  title: "Sylvester Wong",
-  description: "AI Solutions Architect & Agentic Engineering Leader",
+  metadataBase: new URL("https://thesylvester.ca"),
+  title: "Sylvester Wong — AI Software Engineer",
+  description:
+    "I build production AI systems, developer tools, and practical methods that help teams use coding agents with better context, memory, workflows, testing, and review.",
+  openGraph: {
+    title: "Sylvester Wong — AI Software Engineer",
+    description:
+      "I build production AI systems, developer tools, and practical methods that help teams use coding agents with better context, memory, workflows, testing, and review.",
+    url: "https://thesylvester.ca",
+    siteName: "Sylvester Wong",
+    type: "website",
+  },
 };
 
 export default function RootLayout({
@@ -29,11 +29,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${bebasNeue.variable} h-full antialiased dark`}
-    >
-      <body className="min-h-full flex flex-col bg-[#1C1917]">{children}</body>
+    <html lang="en" className={jetbrainsMono.variable}>
+      <body>{children}</body>
     </html>
   );
 }

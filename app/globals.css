@@ -1,73 +1,133 @@
-@import "tailwindcss";
-
-:root {
-  --background: #0a0a0f;
-  --foreground: #ededed;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
-  overflow-x: hidden;
-}
-
-/* Smooth scroll */
 html {
   scroll-behavior: smooth;
 }
+body {
+  margin: 0;
+  background: #12151f;
+  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+}
+a {
+  color: #d97757;
+  text-decoration: none;
+}
+a:hover {
+  color: #e2906f;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+@keyframes blink {
+  0%,
+  55% {
+    opacity: 1;
+  }
+  56%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes floatGlow {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+::selection {
+  background: rgba(217, 119, 87, 0.35);
+  color: #f2f3f5;
+}
+@media (max-width: 1180px) {
+  [data-hero-grid] {
+    grid-template-columns: minmax(0, 1.2fr) minmax(240px, 0.8fr) !important;
+  }
+  [data-hero-card] {
+    grid-column: 1 / -1;
+    max-width: 640px;
+    width: 100%;
+    justify-self: start;
+    margin-bottom: 8px;
+  }
+}
+@media (max-width: 1180px) {
+  [data-hero-portrait] {
+    align-self: end !important;
+  }
+  [data-hero-portrait] img {
+    position: static !important;
+    transform: none !important;
+    height: auto !important;
+    width: 100% !important;
+    max-width: 480px !important;
+  }
+}
+@media (max-width: 760px) {
+  [data-hero-grid] {
+    grid-template-columns: 1fr !important;
+  }
+  [data-hero-portrait] {
+    max-width: 420px;
+    justify-self: center;
+    margin-bottom: 0 !important;
+  }
+  [data-hero-card] {
+    max-width: none;
+  }
+}
 
-/* FlipBanner */
-.fb-anchor {
-  position: relative;
+/* Hover states ported from the design's style-hover attributes.
+   !important is required to beat the elements' inline styles, the same
+   way the design runtime applied these by mutating inline styles. */
+.hov-nav:hover {
+  color: #f2f3f5 !important;
+  text-decoration: none !important;
 }
-.fb-wrapper {
-  display: flex;
-  justify-content: center;
+.hov-gh:hover {
+  border-color: #d97757 !important;
+  color: #f2f3f5 !important;
+  text-decoration: none !important;
 }
-.fb-container {
-  position: relative;
-  display: flex;
-  flex-direction: row;
-  justify-content: center;
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
-  --fs: 0;
+.hov-cta:hover {
+  background: rgba(217, 119, 87, 0.14) !important;
+  text-decoration: none !important;
 }
-.fb-char {
-  position: relative;
-  color: transparent;
-  width: auto;
-  min-width: 0;
-  transition: min-width 0.5s cubic-bezier(1, 0, 0, 1);
+.hov-ghost:hover {
+  border-color: #5c6370 !important;
+  color: #f2f3f5 !important;
+  text-decoration: none !important;
 }
-.fb-spacer {
-  font-size: var(--fs);
-  line-height: 1.2;
-  font-weight: 400;
-  letter-spacing: 0.05em;
-  white-space: pre;
+.hov-card-link:hover {
+  color: #f2f3f5 !important;
 }
-.fb-pillar {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  top: 0;
-  display: flex;
-  flex-direction: column;
-  transition: 1s all 0.3s ease;
+.hov-ask:hover {
+  background: rgba(217, 119, 87, 0.12) !important;
 }
-.fb-letter {
-  height: calc(var(--fs) * 1.2);
-  font-size: var(--fs);
-  font-weight: 400;
-  letter-spacing: 0.05em;
-  white-space: nowrap;
-  text-align: center;
+.hov-underline:hover {
+  text-decoration: underline !important;
+}
+.hov-footer:hover {
+  color: #f2f3f5 !important;
+}
+.hov-status:hover {
+  text-decoration: none !important;
+  color: #a5d97f !important;
+}
+
+/* Ask panel chips (the export's sc-for body was empty — styled per the reference screenshot) */
+.ask-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #3a4152;
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: transparent;
+  color: #c8ccd4;
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.ask-chip:hover {
+  border-color: #d97757;
 }

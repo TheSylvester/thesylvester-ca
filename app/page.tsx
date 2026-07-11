@@ -1,293 +1,823 @@
-"use client";
-
-import Image from "next/image";
-import DotGridBackground from "@/components/dot-grid-background";
-import { FlipBanner } from "@/components/flip-banner";
-
-const NAV_ITEMS = ["About", "Projects", "Contact"];
+import Link from "next/link";
+import AskPanel from "@/components/ask-panel";
+import CodeRain from "@/components/code-rain";
+import CopyEmail from "@/components/copy-email";
+import StatusBar from "@/components/status-bar";
 
 export default function Home() {
   return (
-    <div className="relative min-h-screen bg-[#1C1917]">
-      <DotGridBackground />
+    <div
+      style={{
+        position: "relative",
+        minHeight: "100vh",
+        background: "#12151f",
+        color: "#c8ccd4",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      {/* live code rain background (mouse-reactive) — spans hero and fades into the work section */}
+      <CodeRain />
 
-      {/* Nav */}
-      <nav className="relative z-10 flex items-center justify-between px-8 py-6 max-w-7xl mx-auto">
-        <span className="text-xl font-bold tracking-tight text-[#D4A574]">
-          SW<span className="text-[#F97316]">.</span>
-        </span>
-        <div className="hidden md:flex items-center gap-8 text-sm text-stone-500">
-          {NAV_ITEMS.map((item) => (
-            <a
-              key={item}
-              href={`#${item.toLowerCase()}`}
-              className="hover:text-stone-200 transition-colors duration-200"
-            >
-              {item}
-            </a>
-          ))}
-        </div>
-      </nav>
-
-      {/* Hero */}
-      <main className="relative z-10 flex flex-col items-center justify-center min-h-[calc(100vh-88px)] px-6">
-        {/* Profile image with circle */}
-        <div className="relative mb-4 group" style={{ width: 300, height: 400 }}>
-          {/* Glow */}
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-72 h-72 z-[1] pointer-events-none">
-            <div className="absolute -inset-4 rounded-full bg-gradient-to-t from-[#F97316]/15 via-[#D4A574]/20 to-transparent blur-xl" />
-          </div>
-
-          {/* Circle ring — behind image (temporarily hidden) */}
-          {/* <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-72 h-72 rounded-full border-2 border-[#D4A574]/30 z-[5] pointer-events-none" /> */}
-
-          {/* Image with gradient fade at bottom */}
-          <div className="absolute bottom-6 left-1/2 -translate-x-[52%] w-[560px] z-10 pointer-events-none" style={{ maskImage: "linear-gradient(to bottom, black 60%, transparent 90%)", WebkitMaskImage: "linear-gradient(to bottom, black 60%, transparent 90%)" }}>
-            <Image
-              src="/images/sylvester-suit-800w-bw-clean.png"
-              alt="Sylvester Wong"
-              width={800}
-              height={800}
-              className="w-full h-auto"
-              style={{ filter: "sepia(0.3) brightness(0.85) hue-rotate(5deg) saturate(0.7)" }}
-              priority
-            />
-          </div>
-        </div>
-
-        {/* Name + Tagline group */}
-        <div className="flex flex-col items-center gap-0 mb-8">
-          <h1 className="font-[family-name:var(--font-bebas)] text-6xl md:text-8xl tracking-wide bg-gradient-to-r from-[#D4A574] to-[#F97316] bg-clip-text text-transparent" style={{ lineHeight: "89%" }}>
-            SYLVESTER WONG
-          </h1>
-          <div className="text-center max-w-xl h-10 md:h-12 flex items-center justify-center">
-            <FlipBanner
-              phrases={[
-                "Agentic AI Leader",
-                "Agentic Harness Engineer",
-                "Full Stack Developer",
-                "AI Solutions Architect",
-              ]}
-            />
-          </div>
-        </div>
-
-        {/* Subtitle */}
-        <p className="text-stone-500 text-sm md:text-base mb-10 tracking-wide">
-          Supercharging dev teams with autonomous coding tools
-        </p>
-
-        {/* CTA buttons */}
-        <div className="flex gap-4">
-          <a
-            href="#projects"
-            className="group relative px-7 py-3 rounded-full bg-gradient-to-r from-[#D4A574] to-[#F97316] text-[#1C1917] font-semibold text-sm overflow-hidden transition-all duration-300 hover:shadow-[0_0_24px_rgba(249,115,22,0.3)]"
+      {/* ============ TOP BAR ============ */}
+      <header
+        data-topbar=""
+        style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 50,
+          display: "flex",
+          alignItems: "center",
+          gap: 18,
+          padding: "14px 24px",
+          background: "rgba(18,21,31,.92)",
+          backdropFilter: "blur(10px)",
+          borderBottom: "1px solid #262c3d",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: 6 }}>
+          <div
+            aria-hidden="true"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3,5px)",
+              gridTemplateRows: "repeat(3,5px)",
+              gap: 2,
+            }}
           >
-            View Projects
-          </a>
-          <a
-            href="/Sylvester_Wong_Resume.pdf"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-7 py-3 rounded-full border border-[#D4A574]/30 text-[#D4A574] text-sm font-medium hover:bg-[#D4A574]/10 hover:border-[#D4A574]/50 transition-all duration-300"
-          >
-            View Resume
-          </a>
-          <a
-            href="#contact"
-            className="px-7 py-3 rounded-full border border-stone-700 text-stone-400 text-sm font-medium hover:border-stone-500 hover:text-stone-200 transition-all duration-300"
-          >
-            Get in Touch
-          </a>
+            <span style={{ background: "#d97757" }}></span>
+            <span style={{ background: "transparent" }}></span>
+            <span style={{ background: "#d97757" }}></span>
+            <span style={{ background: "transparent" }}></span>
+            <span style={{ background: "#d97757" }}></span>
+            <span style={{ background: "transparent" }}></span>
+            <span style={{ background: "#d97757" }}></span>
+            <span style={{ background: "transparent" }}></span>
+            <span style={{ background: "#d97757" }}></span>
+          </div>
+          <CopyEmail className="hov-nav" style={{ color: "#c8ccd4", fontSize: 14, letterSpacing: ".02em" }}>
+            sylvester@thesylvester.ca <span style={{ color: "#5c6370" }}>~</span>
+          </CopyEmail>
         </div>
-      </main>
+        <nav
+          style={{
+            marginLeft: "auto",
+            display: "flex",
+            alignItems: "center",
+            gap: "clamp(14px,2.4vw,34px)",
+            fontSize: 13,
+            letterSpacing: ".14em",
+          }}
+        >
+          <a href="#work" className="hov-nav" style={{ color: "#c8ccd4" }}>
+            WORK
+          </a>
+          <Link href="/playbook" className="hov-nav" style={{ color: "#c8ccd4" }}>
+            PLAYBOOK
+          </Link>
+          <a href="#about" className="hov-nav" style={{ color: "#c8ccd4" }}>
+            ABOUT
+          </a>
+          <CopyEmail className="hov-nav" style={{ color: "#c8ccd4" }}>
+            CONTACT
+          </CopyEmail>
+        </nav>
+        <a
+          href="https://github.com/TheSylvester"
+          aria-label="GitHub — TheSylvester"
+          className="hov-gh"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 38,
+            height: 30,
+            border: "1px solid #3a4152",
+            borderRadius: 7,
+            color: "#c8ccd4",
+            fontSize: 13,
+          }}
+        >
+          &gt;_
+        </a>
+      </header>
 
-      {/* Crispy Section */}
-      <section id="projects" className="relative z-10 py-32 px-6">
-        <div className="max-w-6xl mx-auto">
-          {/* Section header */}
-          <div className="text-center mb-16">
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-[#D4A574]/20 bg-[#D4A574]/5 text-[#D4A574] text-xs font-medium tracking-wide uppercase mb-6">
-              Featured Project
+      {/* ============ SCREEN 1 · HERO ============ */}
+      <section
+        data-screen="1"
+        data-screen-label="Hero"
+        style={{
+          position: "relative",
+          zIndex: 2,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          boxSizing: "border-box",
+          minHeight: "calc(100vh - 59px)",
+          paddingBottom: 76,
+          background: "transparent",
+        }}
+      >
+        <div
+          data-hero-grid=""
+          style={{
+            position: "relative",
+            zIndex: 2,
+            flex: 1,
+            display: "grid",
+            gridTemplateColumns: "minmax(0,1.15fr) minmax(260px,.85fr) minmax(280px,340px)",
+            gap: "clamp(20px,3vw,44px)",
+            alignItems: "center",
+            padding: "clamp(28px,4vh,56px) clamp(28px,4vw,72px) 0",
+            maxWidth: 1720,
+            width: "100%",
+            margin: "0 auto",
+            boxSizing: "border-box",
+          }}
+        >
+          {/* left copy */}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: "clamp(14px,1.2vw,17px)", color: "#9aa3b2" }}>
+              Hi, I’m Sylvester Wong
+              <span
+                aria-hidden="true"
+                style={{
+                  display: "inline-block",
+                  width: ".55em",
+                  height: "1em",
+                  background: "#d97757",
+                  marginLeft: 6,
+                  verticalAlign: "-.15em",
+                  animation: "blink 1.1s steps(1) infinite",
+                }}
+              ></span>
             </div>
-            <h2 className="text-3xl md:text-5xl font-bold tracking-tight mb-4">
-              <a
-                href="https://github.com/TheSylvester/crispy"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-stone-100 hover:text-[#D4A574] transition-colors duration-200"
-              >
-                Crispy
-              </a>
-            </h2>
-            <p className="text-lg text-stone-400 max-w-2xl mx-auto mb-10">
-              A power-user&apos;s workbench for multiple Claude Code and Codex instances at a time
-              — run it in VS Code, in your browser, or from Discord on your phone.
+            <h1
+              style={{
+                margin: "22px 0 0",
+                fontWeight: 700,
+                fontSize: "clamp(34px,3.6vw,62px)",
+                lineHeight: 1.16,
+                letterSpacing: "-.02em",
+                color: "#f2f3f5",
+                textWrap: "balance",
+              }}
+            >
+              I turn AI into a software engineering <span style={{ color: "#d97757" }}>superpower</span>.
+            </h1>
+            <p
+              style={{
+                margin: "26px 0 0",
+                maxWidth: 560,
+                fontSize: "clamp(14px,1.15vw,16px)",
+                lineHeight: 1.85,
+                color: "#9aa3b2",
+                textWrap: "pretty",
+              }}
+            >
+              I build production AI systems, developer tools, and practical methods that help teams use coding agents
+              with better context, memory, workflows, testing, and review.
             </p>
 
-            {/* Hero GIF */}
-            <a
-              href="https://github.com/TheSylvester/crispy"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block max-w-2xl mx-auto rounded-xl overflow-hidden border border-stone-800/60 hover:border-[#D4A574]/40 transition-colors duration-300"
+            <div style={{ marginTop: 34, display: "flex", flexWrap: "wrap", gap: 16 }}>
+              <a
+                href="#work"
+                className="hov-cta"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "15px 24px",
+                  border: "1px solid #d97757",
+                  borderRadius: 8,
+                  color: "#d97757",
+                  fontSize: 14,
+                  letterSpacing: ".1em",
+                  background: "rgba(217,119,87,.06)",
+                }}
+              >
+                <span>&gt;_</span> EXPLORE MY WORK
+              </a>
+              <Link
+                href="/playbook"
+                className="hov-ghost"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "15px 24px",
+                  border: "1px solid #3a4152",
+                  borderRadius: 8,
+                  color: "#c8ccd4",
+                  fontSize: 14,
+                  letterSpacing: ".1em",
+                }}
+              >
+                <span style={{ color: "#5c6370" }}>&gt;_</span> READ THE PLAYBOOK
+              </Link>
+            </div>
+
+            <div
+              style={{
+                marginTop: 44,
+                paddingTop: 26,
+                borderTop: "1px solid #262c3d",
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))",
+                gap: 20,
+                maxWidth: 760,
+              }}
             >
-              <Image
-                src="/images/crispy-hero.gif"
-                alt="Crispy — multi-vendor agent harness"
-                width={900}
-                height={471}
-                className="w-full h-auto"
-                unoptimized
-              />
-            </a>
-          </div>
-
-          {/* Bento grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* Main feature — spans 2 cols */}
-            <div className="md:col-span-2 rounded-2xl border border-stone-800/60 bg-stone-900/40 backdrop-blur-sm p-10 flex flex-col justify-center min-h-[220px]">
-              <div className="text-xs font-medium text-[#F97316] uppercase tracking-widest mb-3">Claude Code &amp; Codex deserve a better UI</div>
-              <p className="text-base text-stone-500 leading-relaxed mb-4 max-w-lg">
-                No way to fork conversations side by side. No semantic search for previous sessions.
-                No way to orchestrate agents from different models. Discord bots that couldn&apos;t resume past conversations.
-              </p>
-              <p className="text-2xl md:text-3xl font-bold tracking-tight text-stone-100 leading-snug">
-                So I built one GUI to control<br />
-                <span className="bg-gradient-to-r from-[#D4A574] to-[#F97316] bg-clip-text text-transparent">all my agents.</span>
-              </p>
-            </div>
-
-            {/* Download links card */}
-            <div className="rounded-2xl border border-stone-800/60 bg-stone-900/40 backdrop-blur-sm p-8 flex flex-col justify-center">
-              <div className="text-xs font-medium text-[#D4A574] uppercase tracking-wide mb-4">Get Crispy</div>
-              <div className="space-y-3">
-                <a href="https://www.npmjs.com/package/crispy-code" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 text-sm text-stone-400 hover:text-stone-100 transition-colors group">
-                  <span className="w-7 h-7 rounded-md bg-stone-800/80 flex items-center justify-center text-[10px] font-bold text-[#CB3837] group-hover:bg-stone-700/80">npm</span>
-                  <div>
-                    <div className="text-stone-300 group-hover:text-stone-100">npm i -g crispy-code</div>
-                    <div className="text-xs text-stone-600">Standalone browser &amp; CLI</div>
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <span aria-hidden="true" style={{ color: "#d97757", fontSize: 14, lineHeight: 1.5 }}>
+                  ◇
+                </span>
+                <div>
+                  <div style={{ fontSize: "12.5px", color: "#e6e9ee", fontWeight: 500 }}>Production AI Systems</div>
+                  <div style={{ marginTop: 5, fontSize: "11.5px", lineHeight: 1.55, color: "#7d8698" }}>
+                    Built and shipped in real environments
                   </div>
-                </a>
-                <a href="https://open-vsx.org/extension/the-sylvester/crispy" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 text-sm text-stone-400 hover:text-stone-100 transition-colors group">
-                  <span className="w-7 h-7 rounded-md bg-stone-800/80 flex items-center justify-center group-hover:bg-stone-700/80">
-                    <svg className="w-4 h-4 text-[#007ACC]" viewBox="0 0 24 24" fill="currentColor"><path d="M23.15 2.587L18.21.21a1.494 1.494 0 00-1.705.29l-9.46 8.63-4.12-3.128a.999.999 0 00-1.276.057L.327 7.261A1 1 0 00.326 8.74L3.899 12 .326 15.26a1 1 0 00.001 1.479L1.65 17.94a.999.999 0 001.276.057l4.12-3.128 9.46 8.63a1.492 1.492 0 001.704.29l4.942-2.377A1.5 1.5 0 0024 20.06V3.939a1.5 1.5 0 00-.85-1.352zm-5.146 14.861L10.826 12l7.178-5.448v10.896z"/></svg>
-                  </span>
-                  <div>
-                    <div className="text-stone-300 group-hover:text-stone-100">VS Code / Cursor</div>
-                    <div className="text-xs text-stone-600">OpenVSX extension</div>
-                  </div>
-                </a>
-                <a href="https://github.com/TheSylvester/crispy/releases/latest" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 text-sm text-stone-400 hover:text-stone-100 transition-colors group">
-                  <span className="w-7 h-7 rounded-md bg-stone-800/80 flex items-center justify-center group-hover:bg-stone-700/80">
-                    <svg className="w-4 h-4 text-stone-400" viewBox="0 0 24 24" fill="currentColor"><path d="M5.79 21.61l-1.58-1.22 8.6-11.11C13.48 8.42 14.67 8 16 8c2.76 0 5 2.24 5 5 0 1.33-.42 2.52-1.28 3.19L8.61 27.3l8.6-11.11C17.88 15.52 18 14.78 18 14c0-1.1-.9-2-2-2-.78 0-1.52.12-2.19.79L5.79 21.61zM16 20c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6z" /><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg>
-                  </span>
-                  <div>
-                    <div className="text-stone-300 group-hover:text-stone-100">Windows Desktop</div>
-                    <div className="text-xs text-stone-600">Tauri app — GitHub Releases</div>
-                  </div>
-                </a>
-                <a href="https://github.com/TheSylvester/crispy" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 text-sm text-stone-400 hover:text-stone-100 transition-colors group">
-                  <span className="w-7 h-7 rounded-md bg-stone-800/80 flex items-center justify-center group-hover:bg-stone-700/80">
-                    <svg className="w-4 h-4 text-stone-400" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-                  </span>
-                  <div>
-                    <div className="text-stone-300 group-hover:text-stone-100">Source Code</div>
-                    <div className="text-xs text-stone-600">MIT licensed</div>
-                  </div>
-                </a>
-              </div>
-            </div>
-
-            {/* Feature cards with hoverable screenshots */}
-            {[
-              { title: "Discord Remote", desc: "Control your agents from your phone — and pick up any past conversation where you left off.", img: "/images/discord.png", color: "#D4A574" },
-              { title: "Agent Recall", desc: "Full-text and semantic search across every session. Your agent remembers past work.", img: "/images/agent-memory-recall.png", color: "#F97316" },
-              { title: "Multi-Agent Orchestration", desc: "Pit Claude and Codex against each other to catch bugs a single model misses.", img: "/images/models.gif", color: "#D4A574" },
-              { title: "Fork & Rewind", desc: "Fork from any message to explore a different approach. Side-by-side session view.", img: "/images/fork.gif", color: "#F97316" },
-            ].map((feature) => (
-              <div key={feature.title} className="rounded-2xl border border-stone-800/60 bg-stone-900/40 backdrop-blur-sm p-6 group relative overflow-hidden">
-                <h3 className="text-base font-semibold text-stone-100 mb-2">{feature.title}</h3>
-                <p className="text-sm text-stone-400 leading-relaxed mb-3">{feature.desc}</p>
-                <div className="rounded-lg overflow-hidden border border-stone-800/40 group-hover:border-stone-700/60 transition-colors">
-                  <Image
-                    src={feature.img}
-                    alt={feature.title}
-                    width={400}
-                    height={220}
-                    className="w-full h-auto opacity-70 group-hover:opacity-100 transition-opacity duration-300"
-                    unoptimized
-                  />
                 </div>
               </div>
-            ))}
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <span aria-hidden="true" style={{ color: "#d97757", fontSize: 14, lineHeight: 1.5 }}>
+                  ▤
+                </span>
+                <div>
+                  <div style={{ fontSize: "12.5px", color: "#e6e9ee", fontWeight: 500 }}>Open Source Builder</div>
+                  <div style={{ marginTop: 5, fontSize: "11.5px", lineHeight: 1.55, color: "#7d8698" }}>
+                    Recall (active) · Crispy (archived)
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <span aria-hidden="true" style={{ color: "#d97757", fontSize: 14, lineHeight: 1.5 }}>
+                  ⚡
+                </span>
+                <div>
+                  <div style={{ fontSize: "12.5px", color: "#e6e9ee", fontWeight: 500 }}>Engineering Impact</div>
+                  <div style={{ marginTop: 5, fontSize: "11.5px", lineHeight: 1.55, color: "#7d8698" }}>
+                    LLM Accuracy +25% Review time -50%
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <span aria-hidden="true" style={{ color: "#d97757", fontSize: 14, lineHeight: 1.5 }}>
+                  ◎
+                </span>
+                <div>
+                  <div style={{ fontSize: "12.5px", color: "#e6e9ee", fontWeight: 500 }}>Based in Toronto</div>
+                  <div style={{ marginTop: 5, fontSize: "11.5px", lineHeight: 1.55, color: "#7d8698" }}>
+                    Available for Senior / Lead opportunities
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* CTA */}
-          <div className="text-center mt-12">
-            <a
-              href="https://github.com/TheSylvester/crispy"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-[#D4A574] text-[#1C1917] font-medium text-sm hover:bg-[#E8C4A0] transition-colors duration-200"
-            >
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-              View on GitHub
-            </a>
-          </div>
-        </div>
-      </section>
-      {/* Contact Section */}
-      <section id="contact" className="relative z-10 py-24 px-6">
-        <div className="max-w-2xl mx-auto text-center">
-          <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-4 text-stone-100">
-            Get in Touch
-          </h2>
-          <p className="text-stone-400 mb-10 leading-relaxed">
-            Open to opportunities. Remote preferred.
-          </p>
-          <button
-            onClick={() => {
-              navigator.clipboard.writeText("sylvester@thesylvester.ca");
-              const el = document.getElementById("copy-tooltip");
-              if (el) { el.textContent = "Copied!"; setTimeout(() => { el.textContent = "click to copy email"; }, 2000); }
+          {/* portrait */}
+          <div
+            data-hero-portrait=""
+            style={{
+              position: "relative",
+              alignSelf: "stretch",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "flex-end",
+              minWidth: 0,
+              marginBottom: -26,
             }}
-            className="group inline-flex flex-col items-center gap-1 px-8 py-4 rounded-2xl border border-stone-800/60 bg-stone-900/40 hover:border-[#D4A574]/40 transition-colors duration-200 cursor-pointer"
           >
-            <span className="text-lg text-stone-200 font-medium">sylvester@thesylvester.ca</span>
-            <span id="copy-tooltip" className="text-xs text-stone-500 group-hover:text-[#D4A574] transition-colors">click to copy email</span>
-          </button>
+            <div
+              aria-hidden="true"
+              style={{
+                position: "absolute",
+                bottom: "-18%",
+                left: "50%",
+                transform: "translateX(-50%)",
+                width: "150%",
+                minWidth: 520,
+                height: "calc(112% + clamp(60px,10vh,130px))",
+                background:
+                  "radial-gradient(ellipse 46% 48% at 50% 46%,rgba(217,119,87,.42) 0%,rgba(217,119,87,.2) 38%,rgba(217,119,87,.07) 60%,transparent 76%)",
+                animation: "floatGlow 7s ease-in-out infinite",
+                pointerEvents: "none",
+              }}
+            ></div>
+            {/* eslint-disable-next-line @next/next/no-img-element -- static export serves unoptimized images */}
+            <img
+              src="/images/sylvester-portrait-1200w.webp"
+              alt="Sylvester Wong"
+              style={{
+                position: "absolute",
+                bottom: 0,
+                left: "50%",
+                transform: "translateX(-50%)",
+                display: "block",
+                height: "calc(100% + clamp(20px,4vh,52px))",
+                width: "auto",
+                maxWidth: "none",
+                filter: "drop-shadow(0 24px 60px rgba(0,0,0,.6))",
+              }}
+            />
+          </div>
+
+          {/* sidebar card */}
+          <aside
+            data-hero-card=""
+            data-screen-label="Hero profile card"
+            style={{
+              alignSelf: "center",
+              border: "1px solid #313a4e",
+              borderRadius: 12,
+              background: "rgba(23,27,39,.88)",
+              backdropFilter: "blur(6px)",
+              padding: "24px 24px 26px",
+              fontSize: 13,
+              lineHeight: 1.6,
+              boxShadow: "0 30px 70px -30px rgba(0,0,0,.7)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+              <div style={{ color: "#d97757", fontWeight: 700, letterSpacing: ".06em", fontSize: 14 }}>
+                SYLVESTER.WONG
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#8cc265", fontSize: 12 }}>
+                <span
+                  style={{ width: 7, height: 7, borderRadius: "50%", background: "#8cc265", display: "inline-block" }}
+                ></span>
+                online
+              </div>
+            </div>
+            <div style={{ display: "grid", gap: 16, marginTop: 20 }}>
+              <div>
+                <div style={{ display: "flex", gap: 8, color: "#d97757", fontSize: 12, letterSpacing: ".08em" }}>
+                  <span aria-hidden="true">▣</span>ROLE
+                </div>
+                <div style={{ marginTop: 3, color: "#c8ccd4" }}>Senior / Lead Software Engineer</div>
+              </div>
+              <div>
+                <div style={{ display: "flex", gap: 8, color: "#d97757", fontSize: 12, letterSpacing: ".08em" }}>
+                  <span aria-hidden="true">◈</span>FOCUS
+                </div>
+                <div style={{ marginTop: 3, color: "#c8ccd4" }}>
+                  AI-native development
+                  <br />
+                  Agent systems · Retrieval
+                  <br />
+                  Developer tools · Full-stack
+                </div>
+              </div>
+              <div>
+                <div style={{ display: "flex", gap: 8, color: "#d97757", fontSize: 12, letterSpacing: ".08em" }}>
+                  <span aria-hidden="true">▤</span>BUILDING
+                </div>
+                <div style={{ marginTop: 3, color: "#c8ccd4" }}>
+                  <a
+                    href="https://github.com/TheSylvester/crispy-recall"
+                    className="hov-card-link"
+                    style={{ color: "#c8ccd4" }}
+                  >
+                    Recall
+                  </a>
+                  <br />
+                  <span style={{ color: "#8a93a3" }}>Local memory for Claude Code and Codex</span>
+                </div>
+              </div>
+              <div>
+                <div style={{ display: "flex", gap: 8, color: "#d97757", fontSize: 12, letterSpacing: ".08em" }}>
+                  <span aria-hidden="true">⚙</span>APPROACH
+                </div>
+                <div style={{ marginTop: 3, color: "#c8ccd4" }}>
+                  research → plan → delegate
+                  <br />→ review → retain
+                </div>
+              </div>
+              <div>
+                <div style={{ display: "flex", gap: 8, color: "#d97757", fontSize: 12, letterSpacing: ".08em" }}>
+                  <span aria-hidden="true">▦</span>STACK
+                </div>
+                <div style={{ marginTop: 3, color: "#c8ccd4" }}>
+                  TypeScript · Python · Node
+                  <br />
+                  React · AWS · Postgres
+                  <br />
+                  Qdrant · SQLite · Docker
+                </div>
+              </div>
+              <div>
+                <div style={{ display: "flex", gap: 8, color: "#d97757", fontSize: 12, letterSpacing: ".08em" }}>
+                  <span aria-hidden="true">❝</span>PHILOSOPHY
+                </div>
+                <div style={{ marginTop: 3, color: "#c8ccd4" }}>
+                  AI can write code.
+                  <br />
+                  Engineering makes it valuable.
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+
+        {/* ask panel */}
+        <AskPanel />
+      </section>
+
+      {/* ============ SCREEN 2 · WORK ============ */}
+      <section
+        id="work"
+        data-screen="2"
+        data-screen-label="Selected work"
+        style={{
+          position: "relative",
+          zIndex: 2,
+          background: "transparent",
+          padding: "clamp(80px,10vh,130px) clamp(28px,4vw,72px) 0",
+        }}
+      >
+        <div style={{ maxWidth: 1560, margin: "0 auto" }}>
+          <div style={{ fontSize: 12, letterSpacing: ".3em", color: "#8a93a3" }}>SELECTED WORK</div>
+          <div
+            style={{
+              marginTop: 20,
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "baseline",
+              gap: "18px 40px",
+              justifyContent: "space-between",
+            }}
+          >
+            <h2
+              style={{
+                margin: 0,
+                fontWeight: 700,
+                fontSize: "clamp(30px,3vw,50px)",
+                lineHeight: 1.12,
+                letterSpacing: "-.02em",
+                color: "#f2f3f5",
+                maxWidth: 720,
+                textWrap: "balance",
+              }}
+            >
+              Systems that shipped. Methods that stuck.
+            </h2>
+            <div style={{ color: "#5c6370", fontSize: 13 }}>
+              <span style={{ color: "#d97757" }}>$</span> git log --author=&quot;Sylvester Wong&quot;
+            </div>
+          </div>
+
+          <div
+            style={{
+              marginTop: 52,
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))",
+              gap: 20,
+              alignItems: "stretch",
+            }}
+          >
+            {/* Recall */}
+            <article
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                border: "1px solid #313a4e",
+                borderRadius: 12,
+                background: "#171b27",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "12px 18px",
+                  background: "#1b2030",
+                  borderBottom: "1px solid #262c3d",
+                  fontSize: 12,
+                  color: "#8a93a3",
+                }}
+              >
+                <span style={{ color: "#d97757" }}>▤</span> TheSylvester/crispy-recall
+                <span
+                  style={{
+                    marginLeft: "auto",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    color: "#8cc265",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: "#8cc265",
+                      display: "inline-block",
+                    }}
+                  ></span>
+                  active
+                </span>
+              </div>
+              <div style={{ padding: "22px 22px 24px", display: "flex", flexDirection: "column", gap: 14, flex: 1 }}>
+                <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#f2f3f5" }}>Recall</h3>
+                <p style={{ margin: 0, fontSize: "13.5px", lineHeight: 1.7, color: "#9aa3b2", flex: 1 }}>
+                  Local memory for Claude Code and Codex. Every session saved verbatim and indexed — SQLite FTS5
+                  keyword search fused with local semantic embeddings, so agents can search, read, and continue any
+                  past conversation. No cloud, no LLM calls.
+                </p>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: "11.5px", color: "#7d8698" }}>
+                  <span style={{ border: "1px solid #313a4e", borderRadius: 5, padding: "4px 9px" }}>TypeScript</span>
+                  <span style={{ border: "1px solid #313a4e", borderRadius: 5, padding: "4px 9px" }}>
+                    SQLite · FTS5
+                  </span>
+                  <span style={{ border: "1px solid #313a4e", borderRadius: 5, padding: "4px 9px" }}>llama.cpp</span>
+                </div>
+                <a
+                  href="https://github.com/TheSylvester/crispy-recall"
+                  className="hov-underline"
+                  style={{ fontSize: 13 }}
+                >
+                  github.com/TheSylvester/crispy-recall →
+                </a>
+              </div>
+            </article>
+
+            {/* Crispy */}
+            <article
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                border: "1px solid #313a4e",
+                borderRadius: 12,
+                background: "#171b27",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "12px 18px",
+                  background: "#1b2030",
+                  borderBottom: "1px solid #262c3d",
+                  fontSize: 12,
+                  color: "#8a93a3",
+                }}
+              >
+                <span style={{ color: "#d97757" }}>▤</span>{" "}
+                <a href="https://github.com/TheSylvester/crispy" style={{ color: "#8a93a3" }}>
+                  TheSylvester/crispy
+                </a>
+                <span style={{ marginLeft: "auto", color: "#7d8698" }}>archived</span>
+              </div>
+              <div style={{ padding: "22px 22px 24px", display: "flex", flexDirection: "column", gap: 14, flex: 1 }}>
+                <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#f2f3f5" }}>Crispy</h3>
+                <p style={{ margin: 0, fontSize: "13.5px", lineHeight: 1.7, color: "#9aa3b2", flex: 1 }}>
+                  Multi-vendor agent harness orchestrating Claude Code and Codex through one adapter contract, across
+                  five surfaces — VS Code, browser, CLI, desktop, and a Discord bot with remote agent control. Resume,
+                  fork, and cross-vendor fork any session mid-conversation.
+                </p>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: "11.5px", color: "#7d8698" }}>
+                  <span style={{ border: "1px solid #313a4e", borderRadius: 5, padding: "4px 9px" }}>Agent SDK</span>
+                  <span style={{ border: "1px solid #313a4e", borderRadius: 5, padding: "4px 9px" }}>MCP</span>
+                  <span style={{ border: "1px solid #313a4e", borderRadius: 5, padding: "4px 9px" }}>Tauri</span>
+                </div>
+                <a href="https://crispy.thesylvester.ca" className="hov-underline" style={{ fontSize: 13 }}>
+                  crispy.thesylvester.ca →
+                </a>
+              </div>
+            </article>
+
+            {/* Claro */}
+            <article
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                border: "1px solid #313a4e",
+                borderRadius: 12,
+                background: "#171b27",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "12px 18px",
+                  background: "#1b2030",
+                  borderBottom: "1px solid #262c3d",
+                  fontSize: 12,
+                  color: "#8a93a3",
+                }}
+              >
+                <span style={{ color: "#d97757" }}>◈</span> claro-customs-ai
+                <span style={{ marginLeft: "auto", color: "#7d8698" }}>2024–2025</span>
+              </div>
+              <div style={{ padding: "22px 22px 24px", display: "flex", flexDirection: "column", gap: 14, flex: 1 }}>
+                <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#f2f3f5" }}>Claro Customs AI</h3>
+                <p style={{ margin: 0, fontSize: "13.5px", lineHeight: 1.7, color: "#9aa3b2", flex: 1 }}>
+                  Conversational AI with full feature parity to a Canada/US customs platform — documents, compliance,
+                  and workflows through chat and email. Migrated OCR to LlamaParse + Gemini structured outputs, and
+                  built a snapshot-replay testing framework with an HTML diff dashboard.
+                </p>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 12 }}>
+                  <div style={{ border: "1px solid #313a4e", borderRadius: 7, padding: "10px 12px" }}>
+                    <span style={{ color: "#8cc265" }}>70% → 95%</span>
+                    <br />
+                    <span style={{ color: "#7d8698" }}>ingestion accuracy</span>
+                  </div>
+                  <div style={{ border: "1px solid #313a4e", borderRadius: 7, padding: "10px 12px" }}>
+                    <span style={{ color: "#8cc265" }}>15 → 5 min</span>
+                    <br />
+                    <span style={{ color: "#7d8698" }}>e2e test cycles</span>
+                  </div>
+                </div>
+                <span style={{ fontSize: 13, color: "#7d8698" }}>Senior Software Developer — AI · proprietary</span>
+              </div>
+            </article>
+          </div>
+
+          {/* playbook band */}
+          <div
+            id="about"
+            style={{
+              marginTop: 26,
+              border: "1px solid rgba(217,119,87,.35)",
+              borderRadius: 12,
+              background: "linear-gradient(120deg,rgba(217,119,87,.09),rgba(217,119,87,.02) 55%)",
+              padding: "clamp(26px,3vw,42px)",
+              display: "grid",
+              gridTemplateColumns: "minmax(300px,1.3fr) auto",
+              gap: 28,
+              alignItems: "center",
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 12, letterSpacing: ".3em", color: "#d97757" }}>THE PLAYBOOK</div>
+              <h3
+                style={{
+                  margin: "16px 0 0",
+                  fontSize: "clamp(22px,2.1vw,32px)",
+                  fontWeight: 700,
+                  color: "#f2f3f5",
+                  lineHeight: 1.2,
+                  textWrap: "balance",
+                }}
+              >
+                How I actually use AI to build software.
+              </h3>
+              <p
+                style={{
+                  margin: "16px 0 0",
+                  fontSize: "13.5px",
+                  lineHeight: 1.75,
+                  color: "#9aa3b2",
+                  maxWidth: 640,
+                  textWrap: "pretty",
+                }}
+              >
+                The working method behind everything above — context-isolated task handoffs, self-testing sub-agents,
+                automated review validation. Adopted as a 5-person team’s default workflow; review resolution time cut
+                by 50%. Written up as notes, tips, and tools you can use.
+              </p>
+              <div
+                style={{
+                  marginTop: 22,
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 0,
+                  alignItems: "center",
+                  fontSize: "12.5px",
+                  color: "#c8ccd4",
+                }}
+              >
+                <span style={{ border: "1px solid #3a4152", borderRadius: 6, padding: "7px 12px" }}>research</span>
+                <span style={{ color: "#d97757", padding: "0 8px" }}>→</span>
+                <span style={{ border: "1px solid #3a4152", borderRadius: 6, padding: "7px 12px" }}>plan</span>
+                <span style={{ color: "#d97757", padding: "0 8px" }}>→</span>
+                <span style={{ border: "1px solid #3a4152", borderRadius: 6, padding: "7px 12px" }}>delegate</span>
+                <span style={{ color: "#d97757", padding: "0 8px" }}>→</span>
+                <span style={{ border: "1px solid #3a4152", borderRadius: 6, padding: "7px 12px" }}>review</span>
+                <span style={{ color: "#d97757", padding: "0 8px" }}>→</span>
+                <span style={{ border: "1px solid #3a4152", borderRadius: 6, padding: "7px 12px" }}>retain</span>
+              </div>
+            </div>
+            <Link
+              href="/playbook"
+              className="hov-cta"
+              style={{
+                justifySelf: "end",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "16px 28px",
+                border: "1px solid #d97757",
+                borderRadius: 8,
+                color: "#d97757",
+                fontSize: 14,
+                letterSpacing: ".1em",
+                background: "rgba(217,119,87,.06)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              <span>&gt;_</span> READ THE PLAYBOOK
+            </Link>
+          </div>
+
+          {/* track record strip */}
+          <div
+            style={{
+              marginTop: 26,
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))",
+              gap: 20,
+              border: "1px solid #262c3d",
+              borderRadius: 12,
+              background: "#171b27",
+              padding: "24px 28px",
+              fontSize: "12.5px",
+              lineHeight: 1.65,
+            }}
+          >
+            <div>
+              <div style={{ color: "#e6e9ee" }}>
+                LighthouseAI <span style={{ color: "#5c6370" }}>· 2023–24</span>
+              </div>
+              <div style={{ color: "#7d8698" }}>
+                Agentic workflows lifted GPT-3.5 to GPT-4-level classification (70% → 90%+)
+              </div>
+            </div>
+            <div>
+              <div style={{ color: "#e6e9ee" }}>
+                PromptCore <span style={{ color: "#5c6370" }}>· 2024</span>
+              </div>
+              <div style={{ color: "#7d8698" }}>
+                Human-in-the-loop LLM evaluation system replacing manual prompt tuning
+              </div>
+            </div>
+            <div>
+              <div style={{ color: "#e6e9ee" }}>
+                VS Code <span style={{ color: "#5c6370" }}>· open source</span>
+              </div>
+              <div style={{ color: "#7d8698" }}>UX enhancement PR merged into the mainline release</div>
+            </div>
+            <div>
+              <div style={{ color: "#e6e9ee" }}>
+                Earlier <span style={{ color: "#5c6370" }}>· 2016–21</span>
+              </div>
+              <div style={{ color: "#7d8698" }}>Full ERP build — project tracking, inventory, financial reporting</div>
+            </div>
+          </div>
+
+          {/* footer */}
+          <footer
+            style={{
+              marginTop: "clamp(60px,8vh,100px)",
+              borderTop: "1px solid #262c3d",
+              padding: "26px 0 90px",
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "16px 32px",
+              alignItems: "center",
+              fontSize: "12.5px",
+            }}
+          >
+            <span style={{ color: "#5c6370" }}>© 2026 Sylvester Wong · Toronto, ON</span>
+            <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: "16px 28px" }}>
+              <a href="/Sylvester_Wong_Resume.pdf" className="hov-footer" style={{ color: "#9aa3b2" }}>
+                resume.pdf ↓
+              </a>
+              <a
+                href="https://github.com/TheSylvester/crispy-recall"
+                className="hov-footer"
+                style={{ color: "#9aa3b2" }}
+              >
+                github/crispy-recall
+              </a>
+              <a href="https://github.com/TheSylvester/crispy" className="hov-footer" style={{ color: "#9aa3b2" }}>
+                github/crispy
+              </a>
+              <a
+                href="https://www.linkedin.com/in/sylvester-wong-41552256"
+                className="hov-footer"
+                style={{ color: "#9aa3b2" }}
+              >
+                linkedin
+              </a>
+              <CopyEmail className="hov-footer" style={{ color: "#9aa3b2" }}>
+                sylvester@thesylvester.ca
+              </CopyEmail>
+            </div>
+          </footer>
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="relative z-10 border-t border-stone-800/40 py-8 px-6">
-        <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
-          <span className="text-sm text-stone-600">
-            &copy; {new Date().getFullYear()} Sylvester Wong
-          </span>
-          <div className="flex items-center gap-4">
-            <a
-              href="https://github.com/TheSylvester"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-stone-500 hover:text-stone-200 transition-colors"
-              aria-label="GitHub"
-            >
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-            </a>
-            <a
-              href="https://linkedin.com/in/sylvester-wong-41552256"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-stone-500 hover:text-stone-200 transition-colors"
-              aria-label="LinkedIn"
-            >
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
-            </a>
-          </div>
-        </div>
-      </footer>
+      {/* status bar — fixed viewport overlay, above all content */}
+      <StatusBar />
     </div>
   );
 }
