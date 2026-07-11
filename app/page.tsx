@@ -3,6 +3,7 @@ import AskPanel from "@/components/ask-panel";
 import CodeRain from "@/components/code-rain";
 import CopyEmail from "@/components/copy-email";
 import HomeAnchor from "@/components/home-anchor";
+import RevealInit from "@/components/reveal-init";
 import StatusBar from "@/components/status-bar";
 
 export default function Home() {
@@ -124,6 +125,7 @@ export default function Home() {
               Hi, I’m Sylvester Wong
               <span
                 aria-hidden="true"
+                className="cursor-blink"
                 style={{
                   display: "inline-block",
                   width: ".55em",
@@ -131,7 +133,6 @@ export default function Home() {
                   background: "#d97757",
                   marginLeft: 6,
                   verticalAlign: "-.15em",
-                  animation: "blink 1.1s steps(1) infinite",
                 }}
               ></span>
             </div>
@@ -281,6 +282,7 @@ export default function Home() {
           >
             <div
               aria-hidden="true"
+              className="portrait-glow"
               style={{
                 position: "absolute",
                 bottom: "-18%",
@@ -291,7 +293,6 @@ export default function Home() {
                 height: "calc(112% + clamp(60px,10vh,130px))",
                 background:
                   "radial-gradient(ellipse 46% 48% at 50% 46%,rgba(217,119,87,.42) 0%,rgba(217,119,87,.2) 38%,rgba(217,119,87,.07) 60%,transparent 76%)",
-                animation: "floatGlow 7s ease-in-out infinite",
                 pointerEvents: "none",
               }}
             ></div>
@@ -817,6 +818,9 @@ export default function Home() {
 
       {/* status bar — fixed viewport overlay, above all content */}
       <StatusBar />
+
+      {/* one-shot scroll reveals for [data-reveal] elements */}
+      <RevealInit />
     </div>
   );
 }

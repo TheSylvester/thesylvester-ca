@@ -1,3 +1,23 @@
+/* MOTION BUDGET — the contract every animation on this site obeys.
+   Idle systems (max 4, replace-don't-add): cursor blink · portrait glow ·
+   code rain (hero only, pointer-reactive) · status-bar clock.
+   Interaction motion: opacity/transform + the color/border/background hover
+   eases only; 500ms ceiling; reveals are scroll-TRIGGERED one-shots (fire
+   once, run on their own clock), never scroll-scrubbed, never re-played.
+   steps() is reserved for terminal-discrete effects (cursor blink).
+   The tokens below are the only permitted durations/easings/distances. */
+:root {
+  --dur-1: 120ms; /* hover attack: color/border micro */
+  --dur-2: 200ms; /* background fills, focus surfaces */
+  --dur-3: 450ms; /* scroll reveals */
+  --dur-attack: 150ms; /* hover attack — fast enough to feel terminal-crisp */
+  --dur-release: 450ms; /* hover release — the slow, felt half of the asymmetry */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-io: cubic-bezier(0.65, 0, 0.35, 1);
+  --rise: 10px;
+  --stagger: 80ms;
+}
+
 html {
   scroll-behavior: smooth;
 }
@@ -73,6 +93,101 @@ a:hover {
   }
   [data-hero-card] {
     max-width: none;
+  }
+}
+
+/* Hover transition layer — asymmetric: fast attack (--dur-1), soft release
+   (180ms). Eases color/border/background ONLY; transform, layout, and
+   text-decoration never interpolate (an instant underline is correct
+   terminal behavior). .hov-home is filter-only and overrides the base list. */
+.hov-nav,
+.hov-gh,
+.hov-cta,
+.hov-ghost,
+.hov-card-link,
+.hov-ask,
+.hov-underline,
+.hov-footer,
+.hov-status,
+.ask-chip,
+a {
+  transition:
+    color var(--dur-release) var(--ease-io),
+    border-color var(--dur-release) var(--ease-io),
+    background-color var(--dur-release) var(--ease-io);
+}
+.hov-nav:hover,
+.hov-gh:hover,
+.hov-cta:hover,
+.hov-ghost:hover,
+.hov-card-link:hover,
+.hov-ask:hover,
+.hov-underline:hover,
+.hov-footer:hover,
+.hov-status:hover,
+.ask-chip:hover,
+a:hover {
+  transition-duration: var(--dur-attack);
+  transition-timing-function: var(--ease-io);
+}
+.hov-home {
+  transition: filter var(--dur-release) var(--ease-io);
+}
+.hov-home:hover {
+  transition-duration: var(--dur-attack);
+  transition-timing-function: var(--ease-io);
+}
+
+/* Terminal cursor + portrait glow — classes instead of inline styles so the
+   reduced-motion block below can reach them. */
+.cursor-blink {
+  animation: blink 1.1s steps(1) infinite;
+}
+.portrait-glow {
+  animation: floatGlow 7s ease-in-out infinite;
+}
+
+/* Scroll reveals — one-shot "printed output" (wired up by RevealInit).
+   The hidden state exists ONLY when JS is confirmed live (html.js, set
+   pre-paint in the root layout) AND the user accepts motion — no-JS,
+   failed-hydration, reduced-motion, and print visitors always get the
+   fully-visible static page. Reveals never re-hide once .is-in lands. */
+@media (prefers-reduced-motion: no-preference) {
+  html.js [data-reveal] {
+    opacity: 0;
+    transform: translateY(var(--rise));
+    transition:
+      opacity var(--dur-3) var(--ease-out),
+      transform var(--dur-3) var(--ease-out);
+    transition-delay: calc(var(--d, 0) * var(--stagger));
+  }
+  html.js [data-reveal].is-in {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media print {
+  [data-reveal] {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/* Reduced motion: kill movement, keep state. The cursor goes solid (still a
+   terminal), the glow freezes at its mid value, smooth scroll turns off, and
+   hover color eases stay (color change is feedback, not motion). The code
+   rain guards itself in JS and never starts its RAF loop. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .cursor-blink {
+    animation: none;
+    opacity: 1;
+  }
+  .portrait-glow {
+    animation: none;
+    opacity: 0.68;
   }
 }
 

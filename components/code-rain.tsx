@@ -236,6 +236,12 @@ export default function CodeRain() {
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
+    // reduced motion: never start the RAF loop — a static frame of rain is
+    // worthless at this alpha, so hide the canvas entirely
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      canvas.style.opacity = "0";
+      return;
+    }
     canvas.style.opacity = "0.5";
     // next/font registers the family under a hashed name — read the real one off <body>
     const fontFamily = getComputedStyle(document.body).fontFamily;
