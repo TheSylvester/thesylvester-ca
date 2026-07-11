@@ -560,7 +560,8 @@ export default function Home() {
                 </p>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: "11.5px", color: "#7d8698" }}>
                   <span style={{ border: "1px solid #313a4e", borderRadius: 5, padding: "4px 9px" }}>Agent SDK</span>
-                  <span style={{ border: "1px solid #313a4e", borderRadius: 5, padding: "4px 9px" }}>MCP</span>
+                  <span style={{ border: "1px solid #313a4e", borderRadius: 5, padding: "4px 9px" }}>Codex CLI</span>
+                  <span style={{ border: "1px solid #313a4e", borderRadius: 5, padding: "4px 9px" }}>VS Code</span>
                   <span style={{ border: "1px solid #313a4e", borderRadius: 5, padding: "4px 9px" }}>Tauri</span>
                 </div>
                 <a href="https://crispy.thesylvester.ca" className="hov-underline" style={{ fontSize: 13 }}>
