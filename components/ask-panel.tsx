@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 const QUESTIONS = [
@@ -9,8 +10,20 @@ const QUESTIONS = [
   "How did Crispy evolve?",
 ];
 
+const DISCORD_INVITE = "https://discord.gg/e2vw4bTPup";
+const EMAIL = "sylvester@thesylvester.ca";
+
 export default function AskPanel() {
   const [ask, setAsk] = useState("");
+  const [asked, setAsked] = useState<string | null>(null);
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const q = ask.trim();
+    if (!q) return;
+    setAsked(q);
+    setAsk("");
+  }
 
   return (
     <div
@@ -27,8 +40,22 @@ export default function AskPanel() {
         boxSizing: "border-box",
       }}
     >
-      <div style={{ color: "#8cc265", fontSize: 13 }}>Ask me anything about how I build with AI.</div>
-      <div style={{ marginTop: 14, display: "flex", gap: 14, alignItems: "stretch", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <div style={{ color: "#8cc265", fontSize: 13 }}>Ask me anything about how I build with AI.</div>
+        <div
+          style={{
+            border: "1px solid #313a4e",
+            borderRadius: 5,
+            padding: "3px 9px",
+            fontSize: 11,
+            letterSpacing: ".12em",
+            color: "#7d8698",
+          }}
+        >
+          <span style={{ color: "#d97757" }}>●</span> MODEL OFFLINE
+        </div>
+      </div>
+      <form onSubmit={handleSubmit} style={{ marginTop: 14, display: "flex", gap: 14, alignItems: "stretch", flexWrap: "wrap" }}>
         <div
           style={{
             flex: 1,
@@ -61,9 +88,7 @@ export default function AskPanel() {
           />
         </div>
         <button
-          type="button"
-          title="Coming soon"
-          aria-disabled="true"
+          type="submit"
           className="hov-ask"
           style={{
             cursor: "pointer",
@@ -80,7 +105,7 @@ export default function AskPanel() {
           ASK
         </button>
         <div style={{ alignSelf: "center", color: "#5c6370", fontSize: "12.5px" }}>(↵ to submit)</div>
-      </div>
+      </form>
       <div style={{ marginTop: 14, display: "flex", flexWrap: "wrap", gap: 10 }}>
         {QUESTIONS.map((label) => (
           <button key={label} type="button" className="ask-chip" onClick={() => setAsk(label)}>
@@ -89,6 +114,43 @@ export default function AskPanel() {
           </button>
         ))}
       </div>
+      {asked !== null && (
+        <div
+          aria-live="polite"
+          style={{ marginTop: 16, borderTop: "1px solid #232a3a", paddingTop: 14, fontSize: 13, lineHeight: 1.8 }}
+        >
+          <div style={{ color: "#7d8698" }}>
+            <span style={{ color: "#d97757" }}>❯ </span>
+            {asked}
+          </div>
+          <div style={{ color: "#8cc265" }}>
+            {"> model offline — training data still being written at "}
+            <Link href="/guide" className="hov-underline" style={{ color: "#d97757" }}>
+              /guide
+            </Link>
+          </div>
+          <div style={{ color: "#8cc265" }}>
+            {"> ask me directly: "}
+            <a
+              href={DISCORD_INVITE}
+              target="_blank"
+              rel="noreferrer"
+              className="hov-underline"
+              style={{ color: "#d97757" }}
+            >
+              Discord
+            </a>
+            {" · "}
+            <a
+              href={`mailto:${EMAIL}?subject=${encodeURIComponent(asked)}`}
+              className="hov-underline"
+              style={{ color: "#d97757" }}
+            >
+              email
+            </a>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
