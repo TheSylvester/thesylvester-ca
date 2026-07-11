@@ -118,8 +118,8 @@ export default function Home() {
             boxSizing: "border-box",
           }}
         >
-          {/* left copy */}
-          <div style={{ minWidth: 0 }}>
+          {/* left copy — stacked above the portrait so its bleed never covers text */}
+          <div style={{ minWidth: 0, position: "relative", zIndex: 3 }}>
             <div style={{ fontSize: "clamp(14px,1.2vw,17px)", color: "#9aa3b2" }}>
               Hi, I’m Sylvester Wong
               <span
@@ -307,7 +307,13 @@ export default function Home() {
                 display: "block",
                 height: "calc(100% + clamp(20px,4vh,52px))",
                 width: "auto",
-                maxWidth: "none",
+                // the image is sized by hero HEIGHT while its column is sized by
+                // viewport WIDTH — on tall/narrow windows it blows out sideways.
+                // Cap at 2× the column and keep it bottom-anchored; the cap only
+                // engages in that zone, wide viewports render exactly as before.
+                maxWidth: "200%",
+                objectFit: "contain",
+                objectPosition: "bottom center",
                 filter: "drop-shadow(0 24px 60px rgba(0,0,0,.6))",
               }}
             />
