@@ -262,12 +262,12 @@ export default function CodeRain() {
         top: 0,
         left: 0,
         right: 0,
-        height: "135vh",
+        height: "165vh",
         width: "100%",
         pointerEvents: "none",
         zIndex: 1,
-        WebkitMaskImage: "linear-gradient(to bottom,#000 0%,#000 66%,transparent 100%)",
-        maskImage: "linear-gradient(to bottom,#000 0%,#000 66%,transparent 100%)",
+        WebkitMaskImage: "linear-gradient(to bottom,#000 0%,#000 58%,rgba(0,0,0,.18) 82%,transparent 98%)",
+        maskImage: "linear-gradient(to bottom,#000 0%,#000 58%,rgba(0,0,0,.18) 82%,transparent 98%)",
       }}
     />
   );

@@ -429,7 +429,7 @@ export default function Home() {
         }}
       >
         <div style={{ maxWidth: 1560, margin: "0 auto" }}>
-          <div style={{ fontSize: 12, letterSpacing: ".3em", color: "#8a93a3" }}>CURRENT WORK</div>
+          <div data-reveal="" style={{ fontSize: 12, letterSpacing: ".3em", color: "#8a93a3" }}>CURRENT WORK</div>
           <div
             style={{
               marginTop: 20,
@@ -441,7 +441,9 @@ export default function Home() {
             }}
           >
             <h2
+              data-reveal=""
               style={{
+                ["--d" as string]: 1,
                 margin: 0,
                 fontWeight: 700,
                 fontSize: "clamp(30px,3vw,50px)",
@@ -454,8 +456,27 @@ export default function Home() {
             >
               Systems that shipped. Methods that stuck.
             </h2>
-            <div style={{ color: "#5c6370", fontSize: 13 }}>
-              <span style={{ color: "#d97757" }}>$</span> git log --author=&quot;Sylvester Wong&quot;
+            <div data-reveal="" className="reveal-fade" style={{ ["--d" as string]: 2, color: "#5c6370", fontSize: 13 }}>
+              <span className="cmd-type">
+                {/* explicit space — the JSX transform drops the bare one, and the
+                    typewriter's steps(35)/35ch count depends on it */}
+                <span style={{ color: "#d97757" }}>$</span>
+                {' git log --author="Sylvester Wong"'}
+              </span>
+              <span
+                aria-hidden="true"
+                className="cursor-blink"
+                style={{
+                  display: "inline-block",
+                  width: ".55em",
+                  height: "1em",
+                  background: "#d97757",
+                  marginLeft: 8,
+                  verticalAlign: "-.15em",
+                  // offset from the hero cursor so the two never blink in sync
+                  animationDelay: "-.4s",
+                }}
+              ></span>
             </div>
           </div>
 
@@ -470,7 +491,9 @@ export default function Home() {
           >
             {/* Recall */}
             <article
+              data-reveal=""
               style={{
+                ["--d" as string]: 3,
                 display: "flex",
                 flexDirection: "column",
                 border: "1px solid #313a4e",
@@ -538,7 +561,9 @@ export default function Home() {
 
             {/* Crispy */}
             <article
+              data-reveal=""
               style={{
+                ["--d" as string]: 4,
                 display: "flex",
                 flexDirection: "column",
                 border: "1px solid #313a4e",
@@ -586,7 +611,9 @@ export default function Home() {
 
             {/* Fusionthink */}
             <article
+              data-reveal=""
               style={{
+                ["--d" as string]: 5,
                 display: "flex",
                 flexDirection: "column",
                 border: "1px solid #313a4e",
@@ -633,6 +660,7 @@ export default function Home() {
           {/* guide band */}
           <div
             id="about"
+            data-reveal=""
             style={{
               marginTop: 26,
               border: "1px solid rgba(217,119,87,.35)",
@@ -684,15 +712,15 @@ export default function Home() {
                   color: "#c8ccd4",
                 }}
               >
-                <span style={{ border: "1px solid #3a4152", borderRadius: 6, padding: "7px 12px" }}>research</span>
-                <span style={{ color: "#d97757", padding: "0 8px" }}>→</span>
-                <span style={{ border: "1px solid #3a4152", borderRadius: 6, padding: "7px 12px" }}>plan</span>
-                <span style={{ color: "#d97757", padding: "0 8px" }}>→</span>
-                <span style={{ border: "1px solid #3a4152", borderRadius: 6, padding: "7px 12px" }}>delegate</span>
-                <span style={{ color: "#d97757", padding: "0 8px" }}>→</span>
-                <span style={{ border: "1px solid #3a4152", borderRadius: 6, padding: "7px 12px" }}>review</span>
-                <span style={{ color: "#d97757", padding: "0 8px" }}>→</span>
-                <span style={{ border: "1px solid #3a4152", borderRadius: 6, padding: "7px 12px" }}>retain</span>
+                <span className="pipe-t" style={{ ["--p" as string]: 0, border: "1px solid #3a4152", borderRadius: 6, padding: "7px 12px" }}>research</span>
+                <span className="pipe-t" style={{ ["--p" as string]: 1, color: "#d97757", padding: "0 8px" }}>→</span>
+                <span className="pipe-t" style={{ ["--p" as string]: 2, border: "1px solid #3a4152", borderRadius: 6, padding: "7px 12px" }}>plan</span>
+                <span className="pipe-t" style={{ ["--p" as string]: 3, color: "#d97757", padding: "0 8px" }}>→</span>
+                <span className="pipe-t" style={{ ["--p" as string]: 4, border: "1px solid #3a4152", borderRadius: 6, padding: "7px 12px" }}>delegate</span>
+                <span className="pipe-t" style={{ ["--p" as string]: 5, color: "#d97757", padding: "0 8px" }}>→</span>
+                <span className="pipe-t" style={{ ["--p" as string]: 6, border: "1px solid #3a4152", borderRadius: 6, padding: "7px 12px" }}>review</span>
+                <span className="pipe-t" style={{ ["--p" as string]: 7, color: "#d97757", padding: "0 8px" }}>→</span>
+                <span className="pipe-t" style={{ ["--p" as string]: 8, border: "1px solid #3a4152", borderRadius: 6, padding: "7px 12px" }}>retain</span>
               </div>
             </div>
             <Link
@@ -719,6 +747,7 @@ export default function Home() {
 
           {/* track record strip */}
           <div
+            data-reveal=""
             style={{
               marginTop: 26,
               display: "grid",
@@ -732,7 +761,7 @@ export default function Home() {
               lineHeight: 1.65,
             }}
           >
-            <div>
+            <div className="row-t" style={{ ["--p" as string]: 0 }}>
               <div style={{ color: "#e6e9ee" }}>
                 Antidote Health <span style={{ color: "#5c6370" }}>· 2026–present</span>
               </div>
@@ -740,7 +769,7 @@ export default function Home() {
                 Australian telehealth platform — patient booking, Stripe payments, EHR/FHIR integration
               </div>
             </div>
-            <div>
+            <div className="row-t" style={{ ["--p" as string]: 1 }}>
               <div style={{ color: "#e6e9ee" }}>
                 Claro Customs AI <span style={{ color: "#5c6370" }}>· 2024–25</span>
               </div>
@@ -749,7 +778,7 @@ export default function Home() {
                 cycles 15 → 5 min
               </div>
             </div>
-            <div>
+            <div className="row-t" style={{ ["--p" as string]: 2 }}>
               <div style={{ color: "#e6e9ee" }}>
                 PromptCore <span style={{ color: "#5c6370" }}>· 2024</span>
               </div>
@@ -757,7 +786,7 @@ export default function Home() {
                 Human-in-the-loop LLM evaluation; workflow runner &gt;50% faster than Microsoft Prompt Flow
               </div>
             </div>
-            <div>
+            <div className="row-t" style={{ ["--p" as string]: 3 }}>
               <div style={{ color: "#e6e9ee" }}>
                 LighthouseAI <span style={{ color: "#5c6370" }}>· 2023–24</span>
               </div>
@@ -765,7 +794,7 @@ export default function Home() {
                 Agentic workflows lifted GPT-3.5 to GPT-4-level classification (70% → 90%+)
               </div>
             </div>
-            <div>
+            <div className="row-t" style={{ ["--p" as string]: 4 }}>
               <div style={{ color: "#e6e9ee" }}>
                 VS Code <span style={{ color: "#5c6370" }}>· open source</span>
               </div>

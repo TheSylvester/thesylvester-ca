@@ -173,6 +173,54 @@ a:hover {
   }
 }
 
+/* Screen-2 choreography — the git-log gag types itself (the ONE typewriter on
+   the site; only prompt-prefixed text may type), then pipeline chips and
+   track-record rows print as discrete tokens (opacity only — printed output
+   doesn't move). Every hidden state lives inside this gated block so no-JS
+   and reduced-motion visitors always see the full static page. */
+.pipe-t,
+.row-t {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: no-preference) {
+  /* the typed line's own reveal is opacity-only — type-on is the sole motion */
+  html.js [data-reveal].reveal-fade {
+    transform: none;
+  }
+  /* 35 = `$ git log --author="Sylvester Wong"`.length — steps/ch must match */
+  html.js [data-reveal] .cmd-type {
+    display: inline-block;
+    width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    vertical-align: bottom;
+  }
+  html.js [data-reveal].is-in .cmd-type {
+    animation: typeCmd 700ms steps(35, end) 160ms both;
+  }
+  @keyframes typeCmd {
+    to {
+      width: 35ch;
+    }
+  }
+  html.js [data-reveal] .pipe-t {
+    opacity: 0;
+  }
+  html.js [data-reveal].is-in .pipe-t {
+    transition: opacity 250ms var(--ease-out);
+    transition-delay: calc(250ms + var(--p) * 70ms);
+    opacity: 1;
+  }
+  html.js [data-reveal] .row-t {
+    opacity: 0;
+  }
+  html.js [data-reveal].is-in .row-t {
+    transition: opacity 350ms var(--ease-out);
+    transition-delay: calc(150ms + var(--p) * 80ms);
+    opacity: 1;
+  }
+}
+
 /* Reduced motion: kill movement, keep state. The cursor goes solid (still a
    terminal), the glow freezes at its mid value, smooth scroll turns off, and
    hover color eases stay (color change is feedback, not motion). The code
