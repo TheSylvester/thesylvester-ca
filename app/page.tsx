@@ -163,8 +163,8 @@ export default function Home() {
             </p>
 
             <div style={{ marginTop: 34, display: "flex", flexWrap: "wrap", gap: 16 }}>
-              <a
-                href="#work"
+              <Link
+                href="/guide"
                 className="hov-cta"
                 style={{
                   display: "inline-flex",
@@ -179,10 +179,10 @@ export default function Home() {
                   background: "rgba(217,119,87,.06)",
                 }}
               >
-                <span>&gt;_</span> EXPLORE MY WORK
-              </a>
-              <Link
-                href="/guide"
+                <span>&gt;_</span> MY CLAUDE CODE GUIDE
+              </Link>
+              <a
+                href="#work"
                 className="hov-ghost"
                 style={{
                   display: "inline-flex",
@@ -196,8 +196,8 @@ export default function Home() {
                   letterSpacing: ".1em",
                 }}
               >
-                <span style={{ color: "#5c6370" }}>&gt;_</span> READ THE GUIDE
-              </Link>
+                <span style={{ color: "#5c6370" }}>&gt;_</span> EXPLORE MY WORK
+              </a>
             </div>
 
             <div
@@ -240,7 +240,7 @@ export default function Home() {
                 <div>
                   <div style={{ fontSize: "12.5px", color: "#e6e9ee", fontWeight: 500 }}>Engineering Impact</div>
                   <div style={{ marginTop: 5, fontSize: "11.5px", lineHeight: 1.55, color: "#7d8698" }}>
-                    LLM accuracy 70 → 95% · review time -50%
+                    LLM accuracy 70&nbsp;→&nbsp;95% · review&nbsp;time&nbsp;-50%
                   </div>
                 </div>
               </div>
@@ -372,17 +372,15 @@ export default function Home() {
                   <span aria-hidden="true">▦</span>STACK
                 </div>
                 <div style={{ marginTop: 3, color: "#c8ccd4" }}>
-                  Claude Code · Codex · Agent SDK
-                  <br />
-                  MCP · llama.cpp · Supabase
+                  Claude Code · Codex · Agent SDK · MCP
                   <br />
                   TypeScript · Python · Node
                   <br />
                   React · Next.js · Vite
                   <br />
-                  Postgres · SQLite · Docker
+                  Supabase · Postgres · SQLite
                   <br />
-                  Stripe · Playwright · GitHub Actions
+                  Stripe · Docker · GitHub Actions
                 </div>
               </div>
               <div>
@@ -698,7 +696,7 @@ export default function Home() {
                 whiteSpace: "nowrap",
               }}
             >
-              <span>&gt;_</span> READ THE GUIDE
+              <span>&gt;_</span> MY CLAUDE CODE GUIDE
             </Link>
           </div>
 
