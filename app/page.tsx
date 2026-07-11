@@ -4,6 +4,7 @@ import CodeRain from "@/components/code-rain";
 import CopyEmail from "@/components/copy-email";
 import HomeAnchor from "@/components/home-anchor";
 import RevealInit from "@/components/reveal-init";
+import ScrollSentinel from "@/components/scroll-sentinel";
 import StatusBar from "@/components/status-bar";
 
 export default function Home() {
@@ -20,6 +21,9 @@ export default function Home() {
     >
       {/* live code rain background (mouse-reactive) — spans hero and fades into the work section */}
       <CodeRain />
+
+      {/* 1px sentinel driving html[data-scrolled] for the top-bar border state */}
+      <ScrollSentinel />
 
       {/* ============ TOP BAR ============ */}
       <header
@@ -428,7 +432,7 @@ export default function Home() {
       <section
         id="work"
         data-screen="2"
-        data-screen-label="Current work"
+        data-screen-label="Work"
         style={{
           position: "relative",
           zIndex: 2,

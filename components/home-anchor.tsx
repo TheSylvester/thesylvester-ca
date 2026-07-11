@@ -31,9 +31,13 @@ export default function HomeAnchor() {
         gap: 2,
       }}
     >
-      {/* quincunx pixel mark — orange on even cells */}
+      {/* quincunx pixel mark — orange on even cells; .qx-on drives the hover scanline */}
       {Array.from({ length: 9 }, (_, i) => (
-        <span key={i} style={{ background: i % 2 === 0 ? "#d97757" : "transparent" }}></span>
+        <span
+          key={i}
+          className={i % 2 === 0 ? "qx-on" : undefined}
+          style={{ background: i % 2 === 0 ? "#d97757" : "transparent" }}
+        ></span>
       ))}
     </Link>
   );

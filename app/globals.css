@@ -99,7 +99,7 @@ a:hover {
 /* Hover transition layer — asymmetric: fast attack (--dur-1), soft release
    (180ms). Eases color/border/background ONLY; transform, layout, and
    text-decoration never interpolate (an instant underline is correct
-   terminal behavior). .hov-home is filter-only and overrides the base list. */
+   terminal behavior). .hov-home hovers via the .qx-on scanline below. */
 .hov-nav,
 .hov-gh,
 .hov-cta,
@@ -128,14 +128,6 @@ a:hover {
   transition-duration: var(--dur-attack);
   transition-timing-function: var(--ease-io);
 }
-.hov-home {
-  transition: filter var(--dur-release) var(--ease-io);
-}
-.hov-home:hover {
-  transition-duration: var(--dur-attack);
-  transition-timing-function: var(--ease-io);
-}
-
 /* Terminal cursor + portrait glow — classes instead of inline styles so the
    reduced-motion block below can reach them. */
 .cursor-blink {
@@ -286,9 +278,6 @@ a:hover {
   color: #0e1119 !important;
   text-decoration: none !important;
 }
-.hov-home:hover {
-  filter: brightness(1.35);
-}
 
 /* Ask panel chips (the export's sc-for body was empty — styled per the reference screenshot) */
 .ask-chip {
@@ -431,4 +420,104 @@ a:hover {
   .copied-in {
     animation: none;
   }
+}
+
+/* Browser chrome — the terminal owns its scrollbar and caret */
+html {
+  scrollbar-color: #2c3447 #12151f;
+}
+::-webkit-scrollbar {
+  width: 12px;
+}
+::-webkit-scrollbar-track {
+  background: #12151f;
+}
+::-webkit-scrollbar-thumb {
+  background: #2c3447;
+  border: 3px solid #12151f;
+  border-radius: 7px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a4152;
+}
+input,
+textarea {
+  caret-color: #d97757;
+}
+
+/* Modeline — the status bar's section segment rises 3px on keyed remount.
+   Event-driven state, not an idle loop; text content itself updates raw. */
+@media (prefers-reduced-motion: no-preference) {
+  .modeline-in {
+    animation: modelineIn 160ms var(--ease-out);
+  }
+  @keyframes modelineIn {
+    from {
+      opacity: 0;
+      transform: translateY(3px);
+    }
+  }
+}
+
+/* Ask-panel response — lines print SEQUENTIALLY but each INSTANTLY
+   (steps(1): terminals don't fade text). All text is in the DOM at mount so
+   aria-live announces once; this is visual timing only. */
+.out-line {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .out-line {
+    animation: printLine 1ms steps(1, end) both;
+    animation-delay: calc(var(--o) * 120ms);
+  }
+  @keyframes printLine {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  .out-divider {
+    animation: dividerIn 200ms var(--ease-out) both;
+  }
+  @keyframes dividerIn {
+    from {
+      border-top-color: transparent;
+    }
+  }
+}
+
+/* Quincunx scanline — clay cells brighten top-to-bottom on hover (260ms total
+   raster scan); hover-out has no delays so the mark fades back as one unit.
+   !important beats the cells' inline background. */
+.qx-on {
+  transition: background-color 120ms var(--ease-out);
+}
+.hov-home:hover .qx-on {
+  background: #e2906f !important;
+}
+.hov-home:hover .qx-on:nth-child(1) {
+  transition-delay: 0ms;
+}
+.hov-home:hover .qx-on:nth-child(3) {
+  transition-delay: 35ms;
+}
+.hov-home:hover .qx-on:nth-child(5) {
+  transition-delay: 70ms;
+}
+.hov-home:hover .qx-on:nth-child(7) {
+  transition-delay: 105ms;
+}
+.hov-home:hover .qx-on:nth-child(9) {
+  transition-delay: 140ms;
+}
+
+/* Top-bar scrolled state — border-color ONLY (backdrop-filter composites
+   every scroll frame; box-shadow transitions are banned here) */
+[data-topbar] {
+  transition: border-color 250ms var(--ease-out);
+}
+html[data-scrolled] [data-topbar] {
+  border-bottom-color: #313a4e !important;
 }

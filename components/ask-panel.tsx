@@ -117,20 +117,22 @@ export default function AskPanel() {
       </div>
       {asked !== null && (
         <div
+          key={asked}
+          className="out-divider"
           aria-live="polite"
           style={{ marginTop: 16, borderTop: "1px solid #232a3a", paddingTop: 14, fontSize: 13, lineHeight: 1.8 }}
         >
-          <div style={{ color: "#7d8698" }}>
+          <div className="out-line" style={{ ["--o" as string]: 0, color: "#7d8698" }}>
             <span style={{ color: "#d97757" }}>❯ </span>
             {asked}
           </div>
-          <div style={{ color: "#8cc265" }}>
+          <div className="out-line" style={{ ["--o" as string]: 1, color: "#8cc265" }}>
             {"> model offline — training data still being written at "}
             <Link href="/guide" className="hov-underline" style={{ color: "#d97757" }}>
               /guide
             </Link>
           </div>
-          <div style={{ color: "#8cc265" }}>
+          <div className="out-line" style={{ ["--o" as string]: 2, color: "#8cc265" }}>
             {"> ask me directly: "}
             <a
               href={DISCORD_INVITE}
