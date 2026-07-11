@@ -57,6 +57,7 @@ export default function AskPanel() {
       </div>
       <form onSubmit={handleSubmit} style={{ marginTop: 14, display: "flex", gap: 14, alignItems: "stretch", flexWrap: "wrap" }}>
         <div
+          className="ask-input-wrap"
           style={{
             flex: 1,
             minWidth: 260,

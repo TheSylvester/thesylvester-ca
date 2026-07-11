@@ -53,6 +53,7 @@ export default function CopyEmail({
       {copied && (
         <span
           aria-live="polite"
+          className="copied-in"
           style={{
             position: "absolute",
             left: 0,

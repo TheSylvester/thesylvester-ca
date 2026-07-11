@@ -82,7 +82,9 @@ export default function Home() {
             fontSize: 13,
           }}
         >
-          &gt;_
+          <span>
+            &gt;<span data-blink="">_</span>
+          </span>
         </a>
       </header>
 
@@ -180,7 +182,10 @@ export default function Home() {
                   background: "rgba(217,119,87,.06)",
                 }}
               >
-                <span>&gt;_</span> MY CLAUDE CODE GUIDE
+                <span>
+                &gt;<span data-blink="">_</span>
+              </span>{" "}
+              MY CLAUDE CODE GUIDE
               </Link>
               <a
                 href="#work"
@@ -197,7 +202,10 @@ export default function Home() {
                   letterSpacing: ".1em",
                 }}
               >
-                <span style={{ color: "#5c6370" }}>&gt;_</span> EXPLORE MY WORK
+                <span style={{ color: "#5c6370" }}>
+                  &gt;<span data-blink="">_</span>
+                </span>{" "}
+                EXPLORE MY WORK
               </a>
             </div>
 
@@ -492,6 +500,7 @@ export default function Home() {
             {/* Recall */}
             <article
               data-reveal=""
+              className="hov-card"
               style={{
                 ["--d" as string]: 3,
                 display: "flex",
@@ -503,6 +512,7 @@ export default function Home() {
               }}
             >
               <div
+                data-card-bar=""
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -554,7 +564,7 @@ export default function Home() {
                   <span style={{ border: "1px solid #313a4e", borderRadius: 5, padding: "4px 9px" }}>llama.cpp</span>
                 </div>
                 <a href="https://recall.thesylvester.ca" className="hov-underline" style={{ fontSize: 13 }}>
-                  recall.thesylvester.ca →
+                  recall.thesylvester.ca <span data-arrow="">→</span>
                 </a>
               </div>
             </article>
@@ -562,6 +572,7 @@ export default function Home() {
             {/* Crispy */}
             <article
               data-reveal=""
+              className="hov-card"
               style={{
                 ["--d" as string]: 4,
                 display: "flex",
@@ -573,6 +584,7 @@ export default function Home() {
               }}
             >
               <div
+                data-card-bar=""
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -604,7 +616,7 @@ export default function Home() {
                   <span style={{ border: "1px solid #313a4e", borderRadius: 5, padding: "4px 9px" }}>Tauri</span>
                 </div>
                 <a href="https://crispy.thesylvester.ca" className="hov-underline" style={{ fontSize: 13 }}>
-                  crispy.thesylvester.ca →
+                  crispy.thesylvester.ca <span data-arrow="">→</span>
                 </a>
               </div>
             </article>
@@ -612,6 +624,7 @@ export default function Home() {
             {/* Fusionthink */}
             <article
               data-reveal=""
+              className="hov-card"
               style={{
                 ["--d" as string]: 5,
                 display: "flex",
@@ -623,6 +636,7 @@ export default function Home() {
               }}
             >
               <div
+                data-card-bar=""
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -651,7 +665,7 @@ export default function Home() {
                   <span style={{ border: "1px solid #313a4e", borderRadius: 5, padding: "4px 9px" }}>Agent Skills</span>
                 </div>
                 <Link href="/fusionthink" className="hov-underline" style={{ fontSize: 13 }}>
-                  thesylvester.ca/fusionthink →
+                  thesylvester.ca/fusionthink <span data-arrow="">→</span>
                 </Link>
               </div>
             </article>
@@ -741,7 +755,10 @@ export default function Home() {
                 whiteSpace: "nowrap",
               }}
             >
-              <span>&gt;_</span> MY CLAUDE CODE GUIDE
+              <span>
+                &gt;<span data-blink="">_</span>
+              </span>{" "}
+              MY CLAUDE CODE GUIDE
             </Link>
           </div>
 
