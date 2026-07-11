@@ -616,7 +616,9 @@ export default function Home() {
                   <span style={{ border: "1px solid #313a4e", borderRadius: 5, padding: "4px 9px" }}>Codex CLI</span>
                   <span style={{ border: "1px solid #313a4e", borderRadius: 5, padding: "4px 9px" }}>Agent Skills</span>
                 </div>
-                <span style={{ fontSize: 13, color: "#7d8698" }}>Claude Code skill · release in planning</span>
+                <Link href="/fusionthink" className="hov-underline" style={{ fontSize: 13 }}>
+                  thesylvester.ca/fusionthink →
+                </Link>
               </div>
             </article>
           </div>
