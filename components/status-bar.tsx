@@ -42,7 +42,7 @@ export default function StatusBar() {
         <span style={{ color: "#5c6370" }}>⎇</span> main
       </span>
       <span style={{ color: "#5c6370", letterSpacing: ".18em", flex: 1, textAlign: "center", minWidth: 200 }}>
-        AI SYSTEMS · DEVELOPER TOOLS · ENGINEERING PRACTICE
+        AI SYSTEMS · DEVELOPER TOOLS · AGENTIC WORKFLOWS
       </span>
       <span style={{ color: "#8cc265", display: "inline-flex", alignItems: "center", gap: 7 }}>
         <span

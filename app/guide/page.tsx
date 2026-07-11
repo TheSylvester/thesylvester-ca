@@ -3,10 +3,10 @@ import Link from "next/link";
 import CopyEmail from "@/components/copy-email";
 
 export const metadata: Metadata = {
-  title: "The Playbook — Sylvester Wong",
+  title: "My Claude Code Guide — Sylvester Wong",
 };
 
-export default function Playbook() {
+export default function Guide() {
   return (
     <div
       style={{
@@ -25,7 +25,7 @@ export default function Playbook() {
           ← thesylvester.ca
         </Link>
 
-        <div style={{ marginTop: 48, fontSize: 12, letterSpacing: ".3em", color: "#d97757" }}>THE PLAYBOOK</div>
+        <div style={{ marginTop: 48, fontSize: 12, letterSpacing: ".3em", color: "#d97757" }}>MY CLAUDE CODE GUIDE</div>
         <h1
           style={{
             margin: "16px 0 0",

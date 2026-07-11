@@ -113,6 +113,9 @@ a:hover {
   text-decoration: none !important;
   color: #a5d97f !important;
 }
+.hov-home:hover {
+  filter: brightness(1.35);
+}
 
 /* Ask panel chips (the export's sc-for body was empty — styled per the reference screenshot) */
 .ask-chip {

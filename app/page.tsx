@@ -2,6 +2,7 @@ import Link from "next/link";
 import AskPanel from "@/components/ask-panel";
 import CodeRain from "@/components/code-rain";
 import CopyEmail from "@/components/copy-email";
+import HomeAnchor from "@/components/home-anchor";
 import StatusBar from "@/components/status-bar";
 
 export default function Home() {
@@ -36,25 +37,7 @@ export default function Home() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: 6 }}>
-          <div
-            aria-hidden="true"
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3,5px)",
-              gridTemplateRows: "repeat(3,5px)",
-              gap: 2,
-            }}
-          >
-            <span style={{ background: "#d97757" }}></span>
-            <span style={{ background: "transparent" }}></span>
-            <span style={{ background: "#d97757" }}></span>
-            <span style={{ background: "transparent" }}></span>
-            <span style={{ background: "#d97757" }}></span>
-            <span style={{ background: "transparent" }}></span>
-            <span style={{ background: "#d97757" }}></span>
-            <span style={{ background: "transparent" }}></span>
-            <span style={{ background: "#d97757" }}></span>
-          </div>
+          <HomeAnchor />
           <CopyEmail className="hov-nav" style={{ color: "#c8ccd4", fontSize: 14, letterSpacing: ".02em" }}>
             sylvester@thesylvester.ca <span style={{ color: "#5c6370" }}>~</span>
           </CopyEmail>
@@ -72,8 +55,8 @@ export default function Home() {
           <a href="#work" className="hov-nav" style={{ color: "#c8ccd4" }}>
             WORK
           </a>
-          <Link href="/playbook" className="hov-nav" style={{ color: "#c8ccd4" }}>
-            PLAYBOOK
+          <Link href="/guide" className="hov-nav" style={{ color: "#c8ccd4" }}>
+            CLAUDE CODE GUIDE
           </Link>
           <a href="#about" className="hov-nav" style={{ color: "#c8ccd4" }}>
             ABOUT
@@ -199,7 +182,7 @@ export default function Home() {
                 <span>&gt;_</span> EXPLORE MY WORK
               </a>
               <Link
-                href="/playbook"
+                href="/guide"
                 className="hov-ghost"
                 style={{
                   display: "inline-flex",
@@ -213,7 +196,7 @@ export default function Home() {
                   letterSpacing: ".1em",
                 }}
               >
-                <span style={{ color: "#5c6370" }}>&gt;_</span> READ THE PLAYBOOK
+                <span style={{ color: "#5c6370" }}>&gt;_</span> READ THE GUIDE
               </Link>
             </div>
 
@@ -257,7 +240,7 @@ export default function Home() {
                 <div>
                   <div style={{ fontSize: "12.5px", color: "#e6e9ee", fontWeight: 500 }}>Engineering Impact</div>
                   <div style={{ marginTop: 5, fontSize: "11.5px", lineHeight: 1.55, color: "#7d8698" }}>
-                    LLM Accuracy +25% Review time -50%
+                    LLM accuracy 70 → 95% · review time -50%
                   </div>
                 </div>
               </div>
@@ -386,23 +369,20 @@ export default function Home() {
               </div>
               <div>
                 <div style={{ display: "flex", gap: 8, color: "#d97757", fontSize: 12, letterSpacing: ".08em" }}>
-                  <span aria-hidden="true">⚙</span>APPROACH
-                </div>
-                <div style={{ marginTop: 3, color: "#c8ccd4" }}>
-                  research → plan → delegate
-                  <br />→ review → retain
-                </div>
-              </div>
-              <div>
-                <div style={{ display: "flex", gap: 8, color: "#d97757", fontSize: 12, letterSpacing: ".08em" }}>
                   <span aria-hidden="true">▦</span>STACK
                 </div>
                 <div style={{ marginTop: 3, color: "#c8ccd4" }}>
+                  Claude Code · Codex · Agent SDK
+                  <br />
+                  MCP · llama.cpp · Supabase
+                  <br />
                   TypeScript · Python · Node
                   <br />
-                  React · AWS · Postgres
+                  React · Next.js · Vite
                   <br />
-                  Qdrant · SQLite · Docker
+                  Postgres · SQLite · Docker
+                  <br />
+                  Stripe · Playwright · GitHub Actions
                 </div>
               </div>
               <div>
@@ -427,7 +407,7 @@ export default function Home() {
       <section
         id="work"
         data-screen="2"
-        data-screen-label="Selected work"
+        data-screen-label="Current work"
         style={{
           position: "relative",
           zIndex: 2,
@@ -436,7 +416,7 @@ export default function Home() {
         }}
       >
         <div style={{ maxWidth: 1560, margin: "0 auto" }}>
-          <div style={{ fontSize: 12, letterSpacing: ".3em", color: "#8a93a3" }}>SELECTED WORK</div>
+          <div style={{ fontSize: 12, letterSpacing: ".3em", color: "#8a93a3" }}>CURRENT WORK</div>
           <div
             style={{
               marginTop: 20,
@@ -591,7 +571,7 @@ export default function Home() {
               </div>
             </article>
 
-            {/* Claro */}
+            {/* Fusionthink */}
             <article
               style={{
                 display: "flex",
@@ -614,34 +594,28 @@ export default function Home() {
                   color: "#8a93a3",
                 }}
               >
-                <span style={{ color: "#d97757" }}>◈</span> claro-customs-ai
-                <span style={{ marginLeft: "auto", color: "#7d8698" }}>2024–2025</span>
+                <span style={{ color: "#d97757" }}>◈</span> fusionthink
+                <span style={{ marginLeft: "auto", color: "#7d8698" }}>in daily use</span>
               </div>
               <div style={{ padding: "22px 22px 24px", display: "flex", flexDirection: "column", gap: 14, flex: 1 }}>
-                <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#f2f3f5" }}>Claro Customs AI</h3>
+                <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#f2f3f5" }}>Fusionthink</h3>
                 <p style={{ margin: 0, fontSize: "13.5px", lineHeight: 1.7, color: "#9aa3b2", flex: 1 }}>
-                  Conversational AI with full feature parity to a Canada/US customs platform — documents, compliance,
-                  and workflows through chat and email. Migrated OCR to LlamaParse + Gemini structured outputs, and
-                  built a snapshot-replay testing framework with an HTML diff dashboard.
+                  Multi-vendor adversarial review for coding agents. A Claude reviewer and a Codex reviewer take the
+                  same brief, every claim is verified against the real code, weak findings get pushed back, and
+                  disagreements are settled across vendors. Distilled from a review loop run 186+ times in my own
+                  sessions.
                 </p>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 12 }}>
-                  <div style={{ border: "1px solid #313a4e", borderRadius: 7, padding: "10px 12px" }}>
-                    <span style={{ color: "#8cc265" }}>70% → 95%</span>
-                    <br />
-                    <span style={{ color: "#7d8698" }}>ingestion accuracy</span>
-                  </div>
-                  <div style={{ border: "1px solid #313a4e", borderRadius: 7, padding: "10px 12px" }}>
-                    <span style={{ color: "#8cc265" }}>15 → 5 min</span>
-                    <br />
-                    <span style={{ color: "#7d8698" }}>e2e test cycles</span>
-                  </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: "11.5px", color: "#7d8698" }}>
+                  <span style={{ border: "1px solid #313a4e", borderRadius: 5, padding: "4px 9px" }}>Claude Code</span>
+                  <span style={{ border: "1px solid #313a4e", borderRadius: 5, padding: "4px 9px" }}>Codex CLI</span>
+                  <span style={{ border: "1px solid #313a4e", borderRadius: 5, padding: "4px 9px" }}>Agent Skills</span>
                 </div>
-                <span style={{ fontSize: 13, color: "#7d8698" }}>Senior Software Developer — AI · proprietary</span>
+                <span style={{ fontSize: 13, color: "#7d8698" }}>Claude Code skill · release in planning</span>
               </div>
             </article>
           </div>
 
-          {/* playbook band */}
+          {/* guide band */}
           <div
             id="about"
             style={{
@@ -657,7 +631,7 @@ export default function Home() {
             }}
           >
             <div>
-              <div style={{ fontSize: 12, letterSpacing: ".3em", color: "#d97757" }}>THE PLAYBOOK</div>
+              <div style={{ fontSize: 12, letterSpacing: ".3em", color: "#d97757" }}>MY CLAUDE CODE GUIDE</div>
               <h3
                 style={{
                   margin: "16px 0 0",
@@ -707,7 +681,7 @@ export default function Home() {
               </div>
             </div>
             <Link
-              href="/playbook"
+              href="/guide"
               className="hov-cta"
               style={{
                 justifySelf: "end",
@@ -724,7 +698,7 @@ export default function Home() {
                 whiteSpace: "nowrap",
               }}
             >
-              <span>&gt;_</span> READ THE PLAYBOOK
+              <span>&gt;_</span> READ THE GUIDE
             </Link>
           </div>
 
@@ -745,6 +719,31 @@ export default function Home() {
           >
             <div>
               <div style={{ color: "#e6e9ee" }}>
+                Antidote Health <span style={{ color: "#5c6370" }}>· 2026–present</span>
+              </div>
+              <div style={{ color: "#7d8698" }}>
+                Australian telehealth platform — patient booking, Stripe payments, EHR/FHIR integration
+              </div>
+            </div>
+            <div>
+              <div style={{ color: "#e6e9ee" }}>
+                Claro Customs AI <span style={{ color: "#5c6370" }}>· 2024–25</span>
+              </div>
+              <div style={{ color: "#7d8698" }}>
+                Conversational AI for a Canada/US customs platform — document ingestion accuracy 70% → 95%, e2e test
+                cycles 15 → 5 min
+              </div>
+            </div>
+            <div>
+              <div style={{ color: "#e6e9ee" }}>
+                PromptCore <span style={{ color: "#5c6370" }}>· 2024</span>
+              </div>
+              <div style={{ color: "#7d8698" }}>
+                Human-in-the-loop LLM evaluation; workflow runner &gt;50% faster than Microsoft Prompt Flow
+              </div>
+            </div>
+            <div>
+              <div style={{ color: "#e6e9ee" }}>
                 LighthouseAI <span style={{ color: "#5c6370" }}>· 2023–24</span>
               </div>
               <div style={{ color: "#7d8698" }}>
@@ -753,23 +752,9 @@ export default function Home() {
             </div>
             <div>
               <div style={{ color: "#e6e9ee" }}>
-                PromptCore <span style={{ color: "#5c6370" }}>· 2024</span>
-              </div>
-              <div style={{ color: "#7d8698" }}>
-                Human-in-the-loop LLM evaluation system replacing manual prompt tuning
-              </div>
-            </div>
-            <div>
-              <div style={{ color: "#e6e9ee" }}>
                 VS Code <span style={{ color: "#5c6370" }}>· open source</span>
               </div>
               <div style={{ color: "#7d8698" }}>UX enhancement PR merged into the mainline release</div>
-            </div>
-            <div>
-              <div style={{ color: "#e6e9ee" }}>
-                Earlier <span style={{ color: "#5c6370" }}>· 2016–21</span>
-              </div>
-              <div style={{ color: "#7d8698" }}>Full ERP build — project tracking, inventory, financial reporting</div>
             </div>
           </div>
 
