@@ -63,6 +63,9 @@ export default function Home() {
           <Link href="/guide" className="hov-nav" style={{ color: "#c8ccd4" }}>
             CLAUDE CODE GUIDE
           </Link>
+          <Link href="/crystal-quest" className="hov-nav" style={{ color: "#c8ccd4" }}>
+            CRYSTAL QUEST
+          </Link>
           <a href="#about" className="hov-nav" style={{ color: "#c8ccd4" }}>
             ABOUT
           </a>
