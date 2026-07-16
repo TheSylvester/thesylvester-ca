@@ -94,6 +94,12 @@ export default function StatusBar() {
           </span>
         </span>
       )}
+      {/* stashed tmux window — dim vs the active section's #8a93a3; numbered high
+          so future sections never collide. CSS-gated to fine pointers: the game
+          is mouse-only, touch devices never see it. */}
+      <Link href="/crystal-quest" className="hov-status cq-window" style={{ color: "#5c6370" }}>
+        9:crystal-quest
+      </Link>
       <span style={{ color: "#5c6370", letterSpacing: ".18em", flex: 1, textAlign: "center", minWidth: 200 }}>
         AI SYSTEMS · DEVELOPER TOOLS · AGENTIC WORKFLOWS
       </span>

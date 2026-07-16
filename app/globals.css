@@ -310,6 +310,16 @@ a:hover {
   color: #0e1119 !important;
   text-decoration: none !important;
 }
+/* crystal-quest modeline window — the game requires a physical mouse, so the
+   link only exists on fine-pointer devices. Default-hidden is SSR-safe. */
+.cq-window {
+  display: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .cq-window {
+    display: inline-block;
+  }
+}
 
 /* Ask panel chips (the export's sc-for body was empty — styled per the reference screenshot) */
 .ask-chip {
