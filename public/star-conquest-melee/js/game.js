@@ -14,7 +14,9 @@
 // slow motion stays precise. Impulses split against the current heading:
 // ACCEL drives the along component (speed up / brake), TURN the across one
 // (curve), so speed build-up and turn agility tune independently. Sliders
-// on the pause/idle screen drive VMAX, ACCEL and TURN live. The 512×342
+// drive VMAX, ACCEL and TURN live — they now sit one screen deeper, on the
+// tabbed Dev Options panel the pause menu's button opens, so the paused
+// screen itself is just a title and two buttons. The 512×342
 // field scales up to fill the window; letterbox bars keep the aspect ratio.
 //
 // Shooting has two aim-control modes. The default "mouse" mode keeps the
@@ -50,7 +52,9 @@ const WW = FW * 6;      // world width — a 6×11 grid of view-sized rooms
 const WH = FH * 11;     // world height
 const TICK = 1000 / 60; // 60 Hz fixed timestep — twice the original's 30 Hz
 const SHIP_R = 7;
-let VMAX = 9;           // px per tick — 540 px/s baseline; the pause-screen slider drives this live
+let VMAX = 2;           // px per tick — 120 px/s baseline; the pause-screen slider drives this live, and
+                        // Encounter.mods.speed (the AFTERBURNER upgrade) adds px/tick on top of it AT THE
+                        // CLAMP in step() — a purchase never writes the tuner value
 let ACCEL = 0.015;      // speed gain — velocity px/tick per count ALONG the heading (slider); default is the settled feel
 let TURN = 0.015;       // turn gain — the same, for the component ACROSS the heading (slider); equal gains = the old single-gain model
 const FLICK = 0.01;     // flick curve — gain × (1 + |delta| × FLICK); a 100-count flick doubles its push
@@ -58,16 +62,25 @@ const DAMP = 1;         // per-tick velocity retention — 1 = no friction, like
 let KEYTHRUST = 16;     // keyboard thrust — synthetic mouse counts per tick, through the same impulse pipeline
 let WALLLOSS = 0.5;     // fraction of the flipped velocity component the ship loses on a wall bounce
 let AIMSENS = 0.03;     // push-mode aim gain — offset px per count
-let AIMDIST = 35;       // direction-marker distance from the ship, px
+let AIMDIST = 20;       // direction-marker distance from the ship, px
 let AIMMODE = "mouse";  // mouse = visible absolute pointer (default); push = legacy relative/pointer-lock controls
-let BCOOL = 200;        // ms between shots — one gate for click fire and autofire
+let BCOOL = 400;        // ms between shots — 2.5 shots/s; one gate for click fire and autofire
 let AUTOFIRE = true;    // hold LEFT to keep firing at the cooldown rate
 let BMODE = "off";      // bullet physics — off | newtonian (adds ship vel × factor) | cq-scale (ship speed × factor); code-only, no menu knob
 let BSPEED = 15;        // bullet speed, px per tick (off and newtonian modes)
 let BFACTOR = 1;        // the ship-velocity factor — newtonian adds it, cq-scale multiplies by it
 let BMAX = 15;          // max live bullets (the original capped at 5)
 let BLIFE = 0.5;        // bullet lifetime, seconds
+let BDMG = 1;           // damage one player bullet deals — encounter.js reads it for the enemy side of a body
+                        // contact, so a ram costs exactly one bullet; code-only, no menu knob (a future
+                        // Encounter.mods damage term must multiply into BOTH fire() and contactEvent)
+let CONTACTCD = 62;     // ticks before one enemy body can take contact damage again — mirrors the player's
+                        // post-hit grace (ECFG.player.invuln), so a sustained overlap trades hull for hp once
+                        // a second instead of melting; at the slider's 0 floor a body pays once per TICK of
+                        // contact — never twice for one touch, see contactEvent; slider, combat tab
 let BOUNCE = false;     // bullets bounce off walls instead of dying at them
+let BLASTR = 18;        // BLAST CHARGE splash radius at rank 1, px — the shop row's reach; slider, weapons tab
+let BLASTGAIN = 8;      // px the radius grows per rank past the first: BLASTR + BLASTGAIN × (rank − 1)
 let INVERT = true;      // swap right-button roles — off: hold right to aim; on: mouse aims until right is held to fly
 const AIM_R = 16;       // push-model offset clamp radius, px
 const MIN_FIRE_V = 0.25; // cq-scale refuses to fire below this ship speed — the original's rule
@@ -87,7 +100,18 @@ const FONT = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 
 const canvas = document.getElementById("field");
 const ctx = canvas.getContext("2d");
-const tuner = document.getElementById("tuner");
+const pausemenu = document.getElementById("pausemenu"); // the paused root screen — title, dev options, resume
+const devpanel = document.getElementById("devpanel");   // the tabbed dev options screen the old flat tuner became
+const devbody = devpanel.querySelector(".devbody");     // the scrolling part; the header above it stays put
+const menutitle = pausemenu.querySelector(".menutitle"); // reads "ready" before the first start, "paused" after
+const resumebtn = document.getElementById("resumebtn");  // the same button with the same id — only the word moves
+
+// Which paused screen is up, and which dev tab it opens on. Declared beside G
+// because render() reads UI.dev, and render() is reachable from listeners
+// registered long before the boot tail — a declaration further down would turn
+// any early event into a temporal-dead-zone ReferenceError.
+const UI = { dev: false, tab: "flight" };
+const DEV_TABS = ["flight", "aim", "weapons", "camera", "world", "combat"];
 
 const G = {
   running: false,
@@ -119,9 +143,27 @@ function resize() {
   scale = Math.min(canvas.width / FW, canvas.height / FH);
   ox = (canvas.width - FW * scale) / 2;
   oy = (canvas.height - FH * scale) / 2;
-  const top = (oy + (FH / 2 + 96) * scale) / dpr; // just below the pause hints, in field space
-  tuner.style.top = top + "px";
-  tuner.style.maxHeight = Math.max(60, window.innerHeight - top - 8) + "px"; // small windows scroll instead of clipping
+  hintTop = (oy + (FH / 2 + 96) * scale) / dpr; // just below the pause hints, in field space
+  pausemenu.style.top = hintTop + "px"; // both paused screens hang from the same line —
+  pausemenu.style.maxHeight = Math.max(60, window.innerHeight - hintTop - DEV_MARGIN) + "px";
+  placeDevPanel(); // the panel earns the hint space back — see below
+}
+// The dev panel hangs from the pause menu's line too, but it also SUPPRESSES
+// the pause text, so that space is free while it is open. A short window used
+// to scroll a tab the screen had room for; now the panel measures its live tab
+// at full height and hangs as low as it can while still fitting, climbing
+// toward the top edge only as far as it must. Only a tab taller than the whole
+// window scrolls. display:none measures 0, so a hidden panel is skipped and
+// syncTuner() re-places it the moment it opens.
+const DEV_MARGIN = 8;
+let hintTop = 0; // the line the paused screens hang from — resize() owns it
+function placeDevPanel() {
+  if (devpanel.style.display === "none") return;
+  devpanel.style.maxHeight = "none"; // measure the tab, not the last cap
+  const need = devpanel.offsetHeight;
+  const top = Math.max(DEV_MARGIN, Math.min(hintTop, window.innerHeight - need - DEV_MARGIN));
+  devpanel.style.top = top + "px";
+  devpanel.style.maxHeight = Math.max(60, window.innerHeight - top - DEV_MARGIN) + "px";
 }
 
 // ---- camera --------------------------------------------------------------
@@ -285,6 +327,16 @@ function syncCursor() {
 // while aiming(), the mouse owns the aim and the keys thrust; otherwise the
 // mouse thrusts and the keys snap the stored aim.
 const aiming = () => G.rightHeld !== INVERT;
+// The ring's THRUST role is a shop purchase (THRUST RING, 8 XP, one-time); its
+// AIM role never was gated and never is — see the keydown handler, whose
+// aim-snap branch runs exactly when the ring is the only aim control on the
+// screen. step()'s thrust sum is the ONE site this predicate guards.
+//
+// Read LAZILY and defaulting PERMISSIVE: window.Encounter is assigned at the
+// very end of encounter.js, long after this file has finished running, so a
+// hoisted top-level read would be permanently undefined — and a locked default
+// would leave a standalone game.js (no encounter at all) with no thrust.
+const keyThrustUnlocked = () => !window.Encounter || Encounter.mods.keyThrust !== false;
 
 // each delta is an impulse, split against the current heading: the ALONG
 // component (speed up / brake) uses ACCEL, the ACROSS component (curve)
@@ -401,17 +453,20 @@ function fire() {
       vy += G.vel.y * BFACTOR;
     }
   }
-  const em = window.Encounter ? Encounter.mods : null; // upgrade multipliers — the tuner values stay untouched
+  const em = window.Encounter ? Encounter.mods : null; // upgrade terms — the tuner values stay untouched
   G.bullets.push({ x: G.ship.x, y: G.ship.y, px: G.ship.x, py: G.ship.y, vx, vy,
-                   r: 2.2, dmg: 1, owner: "player", dead: false, spent: false,
-                   ttl: Math.max(1, Math.round(BLIFE * (em ? em.life : 1) * 1000 / TICK)) });
+                   r: 2.2, dmg: BDMG, owner: "player", dead: false, spent: false,
+                   ttl: Math.max(1, Math.round(BLIFE * 1000 / TICK)) }); // no upgrade touches lifetime — BLIFE is the only knob
   G.cool = Math.max(1, Math.round(BCOOL * (em ? em.cool : 1) / TICK));
 }
 
 // ---- simulation step (one ~16.7ms update) --------------------------------
 function step() {
-  if (window.Encounter && Encounter.frozen()) return; // upgrade/death overlays freeze the whole sim
-  if (aiming() && G.keys.size) { // the keys fly the ship while the mouse owns the aim
+  if (window.Encounter && Encounter.frozen()) return; // shop/death overlays freeze the whole sim
+  // the keys fly the ship while the mouse owns the aim — once the THRUST RING
+  // has been bought. Locked, the ring keeps its aim role and only this sum
+  // goes quiet; the HUD prints THRUST LOCKED — SHOP for the whole run.
+  if (keyThrustUnlocked() && aiming() && G.keys.size) {
     let kx = 0;
     let ky = 0;
     for (const c of G.keys) { kx += KEY_AIM[c][0]; ky += KEY_AIM[c][1]; }
@@ -423,10 +478,15 @@ function step() {
   // banked, so there is no dead zone and no reel-back when you turn
   G.vel.x *= DAMP;
   G.vel.y *= DAMP;
+  // the AFTERBURNER upgrade adds px/tick ON TOP of the slider: the clamp is
+  // the only place the two meet, so the VMAX tuner value itself never moves
+  // and a restart (which zeroes mods.speed) hands the slider back untouched
+  const emx = window.Encounter ? Encounter.mods : null;
+  const vcap = VMAX + (emx ? emx.speed : 0);
   const s = Math.hypot(G.vel.x, G.vel.y);
-  if (s > VMAX) {
-    G.vel.x *= VMAX / s;
-    G.vel.y *= VMAX / s;
+  if (s > vcap) {
+    G.vel.x *= vcap / s;
+    G.vel.y *= vcap / s;
   }
   // walls reflect the ship: position mirrors about the margin, and the
   // flipped velocity component keeps 1−WALLLOSS — restitution on that axis
@@ -444,6 +504,7 @@ function step() {
   G.thrustAcc.x = G.thrustAcc.y = 0;
   if (G.cool > 0) G.cool--;
   if (AUTOFIRE && G.leftHeld) fire();
+  stepImpacts(); // visual bursts age on the sim clock — pause and frozen freeze them too
   for (let i = G.bullets.length - 1; i >= 0; i--) {
     const b = G.bullets[i];
     if (b.dead || b.spent) { G.bullets.splice(i, 1); continue; } // consumed by a hit, or expired after its final sweep
@@ -453,18 +514,33 @@ function step() {
     b.y += b.vy;
     if (BOUNCE) {
       // the reflected chord px→x approximates the folded path; enemy bodies
-      // never overhang the world walls, so the chord cannot phantom-hit
-      if (b.x < 0) { b.x = -b.x; b.vx = -b.vx; }
-      else if (b.x > WW) { b.x = WW * 2 - b.x; b.vx = -b.vx; }
-      if (b.y < 0) { b.y = -b.y; b.vy = -b.vy; }
-      else if (b.y > WH) { b.y = WH * 2 - b.y; b.vy = -b.vy; }
+      // never overhang the world walls, so the chord cannot phantom-hit.
+      // Each spark is queued BEFORE its mirror and read off the RAW segment:
+      // the contact point is where px→x crosses the plane, and the direction
+      // is the velocity it arrived on — spawnImpactFx wants the INCOMING one,
+      // so a corner bounce cannot hand the second wall a mirrored x or vx.
+      const rx = b.x, ry = b.y, rvx = b.vx, rvy = b.vy;
+      const m = Math.hypot(rvx, rvy) || 1;
+      if (rx < 0) { queueWallFx(b, 0, alongWall(b.py, ry, crossT(b.px, rx, 0), WH), rvx / m, rvy / m); b.x = -b.x; b.vx = -b.vx; }
+      else if (rx > WW) { queueWallFx(b, WW, alongWall(b.py, ry, crossT(b.px, rx, WW), WH), rvx / m, rvy / m); b.x = WW * 2 - b.x; b.vx = -b.vx; }
+      if (ry < 0) { queueWallFx(b, alongWall(b.px, rx, crossT(b.py, ry, 0), WW), 0, rvx / m, rvy / m); b.y = -b.y; b.vy = -b.vy; }
+      else if (ry > WH) { queueWallFx(b, alongWall(b.px, rx, crossT(b.py, ry, WH), WW), WH, rvx / m, rvy / m); b.y = WH * 2 - b.y; b.vy = -b.vy; }
     }
     b.ttl--;
     // expiry marks, never splices here — the encounter hook still sweeps
-    // this final segment, and the next pass removes the bullet
-    if (b.ttl <= 0 || (!BOUNCE && (b.x < 0 || b.x > WW || b.y < 0 || b.y > WH))) b.spent = true;
+    // this final segment, and the next pass removes the bullet. The two
+    // clauses were one condition; splitting them only tells the two deaths
+    // apart for the spark — b.spent still becomes true in exactly the same
+    // cases, the both-true overlap included.
+    if (!BOUNCE && outOfWorld(b)) {
+      b.spent = true; // left the world — the spark waits on the encounter sweep
+      const m = Math.hypot(b.vx, b.vy) || 1;
+      const w = wallExitPoint(b);
+      queueWallFx(b, w.x, w.y, b.vx / m, b.vy / m);
+    } else if (b.ttl <= 0) b.spent = true; // mid-air fade — no impact, nothing was hit
   }
   if (window.Encounter) Encounter.step(); // enemies, damage, XP, wave state
+  flushWallFx(); // only the bullets the sweep left alive really met the wall
 }
 
 // ---- starfield -----------------------------------------------------------
@@ -591,7 +667,8 @@ function drawAim() {
 }
 
 // the world map in the corner: world-aspect (3072:3762 ≈ 76:93), a dot for
-// the ship, a bright rectangle for the slice of world the camera shows
+// the ship, a bright rectangle for the slice of world the camera shows, and
+// contact dots for the live enemies, XP orbs and player shots
 let MINIMAP = true;
 const MM_W = 76;
 const MM_H = 93;
@@ -610,11 +687,242 @@ function drawMinimap() {
   // h-1 around the +0.5 path) so the stroke stays inside the frame when the
   // camera sits clamped at the world's far corner
   ctx.strokeRect(mx + cam.x * kx + 0.5, my + cam.y * ky + 0.5, FW * kx - 1, FH * ky - 1);
+  // contact dots — between the viewport rectangle and the ship dot so the
+  // ship always reads on top. Same clamp discipline as the ship dot: a dot
+  // of side s stays inside [m, m + MM − s] per axis, so nothing pokes past
+  // the frame when an entity hugs a world wall. Draw-only reads of live sim
+  // state — no randomness, no mutation, the seeded stream is untouched.
+  const dot = (wx, wy, s) => {
+    ctx.fillRect(Math.max(mx, Math.min(mx + wx * kx - s / 2, mx + MM_W - s)),
+                 Math.max(my, Math.min(my + wy * ky - s / 2, my + MM_H - s)), s, s);
+  };
+  ctx.fillStyle = C.dim; // player shots — the faintest, most transient trace
+  for (const b of G.bullets) { if (!b.dead && !b.spent) dot(b.x, b.y, 1); }
+  if (window.Encounter) {
+    const m = Encounter.mapState(); // live arrays — read, never mutate
+    ctx.fillStyle = C.clay;   // XP orbs wear their field color; 1 px vs the 2 px ship
+    for (const o of m.orbs) dot(o.x, o.y, 1);
+    ctx.fillStyle = C.bright; // enemies — the loudest mark on the map
+    for (const e of m.enemies) dot(e.x, e.y, 2);
+  }
   ctx.fillStyle = C.clay; // the ship — clamped so the 2px dot can't poke
   // past the frame when the ship rests against a world wall
   const sx = Math.max(mx, Math.min(mx + G.ship.x * kx - 1, mx + MM_W - 2));
   const sy = Math.max(my, Math.min(my + G.ship.y * ky - 1, my + MM_H - 2));
   ctx.fillRect(sx, sy, 2, 2);
+}
+
+// the other tracking layer: chevrons on the field's inner edge pointing at
+// enemies the viewport has lost. The geometry and the drawing live in
+// encounter.js beside the enemy list; this flag is the world-tab switch it
+// reads, declared here with the rest of the HUD toggles.
+let EDGEARROWS = true;
+
+// ---- the first-run controls card -------------------------------------------
+// One cached bitmap that teaches the shipped mouse contract — the visible
+// cursor aims, left fires, hold right and move the mouse to fly — drawn on the
+// idle field of a session that has never started. G.started is the whole gate:
+// it flips once, inside resume(), and from then on every pause is the ordinary
+// text screen for the rest of the page's life. Nothing is persisted, so a
+// reload is a fresh first run again — deliberately, while the game is a
+// prototype people open cold.
+//
+// Accuracy is a precondition rather than a hope. The art draws the DEFAULT
+// roles only, so a player who picks push mode or clears "invert right" before
+// starting gets the text screen instead of a card that would lie to them, and
+// the same is true of the ring: the card names no keys, which is exactly the
+// contract a first-run player has. The bitmap also states LEFT CLICK TO START,
+// so while it is up render() drops the canvas start copy and the corner map
+// and leaves one hierarchy on the screen.
+//
+// The load is asynchronous, so guideReady opens false and the text screen
+// covers the gap; a load that never completes simply never flips it, and the
+// text screen is what the player keeps. The handler asks for a repaint and
+// nothing else — it never starts the loop or touches sim state.
+const GUIDE_SRC = "assets/ui/mouse-controls-explainer.png";
+const GUIDE_W = 480;                // the 3:1 asset at an integer logical size
+const GUIDE_H = 160;                // 480 × 160 — exactly the source's 2172:724
+const GUIDE_X = (FW - GUIDE_W) / 2; // 16 px of field either side
+const GUIDE_Y = 60;                 // clear of the HUD's top line, well above the pause menu's
+const guideImg = new Image();
+let guideReady = false;
+guideImg.addEventListener("load", () => { guideReady = true; render(); });
+guideImg.src = GUIDE_SRC;
+// Two questions, deliberately separate. ELIGIBLE is "does this screen belong
+// to the card" — pure state, answerable before the bytes arrive. SHOWN adds
+// "and there is a bitmap to draw". Everything the card suppresses keys off
+// SHOWN, so an unloaded frame is the plain text screen, unchanged.
+function guideEligible() {
+  return !G.running && !G.started && !UI.dev && mouseMode() && INVERT;
+}
+function guideShown() { return guideEligible() && guideReady; }
+
+// ---- the eight-way thrust card ---------------------------------------------
+// The THRUST RING purchase's reveal. This file owns the asset — exactly as it
+// owns the first-run card — and encounter.js owns where it lands: the shop
+// overlay draws it the instant the sale registers, and slides its own list
+// down to clear RING_Y + RING_H. It is NEVER modal: every digit and Enter stay
+// live underneath it, so a player can keep buying and continue at any moment.
+//
+// The load is asynchronous on the same contract as the first-run card:
+// ringReady opens false, the handler asks for one repaint and nothing else,
+// and a load that never completes simply leaves the shop drawing its one-line
+// text stand-in instead of the art.
+const RING_SRC = "assets/ui/eight-way-thrust-explainer.png";
+const RING_W = 480;                  // the same 3:1 logical slot the first-run card uses
+const RING_H = 160;
+const RING_X = (FW - RING_W) / 2;    // 16 px of field either side
+const RING_Y = 6;                    // hard against the top — the shop list takes the rest
+const RING_BOTTOM = RING_Y + RING_H; // encDrawHud lays its title out from here
+const ringImg = new Image();
+let ringReady = false;
+ringImg.addEventListener("load", () => { ringReady = true; render(); });
+ringImg.src = RING_SRC;
+function ringCardReady() { return ringReady; }
+function drawRingCard() { ctx.drawImage(ringImg, RING_X, RING_Y, RING_W, RING_H); }
+
+// ---- bullet impact fx ------------------------------------------------------
+// Purely visual. Bursts are spawned by resolveBulletHits() (enemy hits, in
+// encounter.js) and by the wall clauses in step() above — those queue and are
+// flushed after the encounter sweep, see queueWallFx(). They age only in
+// step(), so pausing or a frozen overlay freezes them mid-burst like
+// everything else. NO randomness stream is consumed anywhere: each burst
+// carries a hash32 seed and drawImpacts() re-derives every particle from
+// (seed, age) each frame — the same frame paints the same pixels forever.
+let FXINT = 1;      // impact fx intensity — scales particle count and size; 0 = off (slider)
+let FXDUR = 0.3;    // burst lifetime, seconds (slider)
+const FX_MAX = 48;  // live burst cap — the oldest is evicted first
+const FX_SEED = 0x1F2E3D4C; // fixed hash salt — bursts replay identically across runs
+// per-kind look — enemy hits, wall deaths, and the BLAST CHARGE splash. A
+// `radial` kind ignores the incoming direction and reads the burst's own
+// radius instead: it sprays the full circle out to the rim the sim actually
+// damaged, so the ring a player sees IS the reach they bought.
+const FX_KINDS = {
+  enemy: { n: 8,  ring: true,  spMin: 0.8,  spMax: 2.4, cone: 2.8, color: C.clay,    color2: C.bright },
+  wall:  { n: 4,  ring: false, spMin: 0.5,  spMax: 1.5, cone: 2.0, color: "#9aa3b2", color2: C.dim },
+  blast: { n: 14, ring: true,  spMin: 0.55, spMax: 1,   cone: 0,   color: C.clay,    color2: C.bright, radial: true },
+};
+const fx = { bursts: [], count: 0 };
+// r is the burst's own radius in px — only radial kinds read it, and only the
+// blast passes one: the effective splash radius the sim just applied
+function spawnImpactFx(x, y, dx, dy, kind, r) {
+  if (FXINT <= 0) return; // the off switch — nothing spawns, nothing lingers
+  const K = FX_KINDS[kind] || FX_KINDS.enemy;
+  fx.count = (fx.count + 1) >>> 0;
+  if (fx.bursts.length >= FX_MAX) fx.bursts.shift();
+  fx.bursts.push({ x, y, dx, dy, kind: FX_KINDS[kind] ? kind : "enemy", age: 0,
+    life: Math.max(1, Math.round(FXDUR * 1000 / TICK)), // stamped at spawn, like bullet ttl
+    n: Math.max(1, Math.round(K.n * FXINT)),
+    scale: FXINT,
+    r: r === undefined ? 0 : r, // stamped like the lifetime: a slider moved mid-burst never resizes it
+    seed: hash32(Math.round(x), Math.round(y), fx.count, FX_SEED) });
+}
+function resetImpactFx() { fx.bursts.length = 0; fx.count = 0; fxWall.length = 0; }
+// Wall sparks are QUEUED, never spawned inline: the encounter sweep runs after
+// the bullet loop and still tests this tick's px→x segment, so a bullet can be
+// eaten by a body short of the wall it was heading for. Only the bullets that
+// survive that sweep actually reached the wall, so the queue drains at the end
+// of step() and drops the entries whose bullet died on the way.
+const fxWall = [];
+function queueWallFx(b, x, y, dx, dy) { if (FXINT > 0) fxWall.push({ b, x, y, dx, dy }); }
+function flushWallFx() {
+  for (const q of fxWall) if (!q.b.dead) spawnImpactFx(q.x, q.y, q.dx, q.dy, "wall");
+  fxWall.length = 0;
+}
+// Where a segment crosses a wall plane: the parameter on the crossing axis,
+// clamped to the segment (0 when it began past the plane already).
+function crossT(p0, p1, plane) { const d = p1 - p0; return d === 0 ? 0 : Math.max(0, Math.min(1, (plane - p0) / d)); }
+// The other axis read at that same parameter, held inside the world. Clamping
+// the post-move position instead would slide the spark a whole tick of
+// tangential travel along the wall on any non-perpendicular shot.
+function alongWall(q0, q1, t, span) { return Math.max(0, Math.min(span, q0 + (q1 - q0) * t)); }
+// Did this tick's move carry the bullet out of the world? True only on the
+// terminal path: a bouncing bullet was mirrored back inside before this asks.
+function outOfWorld(b) { return b.x < 0 || b.x > WW || b.y < 0 || b.y > WH; }
+// Where a bullet that left the world crossed the boundary. The FIRST plane the
+// segment crossed wins: its own axis snaps exactly onto that plane, the other
+// rides the segment to the same parameter. An axis still inside the world takes
+// t=2 and can never win the min. Undefined for a bullet still inside — every
+// caller gates on outOfWorld() first. The wall spark reads it, and so does the
+// encounter's wall blast, so the two can never disagree about the contact point.
+function wallExitPoint(b) {
+  const ox = b.x < 0 ? 0 : b.x > WW ? WW : -1;
+  const oy = b.y < 0 ? 0 : b.y > WH ? WH : -1;
+  const tx = ox < 0 ? 2 : crossT(b.px, b.x, ox);
+  const ty = oy < 0 ? 2 : crossT(b.py, b.y, oy);
+  const te = Math.min(tx, ty);
+  return { x: tx <= ty ? ox : alongWall(b.px, b.x, te, WW),
+           y: ty < tx ? oy : alongWall(b.py, b.y, te, WH) };
+}
+function stepImpacts() {
+  for (let i = fx.bursts.length - 1; i >= 0; i--) {
+    if (++fx.bursts[i].age >= fx.bursts[i].life) fx.bursts.splice(i, 1);
+  }
+}
+function drawImpacts() { // draw-only — reads burst state, never mutates it
+  for (const B of fx.bursts) {
+    const K = FX_KINDS[B.kind];
+    const p = B.age / B.life;      // 0..1 progress
+    const fade = 1 - p;
+    const base = Math.atan2(-B.dy, -B.dx); // spray back off the surface
+    // a radial burst is sized by the sim, not by the spray: the ring opens to
+    // the exact radius the damage covered and the sparks stop at that rim
+    const radial = K.radial && B.r > 0;
+    let h = B.seed;
+    const rnd = () => { h = (Math.imul(h, 1664525) + 1013904223) >>> 0; return h / 0x100000000; };
+    if (K.ring) { // one expanding ring flash under the sparks
+      ctx.strokeStyle = K.color;
+      ctx.globalAlpha = 0.45 * fade;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(B.x, B.y, Math.max(0.5, radial ? 2 + (B.r - 2) * p : 2 + 9 * p), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = fade;
+    for (let i = 0; i < B.n; i++) { // three LCG draws per spark: angle, speed, size
+      const a = radial ? rnd() * Math.PI * 2 : base + (rnd() - 0.5) * K.cone;
+      const sp = K.spMin + rnd() * (K.spMax - K.spMin); // radial: a fraction of the radius, not px/tick
+      const sz = (0.9 + rnd() * 0.9) * Math.min(1.6, 0.6 + 0.5 * B.scale);
+      const d = radial ? B.r * sp * Math.min(1, p * 1.5) : sp * B.age * (1 - 0.5 * p); // decelerating spray
+      ctx.fillStyle = i % 3 === 0 ? K.color2 : K.color;
+      ctx.fillRect(B.x + Math.cos(a) * d - sz / 2, B.y + Math.sin(a) * d - sz / 2, sz, sz);
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// The two control lines under the idle headline, as a pair. The first-run
+// default screen — the card's own screen, standing in until (or unless) its
+// bitmap arrives — speaks the card's mouse-only contract and names no keys, so
+// the text stand-in teaches exactly what the art would have. Every other
+// screen keeps the copy that describes the mode it is actually in.
+//
+// ...including the THRUST RING lock. Exactly three of these lines claimed key
+// thrust, and each of the three is now a pair: the unlocked wording, and the
+// wording of the run that has not bought the ring yet. The fourth, "right
+// held: mouse flies · keys aim", stays true either way — in that state the
+// mouse is the thrust source and the ring is only aiming — so it is untouched.
+function pauseLines() {
+  if (guideEligible()) {
+    return ["move the visible cursor to aim · click or hold left to fire",
+            "hold right and move the mouse to fly · release to aim again"];
+  }
+  const ring = keyThrustUnlocked();
+  if (mouseMode()) {
+    return INVERT
+      ? [ring ? "the visible cursor aims · keys thrust · hold right to swap"
+              : "the visible cursor aims · hold right to swap · ring thrust: shop",
+         "right held: mouse flies · keys aim · left fires · esc pauses"]
+      : ["mouse motion flies · keys aim · hold right to swap",
+         ring ? "right held: cursor aims · keys thrust · left fires · esc pauses"
+              : "right held: cursor aims · left fires · esc pauses"];
+  }
+  return INVERT
+    ? [ring ? "qweasdzxc keys fly the ship · the mouse aims · hold right to swap"
+            : "the mouse aims · hold right to fly the ship · ring thrust: shop",
+       "left fires · esc releases"]
+    : ["mouse motion is thrust — a steady side push carves an arc",
+       "hold right to aim — qweasdzxc snaps it · left fires · esc releases"];
 }
 
 function render() {
@@ -651,27 +959,42 @@ function render() {
     ctx.arc(b.x, b.y, b.r || 2.2, 0, Math.PI * 2);
     ctx.fill();
   }
+  drawImpacts(); // world pass — under the camera, over the bullets that made them
   if (G.running) drawAim();
   // UI PASS — the letterbox transform without the camera
   ctx.setTransform(scale, 0, 0, scale, ox, oy);
-  if (MINIMAP) drawMinimap();
+  // one read of the card gate, so the map, the copy and the art cannot
+  // disagree inside a single frame
+  const guide = guideShown();
+  // ...and the same read for the shop's THRUST RING reveal, which encounter.js
+  // owns. Both cards are opaque bitmaps whose rect swallows the corner map's
+  // frame, so the map would show as a sliced-off sliver beside the art rather
+  // than as a map. It comes back the moment the card goes.
+  const ringUp = !!(window.Encounter && Encounter.ringCardShown());
+  if (MINIMAP && !guide && !ringUp) drawMinimap(); // the card screens keep one hierarchy — see guideShown()
   if (window.Encounter) Encounter.drawHud(ctx); // encounter HUD and overlays — screen space, no camera
-  if (!G.running) {
-    ctx.textAlign = "center";
-    ctx.font = "700 13px " + FONT;
-    ctx.fillStyle = C.clay;
-    ctx.fillText(G.started ? "CLICK TO CONTINUE" : mouseMode() ? "CLICK TO START" : "CLICK TO STEER", FW / 2, FH / 2 + 46);
-    ctx.font = "400 10px " + FONT;
-    ctx.fillStyle = C.dim;
-    ctx.fillText(mouseMode() ? INVERT ? "the visible cursor aims · keys thrust · hold right to swap"
-                                           : "mouse motion flies · keys aim · hold right to swap"
-                            : INVERT ? "qweasdzxc keys fly the ship · the mouse aims · hold right to swap"
-                                     : "mouse motion is thrust — a steady side push carves an arc", FW / 2, FH / 2 + 64);
-    ctx.fillText(mouseMode() ? INVERT ? "right held: mouse flies · keys aim · left fires · esc pauses"
-                                           : "right held: cursor aims · keys thrust · left fires · esc pauses"
-                            : INVERT ? "left fires · esc releases"
-                                     : "hold right to aim — qweasdzxc snaps it · left fires · esc releases", FW / 2, FH / 2 + 78);
-    ctx.textAlign = "left";
+  // the pause text, and the dev screen's claim on it: while the panel is open
+  // it owns the screen, so none of this draws. render() reads UI.dev directly
+  // rather than taking a flag, so every foreign caller — the resize listener,
+  // the stardens/minimap/reseed repaints, setAimMode/setInvert and the
+  // encounter's own R/digit/Enter repaint — inherits the suppression for free.
+  if (!G.running && !UI.dev) {
+    if (guide) {
+      // the card already says LEFT CLICK TO START and states the whole
+      // contract, so the headline and both copy lines stay off this screen
+      ctx.drawImage(guideImg, GUIDE_X, GUIDE_Y, GUIDE_W, GUIDE_H);
+    } else {
+      const lines = pauseLines();
+      ctx.textAlign = "center";
+      ctx.font = "700 13px " + FONT;
+      ctx.fillStyle = C.clay;
+      ctx.fillText(G.started ? "CLICK TO CONTINUE" : mouseMode() ? "CLICK TO START" : "CLICK TO STEER", FW / 2, FH / 2 + 46);
+      ctx.font = "400 10px " + FONT;
+      ctx.fillStyle = C.dim;
+      ctx.fillText(lines[0], FW / 2, FH / 2 + 64);
+      ctx.fillText(lines[1], FW / 2, FH / 2 + 78);
+      ctx.textAlign = "left";
+    }
   }
   ctx.restore(); // drop the field clip
 }
@@ -726,6 +1049,11 @@ function setAimMode(m) {
 function pause() {
   if (!G.running) return;
   G.running = false;
+  // pausing always lands on the pause menu, never inside dev options. This sits
+  // BELOW the early return on purpose: visibilitychange, pointerlockchange and
+  // a late lock rejection all call pause() while already paused, and above the
+  // guard each of them would slam an open dev panel shut behind the user.
+  UI.dev = false;
   G.leftHeld = false; // a mouseup can vanish in the lock transition — never resume with a stuck button
   setRightHeld(false);
   if (mouseMode() && locked() && typeof document.exitPointerLock === "function") document.exitPointerLock();
@@ -771,36 +1099,63 @@ function setInvert(v) {
   syncAimUi();
   render();
 }
+// arrows must not nudge sliders mid-flight — either paused screen can hold
+// the focus, and a clicked button keeps it until something takes it away
+function blurPanels() {
+  const a = document.activeElement;
+  if (a && (pausemenu.contains(a) || devpanel.contains(a))) a.blur();
+}
+// The one way back into flight: a click on the field and the pause menu's
+// resume button both land here, so the button behaves exactly like the click
+// (a click is a user gesture, so the pointer-lock arming still works). The two
+// branches keep their ORIGINAL, asymmetric statement order: the normal one
+// asks for the lock while G.running is still false, so a synchronous failure
+// reaches pause()'s !G.running early return and the game resumes unlocked,
+// while the frozen one arms after flipping it. pause()'s guard makes that
+// difference observable, so it is preserved rather than tidied.
+function resume() {
+  if (G.running) return; // a focused resume button re-fires on Space/Enter — never re-enter mid-flight
+  UI.dev = false; // whichever screen the gesture came from, the resume ends on the field
+  if (window.Encounter && Encounter.frozen()) {
+    // dead/shop overlays: the click resumes only the loop — combat stays
+    // frozen and the overlay's own keys (R, the digits, Enter) are the way on.
+    // Lock-dependent modes still re-arm their pointer lock here, so an
+    // R-restart after this resume has working flight controls.
+    G.running = true;
+    syncCursor();
+    if (!mouseMode()) requestLock();
+    else if (!aiming()) requestLock(false, false);
+    blurPanels(); // the overlay keys live on document — nothing may be holding them
+    syncTuner();
+    startLoop();
+    return;
+  }
+  if (!G.started) {
+    G.started = true;
+    G.vel = { x: 0, y: 0 }; // the session starts from rest
+  }
+  if (!mouseMode()) requestLock();
+  else if (!aiming()) requestLock(false, false); // inverted-off starts in mouse-flight
+  G.running = true;
+  syncCursor();
+  blurPanels();
+  syncTuner();
+  startLoop();
+  if (!mouseMode() && aiming()) enterAim(); // inverted push mode opens at the existing fire direction
+}
 canvas.addEventListener("mousedown", (e) => {
   e.preventDefault();
   if (mouseMode()) trackMouse(e); // the start click establishes an aim point, but still never fires
   if (!G.running) {
     if (e.button !== 0) return; // only LEFT starts — a stray right press stays idle
-    if (window.Encounter && Encounter.frozen()) {
-      // dead/upgrade overlays: the click resumes only the loop — combat
-      // stays frozen and the overlay's own keys (R, 1/2/3) are the way on.
-      // Lock-dependent modes still re-arm their pointer lock here, so an
-      // R-restart after this resume has working flight controls.
-      G.running = true;
-      syncCursor();
-      if (!mouseMode()) requestLock();
-      else if (!aiming()) requestLock(false, false);
-      syncTuner();
-      startLoop();
+    // the dev screen owns the field while it is open: a click backs out to the
+    // pause menu instead of resuming. Guarded by the !G.running block it sits
+    // in — __test exposes openDev(), and a stray true must never eat a shot.
+    if (UI.dev) {
+      closeDev();
       return;
     }
-    if (!G.started) {
-      G.started = true;
-      G.vel = { x: 0, y: 0 }; // the session starts from rest
-    }
-    if (!mouseMode()) requestLock();
-    else if (!aiming()) requestLock(false, false); // inverted-off starts in mouse-flight
-    G.running = true;
-    syncCursor();
-    if (tuner.contains(document.activeElement)) document.activeElement.blur(); // arrows must not nudge sliders mid-flight
-    syncTuner();
-    startLoop();
-    if (!mouseMode() && aiming()) enterAim(); // inverted push mode opens at the existing fire direction
+    resume();
     return; // the click that starts or resumes never fires
   }
   if (!mouseMode() && lockSupported && !locked()) {
@@ -843,9 +1198,21 @@ document.addEventListener("keydown", (e) => {
     if (G.running && mouseMode()) {
       e.preventDefault();
       pause(); // mouse mode owns pause directly, including locked right-flight
+    } else if (!G.running && UI.dev) {
+      e.preventDefault();
+      closeDev(); // paused, escape backs out one screen — panel to pause menu
     }
+    // the !G.running gate above is what keeps push mode's running Escape
+    // falling through to the browser, whose lock exit is that mode's only pause
     return;
   }
+  // the shop/death overlays own the keys: a frozen sim keeps G.running true,
+  // so without this gate every ring press below would still enter G.keys and
+  // rewrite the stored aim behind the overlay — and only pause() ever clears
+  // the set, so a hand resting on the ring through a shop visit would lurch
+  // the ship on continue. openShop() clears the set for the keys already
+  // held; this return keeps new ones out for the whole visit.
+  if (window.Encounter && Encounter.frozen()) return;
   if (!G.running) return; // the ring only exists in flight, same as the right button
   const d = KEY_AIM[e.code];
   if (!d) return;
@@ -897,9 +1264,54 @@ window.addEventListener("resize", () => {
   render(); // resetting canvas.width wipes the bitmap — repaint immediately, mid-run too
 });
 
-// tuning controls — live on the pause/idle screen, where the mouse is free
+// Before the first start there is nothing to be paused FROM, and calling that
+// screen "paused" is the one thing that reads wrong on it — so the root screen
+// opens as ready / start and becomes paused / resume the moment G.started
+// flips. The ids, the listeners and resume()'s semantics are untouched: it is
+// the same button wearing the word that fits the moment. syncTuner() calls
+// this because every transition that can put the menu on screen already goes
+// through it, and the DOM is written only when the words really change.
+function syncMenuWords() {
+  const title = G.started ? "paused" : "ready";
+  const action = G.started ? "resume" : "start";
+  if (menutitle.textContent !== title) menutitle.textContent = title;
+  if (resumebtn.textContent !== action) resumebtn.textContent = action;
+}
+
+// tuning controls — live on the pause/idle screen, where the mouse is free.
+// One policy function, now governing BOTH paused screens: running hides them
+// both, and while paused UI.dev picks which one is up. display:none is the
+// hide, deliberately — it is what drops the controls out of the tab order and
+// the accessibility tree during flight. Both elements are flex containers, so
+// the inline "flex" written here matches what the stylesheet intends.
 function syncTuner() {
-  tuner.style.display = G.running ? "none" : "flex";
+  syncMenuWords(); // the menu's own words follow G.started — see above
+  pausemenu.style.display = !G.running && !UI.dev ? "flex" : "none";
+  devpanel.style.display = !G.running && UI.dev ? "flex" : "none";
+  placeDevPanel(); // a panel that just appeared has never been measured
+}
+// one visible tab section at a time, and one marked tab button
+function syncDevTabs() {
+  for (const s of devpanel.querySelectorAll(".tabsec")) s.hidden = s.dataset.tab !== UI.tab;
+  for (const b of devpanel.querySelectorAll(".tab")) b.setAttribute("aria-pressed", String(b.dataset.tab === UI.tab));
+}
+function setDevTab(name) {
+  if (!DEV_TABS.includes(name)) return; // __test can call this — an unknown name would hide every section
+  UI.tab = name;
+  syncDevTabs();
+  placeDevPanel(); // tabs differ in height — the new one re-hangs the panel
+  devbody.scrollTop = 0; // a tab opens at its own top, never at the last one's offset
+  render(); // every UI transition repaints — one rule, so no caller has to know what is on screen
+}
+function openDev() {
+  UI.dev = true;
+  syncTuner();
+  render(); // the pause text goes away — the panel owns the screen now
+}
+function closeDev() {
+  UI.dev = false; // UI.tab survives: reopening returns to the tab the user left on
+  syncTuner();
+  render();
 }
 function syncAimUi() {
   canvas.setAttribute("aria-label", mouseMode()
@@ -924,6 +1336,10 @@ function showTuner() {
   out("bfactor-out", BFACTOR.toFixed(2));
   out("bmax-out", String(BMAX));
   out("blife-out", BLIFE.toFixed(2) + " s");
+  out("fxint-out", FXINT.toFixed(1) + "× burst intensity · 0 = off");
+  out("fxdur-out", FXDUR.toFixed(2) + " s burst life");
+  out("blastr-out", BLASTR + " px at rank 1");
+  out("blastgain-out", "+" + BLASTGAIN + " px per rank · rank 3 = " + (BLASTR + 2 * BLASTGAIN) + " px");
   out("cammode-out", CAMDESC[CAMMODE]);
   out("camease-out", CAMEASE.toFixed(2) + " of the gap per tick");
   out("cambox-out", Math.round(CAMBOX * 100) + "% of the view");
@@ -934,6 +1350,7 @@ function showTuner() {
   out("leaddz-out", LEADDZ + " ms to commit a reversal · 0 = off");
   out("edgemargin-out", EDGEMARGIN + " px the ship keeps from the view edge");
   out("stardens-out", STARDENS.toFixed(1) + " stars per cell (avg)");
+  out("contactcd-out", CONTACTCD + " ticks · " + (CONTACTCD * TICK / 1000).toFixed(2) + " s between contact hits on one body");
 }
 const CAMDESC = { // one-line reminders beside the camera selector
   lock: "hard-centers the ship",
@@ -978,6 +1395,10 @@ bind("bfactor", (v) => { BFACTOR = v; }).value = String(BFACTOR);
 bind("bmax", (v) => { BMAX = v; }).value = String(BMAX);
 bind("blife", (v) => { BLIFE = v; }).value = String(BLIFE);
 bind("bounce", (v) => { BOUNCE = v; }).checked = BOUNCE;
+bind("fxint", (v) => { FXINT = v; }).value = String(FXINT);
+bind("fxdur", (v) => { FXDUR = v; }).value = String(FXDUR);
+bind("blastr", (v) => { BLASTR = v; }).value = String(BLASTR);
+bind("blastgain", (v) => { BLASTGAIN = v; }).value = String(BLASTGAIN);
 bind("cammode", (v) => { setCamMode(v); }).value = CAMMODE;
 bind("camease", (v) => { CAMEASE = v; }).value = String(CAMEASE);
 bind("cambox", (v) => { CAMBOX = v; }).value = String(CAMBOX);
@@ -989,13 +1410,25 @@ bind("leaddz", (v) => { LEADDZ = v; }).value = String(LEADDZ);
 bind("edgemargin", (v) => { EDGEMARGIN = v; }).value = String(EDGEMARGIN);
 bind("stardens", (v) => { STARDENS = v; render(); }).value = String(STARDENS); // the idle sky repaints live
 bind("minimap", (v) => { MINIMAP = v; render(); }).checked = MINIMAP;
+bind("edgearrows", (v) => { EDGEARROWS = v; render(); }).checked = EDGEARROWS;
+bind("contactcd", (v) => { CONTACTCD = v; }).value = String(CONTACTCD);
 document.getElementById("reseed").addEventListener("click", () => {
   SEED = (Math.random() * 0x100000000) >>> 0;
   render(); // a whole new sky, same ship
 });
+// the screen buttons, all on "click" like reseed: click keeps Enter/Space
+// activation working and only fires when the press and the release share a
+// target, so a button revealed under a held-down cursor cannot self-activate
+document.getElementById("devbtn").addEventListener("click", openDev);
+document.getElementById("devback").addEventListener("click", closeDev);
+resumebtn.addEventListener("click", resume);
+for (const b of devpanel.querySelectorAll(".tab")) {
+  b.addEventListener("click", () => setDevTab(b.dataset.tab));
+}
 syncAimUi();
 syncCursor();
 showTuner();
+syncDevTabs(); // the markup already ships the four inactive sections hidden — this keeps them honest
 
 // ---- test hook -----------------------------------------------------------
 // headless smoke checks drive the sim through this; normal play never does.
@@ -1004,6 +1437,18 @@ showTuner();
 // lets, and gate exposes the lookahead commit-gate state.
 window.__test = { G, cam, step, setCamMode, render, WW, WH, FW, FH,
   updateCamera, leadVec, aiming, fireDir, mouseAimDir, cursorHidden, gate, setAimMode, setRightHeld, setInvert,
+  // the paused screens: the state, the transitions, and a visibility snapshot.
+  // getComputedStyle, never offsetParent — both screens are position:fixed, so
+  // offsetParent is null even when they are plainly on screen.
+  ui: { UI, openDev, closeDev, setDevTab, resume, syncMenu: syncMenuWords,
+    view: () => ({
+      menu: getComputedStyle(pausemenu).display !== "none",
+      panel: getComputedStyle(devpanel).display !== "none",
+      dev: UI.dev,
+      tab: UI.tab,
+      running: G.running,
+      sections: [...devpanel.querySelectorAll(".tabsec")].map((s) => ({ tab: s.dataset.tab, shown: getComputedStyle(s).display !== "none" })),
+    }) },
   setMouseClient: (x, y) => { G.mouse.x = x; G.mouse.y = y; G.mouse.seen = true; },
   setLeadSrc: (v) => { LEADSRC = v; },
   setLeadDz: (v) => { LEADDZ = v; },
@@ -1011,6 +1456,40 @@ window.__test = { G, cam, step, setCamMode, render, WW, WH, FW, FH,
   setCamLead: (v) => { CAMLEAD = v; },
   setAimLead: (v) => { AIMLEAD = v; },
   setVmax: (v) => { VMAX = v; },
+  setContactCd: (v) => { CONTACTCD = v; }, // the contact-cadence checks drive the slider's whole range, floor included
+  // the impact-fx system: the live burst list, the two entry points the
+  // encounter calls, and the slider reach the checks need
+  fx, spawnImpactFx, resetImpactFx,
+  fxState: () => ({ FXINT, FXDUR, bursts: fx.bursts.length, count: fx.count }),
+  setFxInt: (v) => { FXINT = v; },
+  setFxDur: (v) => { FXDUR = v; },
+  // the corner map: its toggle, its live geometry, and field→backing-store
+  // pixels so the contact-dot checks can probe real pixels instead of
+  // hardcoding 76/93/8 or guessing the letterbox transform
+  setMinimap: (v) => { MINIMAP = !!v; },
+  minimapInfo: () => ({ W: MM_W, H: MM_H, M: MM_M, on: MINIMAP }),
+  fieldToCanvas: (fx, fy) => ({ x: ox + fx * scale, y: oy + fy * scale }),
+  // the edge arrows: their toggle, so the determinism check can force the
+  // draw branch on however a human left the checkbox
+  setEdgeArrows: (v) => { EDGEARROWS = !!v; },
+  edgeArrowsOn: () => EDGEARROWS,
+  // the first-run card: the gate and the load flag as two separate answers —
+  // a check can assert the eligibility rules on a page whose PNG is still in
+  // flight — plus the rect the UI pass draws, so nothing has to hardcode it
+  guideState: () => ({ eligible: guideEligible(), ready: guideReady, shown: guideShown(),
+    x: GUIDE_X, y: GUIDE_Y, w: GUIDE_W, h: GUIDE_H, src: GUIDE_SRC }),
+  // ...and a writer for the load flag alone. It is the one half of the card's
+  // contract a check cannot otherwise reach: the bytes have long arrived by
+  // the time a suite runs, so the pre-load screen has to be driven on purpose.
+  // Returns the flag it replaced, so the caller can put it back.
+  setGuideReady: (v) => { const was = guideReady; guideReady = !!v; return was; },
+  // the THRUST RING reveal: the same two halves as the first-run card — the
+  // rect the shop overlay draws into, the load flag, and a writer for it, so a
+  // check can drive the pre-load screen the shop's text stand-in is for
+  ringCardState: () => ({ ready: ringReady, x: RING_X, y: RING_Y, w: RING_W, h: RING_H, src: RING_SRC }),
+  setRingReady: (v) => { const was = ringReady; ringReady = !!v; return was; },
+  keyThrustUnlocked, // the ring's thrust gate, read exactly as step() reads it
+  pauseLines, // the copy the idle screen would print — the card's text stand-in included
   aimState: () => ({ AIMMODE, mouse: { ...G.mouse }, direction: fireDir(), aiming: aiming(), rightHeld: G.rightHeld, cursorHidden: cursorHidden(), locked: locked() }),
   camState: () => ({ CAMMODE, CAMEASE, CAMBOX, CAMLEAD, LEADSRC, AIMLEAD, LEADBLEND, LEADDZ, EDGEMARGIN }) };
 

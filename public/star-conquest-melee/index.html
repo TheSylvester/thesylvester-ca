@@ -9,188 +9,291 @@
   body { background: #12151f; overflow: hidden; }
   canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
   canvas.hide-cursor { cursor: none; }
-  #tuner { position: fixed; left: 50%; transform: translateX(-50%); display: flex; gap: 28px;
-           /* left:50% halves shrink-to-fit space — max-content re-widens; wrap still saves narrow windows */
-           width: max-content; flex-wrap: wrap; justify-content: center; max-width: 100vw; overflow-y: auto;
-           font: 400 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #5c6370; }
-  #tuner .col { display: flex; flex-direction: column; gap: 6px; }
-  #tuner .row { display: flex; align-items: center; gap: 10px; }
-  #tuner .gap { margin-top: 8px; }
-  #tuner label { width: 84px; text-align: right; }
-  #tuner input { width: 180px; accent-color: #d97757; }
-  #tuner input[type=checkbox] { width: auto; }
-  #tuner select, #tuner button { font: inherit; color: #9aa3b2; background: #0e1119;
-                                 border: 1px solid #313a4e; accent-color: #d97757; }
-  #tuner select { width: 180px; }
-  #tuner button { padding: 1px 10px; cursor: pointer; }
-  #tuner button:hover { color: #f2f3f5; border-color: #5c6370; }
-  #tuner .slot { width: 180px; }
-  #tuner output { color: #9aa3b2; min-width: 170px; }
+  /* Two paused screens, one geometry. The pause menu is the root screen; the
+     dev panel replaces it when it opens. JS owns top and max-height (resize())
+     and display (syncTuner()) for both, so the values here are only the shape.
+     left:50% halves shrink-to-fit space — a fixed width re-widens the panel. */
+  #pausemenu, #devpanel { position: fixed; left: 50%; transform: translateX(-50%);
+                          font: 400 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+                          color: #5c6370; }
+  #pausemenu { display: flex; align-items: center; gap: 14px;
+               /* left:50% halves shrink-to-fit space — max-content re-widens; wrap still saves narrow windows */
+               width: max-content; max-width: 100vw; flex-wrap: wrap; justify-content: center; }
+  #pausemenu .menutitle { letter-spacing: 0.14em; }
+  /* the dev screen is a real panel: its own ground over the letterbox, and a
+     fixed width so switching tabs never re-measures and re-centers the frame.
+     1180px is the floor for the two-column tabs: weapons needs 536+28+571 of
+     content and .devbody's padding eats 24 — any narrower and .tabsec wraps
+     col 2 onto its own line, which is exactly what the split was there to
+     avoid given how little vertical room resize() leaves. */
+  #devpanel { display: flex; flex-direction: column; width: min(1180px, calc(100vw - 16px));
+              background: #0e1119; border: 1px solid #313a4e; }
+  #devpanel .devhead { flex: 0 0 auto; display: flex; align-items: center; gap: 12px;
+                       padding: 6px 10px; border-bottom: 1px solid #313a4e; }
+  #devpanel .devtitle { color: #9aa3b2; letter-spacing: 0.16em; }
+  #devpanel .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  #devpanel .back { margin-left: auto; }
+  /* only the tab body scrolls — the header must not leave with it. min-height:0
+     is mandatory: without it this flex child refuses to shrink below its
+     content and the panel overflows the window instead of scrolling, and the
+     page itself cannot scroll (body { overflow: hidden }). */
+  #devpanel .devbody { flex: 1 1 auto; overflow-y: auto; min-height: 0; padding: 10px 12px; }
+  #devpanel .tabsec { display: flex; gap: 28px; flex-wrap: wrap; justify-content: center; }
+  /* display:none only — a hidden section's controls must leave the tab order
+     and the accessibility tree, not just the screen, or Tab walks into
+     invisible sliders and the arrow keys retune the game */
+  #devpanel .tabsec[hidden] { display: none; }
+  #devpanel .col { display: flex; flex-direction: column; gap: 6px; }
+  #devpanel .row { display: flex; align-items: center; gap: 10px; }
+  #devpanel label { width: 84px; text-align: right; }
+  #devpanel input { width: 180px; accent-color: #d97757; }
+  #devpanel input[type=checkbox] { width: auto; }
+  #devpanel select { width: 180px; }
+  #devpanel .slot { width: 180px; }
+  #devpanel output { color: #9aa3b2; min-width: 170px; }
+  #pausemenu button, #devpanel select, #devpanel button { font: inherit; color: #9aa3b2; background: #0e1119;
+                                                          border: 1px solid #313a4e; accent-color: #d97757; }
+  #pausemenu button, #devpanel button { padding: 1px 10px; cursor: pointer; }
+  #pausemenu button:hover, #devpanel button:hover { color: #f2f3f5; border-color: #5c6370; }
+  #devpanel .tab[aria-pressed="true"] { color: #f2f3f5; border-color: #d97757; } /* the live tab wears the accent */
 </style>
 </head>
 <body>
 <canvas id="field" aria-label="Ship playground — move the visible pointer to aim, hold right to fly with the mouse and aim with QWE/ASDZXC, left fires, Escape pauses"></canvas>
-<div id="tuner">
-  <div class="col">
-    <div class="row">
-      <label for="vmax">max speed</label>
-      <input id="vmax" type="range" min="4" max="50" step="0.5">
-      <output id="vmax-out" for="vmax"></output>
+<div id="pausemenu">
+  <!-- the first-run wording: syncMenuWords() swaps both to paused / resume
+       the moment G.started flips, and the ids never move -->
+  <span class="menutitle">ready</span>
+  <button id="devbtn" type="button">dev options</button>
+  <button id="resumebtn" type="button">start</button>
+</div>
+<div id="devpanel">
+  <div class="devhead">
+    <span class="devtitle">DEV OPTIONS</span>
+    <div class="tabs">
+      <button class="tab" type="button" data-tab="flight" aria-pressed="true">flight</button>
+      <button class="tab" type="button" data-tab="aim" aria-pressed="false">aim</button>
+      <button class="tab" type="button" data-tab="weapons" aria-pressed="false">weapons</button>
+      <button class="tab" type="button" data-tab="camera" aria-pressed="false">camera</button>
+      <button class="tab" type="button" data-tab="world" aria-pressed="false">world</button>
+      <button class="tab" type="button" data-tab="combat" aria-pressed="false">combat</button>
     </div>
-    <div class="row">
-      <label for="accel">accel</label>
-      <input id="accel" type="range" min="0.001" max="0.03" step="0.001">
-      <output id="accel-out" for="accel"></output>
-    </div>
-    <div class="row">
-      <label for="turn">turn</label>
-      <input id="turn" type="range" min="0.001" max="0.03" step="0.001">
-      <output id="turn-out" for="turn"></output>
-    </div>
-    <div class="row">
-      <label for="keythrust">key thrust</label>
-      <input id="keythrust" type="range" min="1" max="30" step="0.5">
-      <output id="keythrust-out" for="keythrust"></output>
-    </div>
-    <div class="row">
-      <label for="wallloss">wall loss</label>
-      <input id="wallloss" type="range" min="0" max="1" step="0.05">
-      <output id="wallloss-out" for="wallloss"></output>
-    </div>
-    <div class="row gap">
-      <label for="aimmode">aim control</label>
-      <select id="aimmode">
-        <option value="mouse">mouse mode</option>
-        <option value="push">push mode (legacy)</option>
-      </select>
-      <output id="aimmode-out" for="aimmode"></output>
-    </div>
-    <div class="row">
-      <label for="aimsens">push sens</label>
-      <input id="aimsens" type="range" min="0.02" max="0.6" step="0.01">
-      <output id="aimsens-out" for="aimsens"></output>
-    </div>
-    <div class="row">
-      <label for="aimdist">cursor dist</label>
-      <input id="aimdist" type="range" min="15" max="100" step="1">
-      <output id="aimdist-out" for="aimdist"></output>
-    </div>
-    <div class="row">
-      <label for="invert">invert right</label>
-      <span class="slot"><input id="invert" type="checkbox"></span>
-      <output id="invert-out" for="invert"></output>
-    </div>
+    <button id="devback" class="back" type="button">back</button>
   </div>
-  <div class="col">
-    <div class="row">
-      <label for="cool">cooldown</label>
-      <input id="cool" type="range" min="50" max="1000" step="10">
-      <output id="cool-out" for="cool"></output>
-    </div>
-    <div class="row">
-      <label for="autofire">autofire</label>
-      <span class="slot"><input id="autofire" type="checkbox"></span>
-      <output for="autofire">hold left fires at the cooldown rate</output>
-    </div>
-    <div class="row">
-      <label for="bspeed">bullet speed</label>
-      <input id="bspeed" type="range" min="2" max="40" step="0.5">
-      <output id="bspeed-out" for="bspeed"></output>
-    </div>
-    <div class="row">
-      <label for="bfactor">factor</label>
-      <input id="bfactor" type="range" min="0" max="4" step="0.05">
-      <output id="bfactor-out" for="bfactor"></output>
-    </div>
-    <div class="row">
-      <label for="bmax">max bullets</label>
-      <input id="bmax" type="range" min="1" max="20" step="1">
-      <output id="bmax-out" for="bmax"></output>
-    </div>
-    <div class="row">
-      <label for="blife">lifetime</label>
-      <input id="blife" type="range" min="0.25" max="5" step="0.25">
-      <output id="blife-out" for="blife"></output>
-    </div>
-    <div class="row">
-      <label for="bounce">bounce</label>
-      <span class="slot"><input id="bounce" type="checkbox"></span>
-      <output for="bounce">bullets bounce off walls; off = die there</output>
-    </div>
-  </div>
-  <div class="col">
-    <div class="row">
-      <label for="cammode">camera</label>
-      <select id="cammode">
-        <option value="lock">lock</option>
-        <option value="smooth">smooth</option>
-        <option value="deadzone">deadzone</option>
-        <option value="lookahead">lookahead</option>
-        <option value="flip">flip</option>
-      </select>
-      <output id="cammode-out" for="cammode"></output>
-    </div>
-    <div class="row">
-      <label for="camease">cam ease</label>
-      <input id="camease" type="range" min="0.01" max="0.3" step="0.01">
-      <output id="camease-out" for="camease"></output>
-    </div>
-    <div class="row">
-      <label for="cambox">dead zone</label>
-      <input id="cambox" type="range" min="0.1" max="0.9" step="0.05">
-      <output id="cambox-out" for="cambox"></output>
-    </div>
-    <div class="row">
-      <label for="camlead">lookahead</label>
-      <input id="camlead" type="range" min="0" max="60" step="1">
-      <output id="camlead-out" for="camlead"></output>
-    </div>
-    <div class="row">
-      <label for="leadsrc">lead source</label>
-      <select id="leadsrc">
-        <option value="vel">vel</option>
-        <option value="aim">aim</option>
-        <option value="blend">blend</option>
-        <option value="add">add</option>
-        <option value="swap">swap</option>
-      </select>
-      <output id="leadsrc-out" for="leadsrc"></output>
-    </div>
-    <div class="row">
-      <label for="aimlead">aim lead</label>
-      <input id="aimlead" type="range" min="0" max="250" step="1">
-      <output id="aimlead-out" for="aimlead"></output>
-    </div>
-    <div class="row">
-      <label for="leadblend">lead blend</label>
-      <input id="leadblend" type="range" min="0" max="1" step="0.05">
-      <output id="leadblend-out" for="leadblend"></output>
-    </div>
-    <div class="row">
-      <label for="leaddz">lead deadzone</label>
-      <input id="leaddz" type="range" min="0" max="600" step="10">
-      <output id="leaddz-out" for="leaddz"></output>
-    </div>
-    <div class="row">
-      <label for="edgemargin">edge margin</label>
-      <input id="edgemargin" type="range" min="20" max="150" step="5">
-      <output id="edgemargin-out" for="edgemargin"></output>
-    </div>
-    <div class="row gap">
-      <label for="stardens">star density</label>
-      <input id="stardens" type="range" min="0" max="10" step="0.5">
-      <output id="stardens-out" for="stardens"></output>
-    </div>
-    <div class="row">
-      <label for="reseed">starfield</label>
-      <span class="slot"><button id="reseed" type="button">reseed</button></span>
-      <output for="reseed">deal a new sky</output>
-    </div>
-    <div class="row">
-      <label for="minimap">minimap</label>
-      <span class="slot"><input id="minimap" type="checkbox"></span>
-      <output for="minimap">world map, top right</output>
-    </div>
+  <div class="devbody">
+    <section class="tabsec" data-tab="flight">
+      <div class="col">
+        <div class="row">
+          <label for="vmax">max speed</label>
+          <input id="vmax" type="range" min="2" max="50" step="0.5">
+          <output id="vmax-out" for="vmax"></output>
+        </div>
+        <div class="row">
+          <label for="accel">accel</label>
+          <input id="accel" type="range" min="0.001" max="0.03" step="0.001">
+          <output id="accel-out" for="accel"></output>
+        </div>
+        <div class="row">
+          <label for="turn">turn</label>
+          <input id="turn" type="range" min="0.001" max="0.03" step="0.001">
+          <output id="turn-out" for="turn"></output>
+        </div>
+        <div class="row">
+          <label for="keythrust">key thrust</label>
+          <input id="keythrust" type="range" min="1" max="30" step="0.5">
+          <output id="keythrust-out" for="keythrust"></output>
+        </div>
+        <div class="row">
+          <label for="wallloss">wall loss</label>
+          <input id="wallloss" type="range" min="0" max="1" step="0.05">
+          <output id="wallloss-out" for="wallloss"></output>
+        </div>
+      </div>
+    </section>
+    <section class="tabsec" data-tab="aim" hidden>
+      <div class="col">
+        <div class="row">
+          <label for="aimmode">aim control</label>
+          <select id="aimmode">
+            <option value="mouse">mouse mode</option>
+            <option value="push">push mode (legacy)</option>
+          </select>
+          <output id="aimmode-out" for="aimmode"></output>
+        </div>
+        <div class="row">
+          <label for="aimsens">push sens</label>
+          <input id="aimsens" type="range" min="0.02" max="0.6" step="0.01">
+          <output id="aimsens-out" for="aimsens"></output>
+        </div>
+        <div class="row">
+          <label for="aimdist">cursor dist</label>
+          <input id="aimdist" type="range" min="15" max="100" step="1">
+          <output id="aimdist-out" for="aimdist"></output>
+        </div>
+        <div class="row">
+          <label for="invert">invert right</label>
+          <span class="slot"><input id="invert" type="checkbox"></span>
+          <output id="invert-out" for="invert"></output>
+        </div>
+      </div>
+    </section>
+    <section class="tabsec" data-tab="weapons" hidden>
+      <div class="col">
+        <div class="row">
+          <label for="cool">cooldown</label>
+          <input id="cool" type="range" min="50" max="1000" step="10">
+          <output id="cool-out" for="cool"></output>
+        </div>
+        <div class="row">
+          <label for="autofire">autofire</label>
+          <span class="slot"><input id="autofire" type="checkbox"></span>
+          <output for="autofire">hold left fires at the cooldown rate</output>
+        </div>
+        <div class="row">
+          <label for="bspeed">bullet speed</label>
+          <input id="bspeed" type="range" min="2" max="40" step="0.5">
+          <output id="bspeed-out" for="bspeed"></output>
+        </div>
+        <div class="row">
+          <label for="bfactor">factor</label>
+          <input id="bfactor" type="range" min="0" max="4" step="0.05">
+          <output id="bfactor-out" for="bfactor"></output>
+        </div>
+      </div>
+      <div class="col">
+        <div class="row">
+          <label for="bmax">max bullets</label>
+          <input id="bmax" type="range" min="1" max="20" step="1">
+          <output id="bmax-out" for="bmax"></output>
+        </div>
+        <div class="row">
+          <label for="blife">lifetime</label>
+          <input id="blife" type="range" min="0.25" max="5" step="0.25">
+          <output id="blife-out" for="blife"></output>
+        </div>
+        <div class="row">
+          <label for="bounce">bounce</label>
+          <span class="slot"><input id="bounce" type="checkbox"></span>
+          <output for="bounce">bullets bounce off walls; off = die there</output>
+        </div>
+        <div class="row">
+          <label for="fxint">impact fx</label>
+          <input id="fxint" type="range" min="0" max="2" step="0.1">
+          <output id="fxint-out" for="fxint"></output>
+        </div>
+        <div class="row">
+          <label for="fxdur">fx duration</label>
+          <input id="fxdur" type="range" min="0.1" max="1" step="0.05">
+          <output id="fxdur-out" for="fxdur"></output>
+        </div>
+        <div class="row">
+          <label for="blastr">blast radius</label>
+          <input id="blastr" type="range" min="6" max="60" step="1">
+          <output id="blastr-out" for="blastr"></output>
+        </div>
+        <div class="row">
+          <label for="blastgain">blast gain</label>
+          <input id="blastgain" type="range" min="0" max="24" step="1">
+          <output id="blastgain-out" for="blastgain"></output>
+        </div>
+      </div>
+    </section>
+    <section class="tabsec" data-tab="camera" hidden>
+      <div class="col">
+        <div class="row">
+          <label for="cammode">camera</label>
+          <select id="cammode">
+            <option value="lock">lock</option>
+            <option value="smooth">smooth</option>
+            <option value="deadzone">deadzone</option>
+            <option value="lookahead">lookahead</option>
+            <option value="flip">flip</option>
+          </select>
+          <output id="cammode-out" for="cammode"></output>
+        </div>
+        <div class="row">
+          <label for="camease">cam ease</label>
+          <input id="camease" type="range" min="0.01" max="0.3" step="0.01">
+          <output id="camease-out" for="camease"></output>
+        </div>
+        <div class="row">
+          <label for="cambox">dead zone</label>
+          <input id="cambox" type="range" min="0.1" max="0.9" step="0.05">
+          <output id="cambox-out" for="cambox"></output>
+        </div>
+        <div class="row">
+          <label for="camlead">lookahead</label>
+          <input id="camlead" type="range" min="0" max="60" step="1">
+          <output id="camlead-out" for="camlead"></output>
+        </div>
+        <div class="row">
+          <label for="leadsrc">lead source</label>
+          <select id="leadsrc">
+            <option value="vel">vel</option>
+            <option value="aim">aim</option>
+            <option value="blend">blend</option>
+            <option value="add">add</option>
+            <option value="swap">swap</option>
+          </select>
+          <output id="leadsrc-out" for="leadsrc"></output>
+        </div>
+      </div>
+      <div class="col">
+        <div class="row">
+          <label for="aimlead">aim lead</label>
+          <input id="aimlead" type="range" min="0" max="250" step="1">
+          <output id="aimlead-out" for="aimlead"></output>
+        </div>
+        <div class="row">
+          <label for="leadblend">lead blend</label>
+          <input id="leadblend" type="range" min="0" max="1" step="0.05">
+          <output id="leadblend-out" for="leadblend"></output>
+        </div>
+        <div class="row">
+          <label for="leaddz">lead deadzone</label>
+          <input id="leaddz" type="range" min="0" max="600" step="10">
+          <output id="leaddz-out" for="leaddz"></output>
+        </div>
+        <div class="row">
+          <label for="edgemargin">edge margin</label>
+          <input id="edgemargin" type="range" min="20" max="150" step="5">
+          <output id="edgemargin-out" for="edgemargin"></output>
+        </div>
+      </div>
+    </section>
+    <section class="tabsec" data-tab="world" hidden>
+      <div class="col">
+        <div class="row">
+          <label for="stardens">star density</label>
+          <input id="stardens" type="range" min="0" max="10" step="0.5">
+          <output id="stardens-out" for="stardens"></output>
+        </div>
+        <div class="row">
+          <label for="reseed">starfield</label>
+          <span class="slot"><button id="reseed" type="button">reseed</button></span>
+          <output for="reseed">deal a new sky</output>
+        </div>
+        <div class="row">
+          <label for="minimap">minimap</label>
+          <span class="slot"><input id="minimap" type="checkbox"></span>
+          <output for="minimap">world map, top right</output>
+        </div>
+        <div class="row">
+          <label for="edgearrows">foe arrows</label>
+          <span class="slot"><input id="edgearrows" type="checkbox"></span>
+          <output for="edgearrows">edge arrows point to off-screen foes</output>
+        </div>
+      </div>
+    </section>
+    <section class="tabsec" data-tab="combat" hidden>
+      <div class="col">
+        <div class="row">
+          <label for="contactcd">contact cd</label>
+          <input id="contactcd" type="range" min="0" max="180" step="1">
+          <output id="contactcd-out" for="contactcd"></output>
+        </div>
+      </div>
+    </section>
   </div>
 </div>
 <script src="js/game.js"></script>
