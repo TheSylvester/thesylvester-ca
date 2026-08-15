@@ -78,20 +78,22 @@
     // The standoff carrier — the roster's RANGE axis. Its retreat speed is
     // HIGHER than its approach speed, which is the whole read: crowding a
     // harrier makes it run instead of trade, so the answer to it is to close
-    // the 300 px ring, not to duel across it. It never rams by intent.
+    // the 240 px ring, not to duel across it. It never rams by intent.
     harrier: {
       r: 8, hp: 4,
       maxSpeed: 1.3,         // approach — slower than the ship by a wide margin
       steer: 0.05,
-      prefer: 300,           // the ring it holds: most of the 512 px screen away
+      prefer: 240,           // the ring it holds: half the 512 px screen away
       band: 30,
       backSpeed: 1.6,        // ...and it backs off FASTER than it closes
       sepR: 46,
-      engage: 320,           // dart 110, charger 260, harrier 320 — past the field's
-                             // 342 px half-height, so it can open fire from off
-                             // screen. Intended: the edge chevrons, the positional
-                             // launch cue and the missile's own long flight are the
-                             // three readability layers that pay for it.
+      engage: 270,           // dart 110, charger 260, harrier 270 — still the
+                             // roster's range king, but only just: it was 320,
+                             // which opened locks from off screen, and play
+                             // testing read that as cheap. 270 keeps the lock
+                             // inside the view in ordinary framing, and 260 is
+                             // the hard floor — at or under it the charger
+                             // reaches as far and the standoff identity dies.
       lockon: 45,            // 0.75 s of plant — the research's floor is ~25 ticks,
                              // the time the player needs to develop the lateral
                              // break that beats a missile; below it the first
@@ -106,7 +108,9 @@
     // HEADING AUTHORITY the fuse can spend: (life − arm − decay/2) × turn ≈ 72°.
     // That is the number tuned, by simulating this exact loop against a player
     // holding a full-speed break, launched from every distance the harrier
-    // fires at (240–400 px):
+    // fires at (the ring-to-engage band — 210–270 px since the engage pull-in;
+    // originally tuned over 240–400, and the wave1 suite re-runs the break
+    // fight over the LIVE band, so a retune here is re-proven, not assumed):
     //   turn 0.030 (108°) — the break is HIT at every range. Not minor homing.
     //   turn 0.022 ( 79°) — the break wins, with no margin.
     //   turn 0.020 ( 72°) — the break wins from a standstill too, and survives
@@ -209,13 +213,14 @@
   // multiplier it can never re-derive. RAPID LOADER is the row that needs it.
   const SHOP = [
     // Fire rate is ADDITIVE in the rate, not multiplicative in the cooldown:
-    // each rank adds 50% of the BASE rate, so rank n fires at (1 + n/2)× and
-    // the cap-5 ceiling is 3.5×, not the 5.95× a compounding −30% reached.
-    // Setting mods.cool absolutely (never *=) is what makes that re-derivable
-    // from the rank alone.
-    { name: "RAPID LOADER", desc: "fire rate +50% of base per rank", base: 4, curve: "double", cap: 5,
+    // each rank adds 15% of the BASE rate, so rank n fires at (1 + 0.15n)× and
+    // the cap-5 ceiling is 1.75×, not the 5.95× a compounding −30% reached.
+    // (The step was 50%, then 25%; play testing kept reading each buy as too
+    // large a jump.) Setting mods.cool absolutely (never *=) is what makes
+    // that re-derivable from the rank alone.
+    { name: "RAPID LOADER", desc: "fire rate +15% of base per rank", base: 4, curve: "double", cap: 5,
       icon: "rapid-loader.png",
-      apply: (rank) => { mods.cool = 1 / (1 + 0.5 * rank); } }, // cap 5: past it the
+      apply: (rank) => { mods.cool = 1 / (1 + 0.15 * rank); } }, // cap 5: past it the
                                             // quantized cooldown outruns the BMAX live-bullet budget
     { name: "AFTERBURNER", desc: "max speed +1.0 px/tick", base: 4, curve: "double",
       icon: "afterburner.png",
@@ -740,7 +745,7 @@
       e.vy += (ty - e.vy) * P.steer;
       if (e.cd > 0) e.cd--;
       // the range comes off the body's own stats — dart 110, charger 260,
-      // harrier 320 — and a type whose engage is 0 (the anvil, the husk, the
+      // harrier 270 — and a type whose engage is 0 (the anvil, the husk, the
       // shards) has no attack mode to enter at any distance
       else if (P.engage > 0 && dist <= P.engage) {
         if (e.type === "charger") { // rested and in range — plant to lunge
@@ -880,8 +885,8 @@
     const off = e.r + M.r + 1;
     const m = spawnMissile(e.x + Math.cos(e.lockA) * off, e.y + Math.sin(e.lockA) * off, e.lockA);
     if (m && window.Sfx) Sfx.cue("launch", e); // positional, on the launcher — a
-                                               // harrier firing from off screen is
-                                               // heard before it is seen
+                                               // harrier firing from the screen's
+                                               // edge is heard as well as seen
   }
 
   // Every way a missile ends, in one place: the list removal, the burst and
@@ -1737,11 +1742,16 @@
 
   // ---- screen-edge arrows -------------------------------------------------
   // Quiet chevrons on an inset rect, one per direction to an enemy the
-  // viewport has lost. Pure functions of live state (E.enemies, cam, FW/FH):
-  // no rand(), no Math.random(), no Date.now() — the draw path can never
-  // desync a replay. Directions closer than a bucket apart merge into one
-  // arrow (the nearest body of the bucket represents it) and a nearest-first
-  // cap bounds the worst case, so a swarm behind you stays readable.
+  // viewport has lost. Pure functions of live state (E.enemies, E.missiles,
+  // cam, FW/FH, and E.waveTick for the halo's pulse clock): no rand(), no
+  // Math.random(), no Date.now() — the draw path can never desync a replay.
+  // Directions closer than a bucket apart merge into one arrow (the nearest
+  // body of the bucket represents it) and a nearest-first cap bounds the
+  // worst case, so a swarm behind you stays readable. HOT is the escalation:
+  // a body whose telegraph is running right now — a harrier mid-lock, a
+  // charger mid-windup — outranks proximity for its bucket's claim and
+  // survives the cap first, because the marker's job in that moment is the
+  // shooter, not the nearest walker standing in front of it.
   const ARROWS = { inset: 14, cap: 16, buckets: 48, far: 1200 };
   function computeEdgeArrows() {
     const vx = cam.x + FW / 2; // the view centre — position and heading share
@@ -1749,7 +1759,7 @@
     const slots = new Array(ARROWS.buckets).fill(null); // fixed slot order — deterministic
     // one bucket claim, shared by the bodies and the ordnance so both fold into
     // the SAME merge and the same nearest-wins rule
-    const track = (o, type) => {
+    const track = (o, type, hot) => {
       const sx = o.x - cam.x;
       const sy = o.y - cam.y;
       if (sx >= -o.r && sx <= FW + o.r && sy >= -o.r && sy <= FH + o.r) return; // any part visible — no arrow
@@ -1759,15 +1769,19 @@
       const step = (2 * Math.PI) / ARROWS.buckets;
       const bi = ((Math.round(Math.atan2(dy, dx) / step) % ARROWS.buckets) + ARROWS.buckets) % ARROWS.buckets;
       const s = slots[bi];
-      if (!s) slots[bi] = { dx, dy, dist, n: 1, type, bi };
+      if (!s) slots[bi] = { dx, dy, dist, n: 1, type, bi, hot: !!hot };
       else {
         s.n++;
-        if (dist < s.dist) { s.dx = dx; s.dy = dy; s.dist = dist; s.type = type; } // nearest wins the bucket
+        // hot wins the bucket outright; among peers the nearest wins, as ever
+        if ((hot && !s.hot) || (!!hot === !!s.hot && dist < s.dist)) {
+          s.dx = dx; s.dy = dy; s.dist = dist; s.type = type; s.hot = !!hot;
+        }
       }
     };
     for (const e of E.enemies) {
       if (e.hp <= 0) continue;
-      track(e, e.type);
+      track(e, e.type, (e.type === "harrier" && e.mode === "lockon") ||
+                       (e.type === "charger" && e.mode === "windup"));
     }
     // missiles earn arrows too: a 512×342 window on a 3072×3762 world makes an
     // unheralded off-screen seeker unfair, and a harrier that fires from
@@ -1776,30 +1790,34 @@
     const hw = FW / 2 - ARROWS.inset;
     const hh = FH / 2 - ARROWS.inset;
     return slots.filter(Boolean)
-      .sort((a, b) => a.dist - b.dist || a.bi - b.bi) // explicit tie-break — deterministic order
-      .slice(0, ARROWS.cap)
+      .sort((a, b) => (b.hot ? 1 : 0) - (a.hot ? 1 : 0) || a.dist - b.dist || a.bi - b.bi) // hot first,
+      .slice(0, ARROWS.cap)                     // then nearest; explicit tie-break — deterministic order
       .map((s) => {
         // an off-screen body always overshoots one half-extent, so k < 1 and
         // the arrow lands exactly ON the inset rect — inside the field clip,
         // never in the letterbox bars
         const k = Math.min(hw / Math.max(Math.abs(s.dx), 1e-9), hh / Math.max(Math.abs(s.dy), 1e-9));
         return { x: FW / 2 + s.dx * k, y: FH / 2 + s.dy * k,
-          ang: Math.atan2(s.dy, s.dx), dist: s.dist, n: s.n, type: s.type };
+          ang: Math.atan2(s.dy, s.dx), dist: s.dist, n: s.n, type: s.type, hot: s.hot };
       });
   }
   // per-type chevron size and colour, as two small lookups rather than a
   // growing ternary. Size is mass — the heavies read bigger, ordnance smaller.
-  // The danger accent goes to the three things that can reach you from where
-  // they are: the charger (as it always did), the harrier that shoots across
-  // the field, and the missile already on its way. The bodies that have to
-  // walk to you keep the quiet steel.
+  // The danger accent has two grades. The standing accent (colour) goes to the
+  // three things that can reach you from where they are: the charger (as it
+  // always did), the harrier that shoots across the field, and the missile
+  // already on its way. The bodies that have to walk to you keep the quiet
+  // steel. HOT is the second grade — the telegraph is running RIGHT NOW —
+  // and it buys full strength and a pulsing halo, so the one chevron that is
+  // about to cost a hull reads over every quiet one on the rect.
   const ARROW_SCALE = { charger: 1.25, anvil: 1.25, husk: 1.15, missile: 0.7 };
   const ARROW_ACCENT = { charger: true, harrier: true, missile: true };
   function drawEdgeArrows() {
     for (const a of computeEdgeArrows()) {
       const sc = (ARROW_SCALE[a.type] || 1) * (1 + Math.min(a.n - 1, 3) * 0.15);
       ctx.save();
-      ctx.globalAlpha = 0.3 + 0.45 * Math.max(0, Math.min(1, 1 - a.dist / ARROWS.far));
+      ctx.globalAlpha = a.hot ? 0.9
+        : 0.3 + 0.45 * Math.max(0, Math.min(1, 1 - a.dist / ARROWS.far));
       ctx.translate(a.x, a.y);
       ctx.rotate(a.ang);
       ctx.scale(sc, sc);
@@ -1811,6 +1829,20 @@
       ctx.lineTo(-4, -5);
       ctx.closePath();
       ctx.fill();
+      if (a.hot) {
+        // the telegraph halo: an expanding, fading ring, pulsed off the SIM
+        // tick — the same determinism contract as the geometry above, and it
+        // freezes with the sim, which is honest: a paused lock is not
+        // advancing on you. One pulse per half second, comfortably inside
+        // the 45-tick lock, so even the first lock of a wave pulses.
+        const ph = (E.waveTick % 30) / 30;
+        ctx.globalAlpha = 0.7 * (1 - ph);
+        ctx.strokeStyle = C.clay;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, 6 + ph * 8, 0, 2 * Math.PI);
+        ctx.stroke();
+      }
       ctx.restore(); // restore() puts globalAlpha back — nothing leaks
     }
   }

@@ -1585,6 +1585,21 @@ document.getElementById("reseed").addEventListener("click", () => {
 document.getElementById("devbtn").addEventListener("click", openDev);
 document.getElementById("devback").addEventListener("click", closeDev);
 resumebtn.addEventListener("click", resume);
+// Fullscreen exists for the pointer-lock banner: mouse mode re-acquires the
+// lock on every right press, and Firefox posts its takeover warning on each
+// acquisition unless the document is already fullscreen. It targets
+// documentElement, never the canvas — the pause menu and dev panel are HTML
+// siblings of the canvas and must stay visible inside fullscreen.
+const fsbtn = document.getElementById("fsbtn");
+if (typeof document.documentElement.requestFullscreen === "function") {
+  fsbtn.addEventListener("click", () => {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else document.documentElement.requestFullscreen().catch(() => {}); // a denied request just leaves the window as it was
+  });
+  document.addEventListener("fullscreenchange", () => {
+    fsbtn.textContent = document.fullscreenElement ? "windowed" : "fullscreen";
+  });
+} else fsbtn.remove();
 for (const b of devpanel.querySelectorAll(".tab")) {
   b.addEventListener("click", () => setDevTab(b.dataset.tab));
 }

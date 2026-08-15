@@ -300,7 +300,7 @@ window.runWave1Checks = function () {
   const shopTick = s.waveTick;
   enc.advance(40);
   ok("the shop freezes the sim", enc.state().waveTick === shopTick && enc.state().state === "shop");
-  const RL1 = 1 / 1.5; // rank 1 of the additive curve: +50% of the BASE rate
+  const RL1 = 1 / 1.15; // rank 1 of the additive curve: +15% of the BASE rate
   clickCard(0);
   s = enc.state();
   ok("a click on the first card buys RAPID LOADER and the shop stays open",
@@ -1269,6 +1269,34 @@ window.runWave1Checks = function () {
   ok("a charger's arrow carries its type",
     arrCh.length === 1 && arrCh[0].type === "charger",
     "n=" + arrCh.length + " type=" + (arrCh[0] && arrCh[0].type));
+  // the live-telegraph escalation: the same body, quiet while it loiters and
+  // hot the moment its lock is running — mode is the only thing that moves
+  enc.reset();
+  enc.spawnEnemy(ship().x + 600, ship().y, 0, "harrier");
+  const arrHarIdle = enc.edgeArrows();
+  enc.E.enemies[0].mode = "lockon";
+  const arrHarHot = enc.edgeArrows();
+  ok("a loitering harrier's arrow is quiet; a locking one goes hot",
+    arrHarIdle.length === 1 && arrHarIdle[0].hot === false &&
+    arrHarHot.length === 1 && arrHarHot[0].hot === true && arrHarHot[0].type === "harrier",
+    "idle=" + (arrHarIdle[0] && arrHarIdle[0].hot) + " locking=" + (arrHarHot[0] && arrHarHot[0].hot));
+  // the claim: a nearer quiet body on the same bearing cannot mask the shooter
+  enc.reset();
+  enc.spawnEnemy(ship().x + 500, ship().y);
+  enc.spawnEnemy(ship().x + 700, ship().y, 0, "harrier");
+  enc.E.enemies[1].mode = "lockon";
+  const arrMask = enc.edgeArrows();
+  ok("a locking harrier wins its bucket from a nearer quiet body",
+    arrMask.length === 1 && arrMask[0].type === "harrier" && arrMask[0].hot === true && arrMask[0].n === 2,
+    JSON.stringify(arrMask));
+  // the charger's own telegraph earns the same escalation
+  enc.reset();
+  enc.spawnEnemy(ship().x + 600, ship().y, 0, "charger");
+  enc.E.enemies[0].mode = "windup";
+  const arrChHot = enc.edgeArrows();
+  ok("an off-screen charger mid-windup goes hot too",
+    arrChHot.length === 1 && arrChHot[0].hot === true,
+    "hot=" + (arrChHot[0] && arrChHot[0].hot));
   // the determinism proof: the same wave, once with mid-run repaints and once
   // without. Both legs stage the far body, so the arrow branch really runs in
   // the rendered leg, and — as with the minimap above — the kills sit AFTER
@@ -1454,16 +1482,16 @@ window.runWave1Checks = function () {
   }
   ok("RAPID LOADER's price doubles per rank: 4/8/16/32/64, each deducted exactly",
     JSON.stringify(rlCosts) === "[4,8,16,32,64]" && rlPaid, JSON.stringify(rlCosts));
-  // Each purchase adds 50% of the BASE rate, so rank n fires at (1 + n/2)×
-  // and mods.cool is 1/(1 + n/2) — never a compounded step. apply() SETS it
+  // Each purchase adds 15% of the BASE rate, so rank n fires at (1 + 0.15n)×
+  // and mods.cool is 1/(1 + 0.15n) — never a compounded step. apply() SETS it
   // from the rank rather than multiplying, which is what makes rank the only
   // thing the effect depends on.
-  ok("the fire-rate curve is additive: 1.5/2/2.5/3/3.5x the base rate",
-    rlCurve.every((c, k) => Math.abs(c - 1 / (1 + 0.5 * (k + 1))) < 1e-12),
+  ok("the fire-rate curve is additive: 1.15/1.3/1.45/1.6/1.75x the base rate",
+    rlCurve.every((c, k) => Math.abs(c - 1 / (1 + 0.15 * (k + 1))) < 1e-12),
     JSON.stringify(rlCurve.map((c) => +(1 / c).toFixed(3))));
   ok("rank six is refused at the hard cap and the row reads MAXED",
     enc.buy(0) === false && enc.shopInfo()[0].maxed === true && enc.state().owned[0] === 5 &&
-    Math.abs(enc.state().mods.cool - 1 / 3.5) < 1e-12,
+    Math.abs(enc.state().mods.cool - 1 / 1.75) < 1e-12,
     "owned=" + enc.state().owned[0] + " cool=" + enc.state().mods.cool);
   const abCost0 = enc.shopInfo()[1].cost;
   enc.buy(1);
@@ -1609,7 +1637,7 @@ window.runWave1Checks = function () {
   ok("the staging really bought one of every row",
     preRestart.owned.join(",") === "1,1,1,1,1,1" && preRestart.xp === 500 - 4 - 4 - 8 - 6 - 8 - 8 &&
     preRestart.hullMax === ECFG.player.hull + 1 && preRestart.hull === 2 &&
-    preRestart.mods.cool === 1 / 1.5 && preRestart.mods.speed === 1 && preRestart.mods.keyThrust === true &&
+    preRestart.mods.cool === 1 / 1.15 && preRestart.mods.speed === 1 && preRestart.mods.keyThrust === true &&
     preRestart.mods.blast === 1,
     JSON.stringify({ owned: preRestart.owned, xp: preRestart.xp, hullMax: preRestart.hullMax }));
   enc.restart();
@@ -2184,29 +2212,30 @@ window.runWave1Checks = function () {
   t.G.leftHeld = false; // no autofire bullet may wander into a staged shot
 
   bare();
-  enc.spawnEnemy(ship().x + 300, ship().y, 0, "harrier");
+  enc.spawnEnemy(ship().x + 250, ship().y, 0, "harrier");
   const harBody = enc.E.enemies[0];
   ok("a spawned harrier carries its stamped type and stats",
     harBody.type === "harrier" && harBody.r === HAR.r && harBody.hp === HAR.hp &&
     harBody.orbDrop === HAR.orbDrop && harBody.stats.engage === HAR.engage && harBody.mode === "seek",
     "type=" + harBody.type + " hp=" + harBody.hp + " engage=" + harBody.stats.engage);
-  // the requirement in one check: three rested bodies at the same 300 px, and
-  // only the carrier can do anything about it from there
+  // the requirement in one check: three rested bodies at the same 265 px —
+  // past the charger's 260 engage, inside the harrier's 270 — and only the
+  // carrier can do anything about it from there
   bare();
-  enc.spawnEnemy(ship().x + 300, ship().y, 0, "harrier");
-  enc.spawnEnemy(ship().x - 300, ship().y, 0, "charger");
-  enc.spawnEnemy(ship().x, ship().y + 300, 0, "dart");
+  enc.spawnEnemy(ship().x + 265, ship().y, 0, "harrier");
+  enc.spawnEnemy(ship().x - 265, ship().y, 0, "charger");
+  enc.spawnEnemy(ship().x, ship().y + 265, 0, "dart");
   for (const e of enc.E.enemies) e.cd = 0; // every one of them rested and in the open
   enc.advance(1);
   const harReach = {};
   for (const e of enc.E.enemies) harReach[e.type] = e.mode;
-  ok("at 300 px only the harrier can reach the player at all",
+  ok("at 265 px only the harrier can reach the player at all",
     harReach.harrier === "lockon" && harReach.charger === "seek" && harReach.dart === "seek",
     JSON.stringify(harReach));
   // the lock is honest: it latches at ENTRY, so the break the telegraph buys
   // actually beats it
   bare();
-  enc.spawnEnemy(ship().x + 300, ship().y, 0, "harrier");
+  enc.spawnEnemy(ship().x + 250, ship().y, 0, "harrier");
   const harLock = enc.E.enemies[0];
   harLock.cd = 0;
   enc.advance(1); // the lock opens on the live bearing...
@@ -2233,7 +2262,7 @@ window.runWave1Checks = function () {
   // the plant is what makes the telegraph readable — a body still coasting
   // through its own lock would drag the launch point off the drawn lane
   bare();
-  enc.spawnEnemy(ship().x + 300, ship().y, 0, "harrier");
+  enc.spawnEnemy(ship().x + 250, ship().y, 0, "harrier");
   const harPlant = enc.E.enemies[0];
   harPlant.cd = 0;
   enc.advance(1);
@@ -2245,7 +2274,7 @@ window.runWave1Checks = function () {
     "mode=" + harPlant.mode + " speed=" + Math.hypot(harPlant.vx, harPlant.vy).toFixed(3));
   // the cadence: two launches are a cooldown plus a lock apart, never less
   bare();
-  enc.spawnEnemy(ship().x + 300, ship().y, 0, "harrier");
+  enc.spawnEnemy(ship().x + 250, ship().y, 0, "harrier");
   const harPace = enc.E.enemies[0];
   harPace.cd = 0;
   enc.E.invuln = 9999; // the player is not the subject here — the missiles that
@@ -2364,7 +2393,7 @@ window.runWave1Checks = function () {
     }
     return { taken: enc.state().hitsTaken, fired };
   };
-  const misBand = [250, 300, HAR.engage];
+  const misBand = [HAR.prefer - HAR.band, HAR.prefer, HAR.engage];
   const misParked = misBand.map((d) => misBreak(d, false));
   const misDodged = misBand.map((d) => misBreak(d, true));
   ok("every launch in the harrier's own band lands on a player who stands still",
@@ -2477,7 +2506,7 @@ window.runWave1Checks = function () {
     misMade.slice(0, MIS.max).every((m) => !!m) && misMade.slice(MIS.max).every((m) => m === null) &&
     enc.state().missiles === MIS.max,
     "made=" + misMade.filter(Boolean).length + " live=" + enc.state().missiles);
-  enc.spawnEnemy(ship().x + 300, ship().y, 0, "harrier");
+  enc.spawnEnemy(ship().x + 250, ship().y, 0, "harrier");
   const misCapped = enc.E.enemies[0];
   misCapped.mode = "lockon"; // staged one tick from launching into a full sky
   misCapped.t = 1;

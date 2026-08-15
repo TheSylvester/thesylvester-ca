@@ -53,7 +53,12 @@
 
   const MAXVOICES = 16; // whole-cue admission budget — a cue starts all of its
                         // steps or none of them, never half a recipe
-  const ENG_GAIN = 0.11, ENG_F0 = 48, ENG_F1 = 46;
+  // the engine band is 40–66 Hz, deliberately narrow and deliberately deep:
+  // wide enough that speed still reads in the pitch, narrow enough that the
+  // hum never becomes a NOTE the ear tracks. The gain pays for the tight
+  // lowpass below — most of the saw's energy dies in that filter, and what
+  // survives is the rumble.
+  const ENG_GAIN = 0.17, ENG_F0 = 40, ENG_F1 = 26;
 
   // distance attenuation — the listener is the SHIP, not the camera: the ship
   // is what the sounds are about, and a lookahead camera would otherwise make
@@ -125,7 +130,9 @@
   // sound is tuned; the bus sliders are trims over them.
   const CUES = {
     // the reference's fire() verbatim — the sound this game's ancestor made.
-    // 45 ms gap (not 70) so the RAPID-LOADER cadence of ~15/s still speaks.
+    // 45 ms gap (not 70): RAPID LOADER caps near 5.5/s at the stock BCOOL,
+    // but BCOOL is a live dev slider, and the gap must clear whatever cadence
+    // a retuned page fires at.
     fire: { bus: "shot", gap: 45, steps: [["b", 880, 380, 0.05, "square", 0.22, 0]] },
     // mass meeting a wall; mag carries the flipped component's pre-bounce
     // speed, so a graze whispers and a slam lands.
@@ -134,12 +141,19 @@
     // the reference's bounce(), one notch quieter — a dull tick for something
     // inert being struck, never competing with fire.
     wall: { bus: "shot", gap: 60, steps: [["b", 140, 140, 0.03, "square", 0.10, 0]] },
-    // a dry pitchless click: the shot landed and nothing died, so it has no
-    // note to sing.
-    hit: { bus: "shot", gap: 45, steps: [["n", 0.035, 0.16, 2600, 0]] },
+    // the shot landing on a body that lives: a short falling knock UNDER
+    // fire's band, triangle where the guns are square — a volley reads
+    // guns-high, landings-low, and the kill still owns the only real note.
+    // (It was once a bare 35 ms click, and next to fire it read as silence —
+    // a landed hit the ear cannot find is a miss.)
+    // the volumes sit near kill's on purpose: hit must survive the player's
+    // own fire barrage, and the kill moment still outranks it because the
+    // killing landing plays BOTH cues in the same instant.
+    hit: { bus: "shot", gap: 45, steps: [["b", 340, 190, 0.06, "triangle", 0.30, 0],
+                                         ["n", 0.05, 0.20, 1900, 0]] },
     // a bullet stopped dead by the anvil's frontal shield. Deliberately the
-    // OPPOSITE of hit in every dimension it has: pitched where hit is
-    // pitchless, high and metallic where hit is dull — one volley into the
+    // OPPOSITE of hit in every dimension it has: high and metallic square
+    // where hit is a low soft knock — one volley into the
     // front of that body teaches the shield by ear, with nothing on screen.
     clang: { bus: "shot", gap: 45, steps: [["b", 1250, 880, 0.05, "square", 0.20, 0],
                                            ["n", 0.03, 0.12, 3200, 0]] },
@@ -473,12 +487,20 @@
           busFoe = a.createGain(); busFoe.gain.value = SFXFOE; busFoe.connect(limiter);
           busUi = a.createGain(); busUi.gain.value = SFXUI; busUi.connect(limiter);
           engOsc = a.createOscillator();
-          engOsc.type = "sawtooth";
+          engOsc.type = "sawtooth"; // the harmonics are the point: small
+                                    // speakers cannot voice a 40 Hz fundamental,
+                                    // so the 80/120 Hz partials ARE the engine
+                                    // on a laptop; a sine here would vanish
           engOsc.frequency.value = ENG_F0;
           engFilt = a.createBiquadFilter();
           engFilt.type = "lowpass";
-          engFilt.frequency.value = 360;
-          engFilt.Q.value = 0.7;
+          engFilt.frequency.value = 120; // this cutoff is what makes the saw a
+                                         // RUMBLE instead of a synth-bass note —
+                                         // it was 360, which passed enough
+                                         // harmonics to give the hum a pitch
+                                         // the ear could sing along to
+          engFilt.Q.value = 1.1; // a hint of resonance at the cutoff — the
+                                 // "thrum" of a body, not a filter sweep
           engDyn = a.createGain();
           engDyn.gain.value = 0; // silent until frame() drives it off the flame
           engWatch = a.createGain();
