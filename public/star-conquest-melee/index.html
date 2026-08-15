@@ -9,6 +9,10 @@
   body { background: #12151f; overflow: hidden; }
   canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
   canvas.hide-cursor { cursor: none; }
+  /* a frozen overlay is a MENU, not a gunsight — the shop's cards and its
+     NEXT WAVE button are clicked with an ordinary pointer. syncCursor() owns
+     this class; hide-cursor still wins, since it is set only in flight. */
+  canvas.ui-cursor { cursor: default; }
   /* Two paused screens, one geometry. The pause menu is the root screen; the
      dev panel replaces it when it opens. JS owns top and max-height (resize())
      and display (syncTuner()) for both, so the values here are only the shape.
@@ -77,6 +81,7 @@
       <button class="tab" type="button" data-tab="camera" aria-pressed="false">camera</button>
       <button class="tab" type="button" data-tab="world" aria-pressed="false">world</button>
       <button class="tab" type="button" data-tab="combat" aria-pressed="false">combat</button>
+      <button class="tab" type="button" data-tab="audio" aria-pressed="false">audio</button>
     </div>
     <button id="devback" class="back" type="button">back</button>
   </div>
@@ -294,9 +299,49 @@
         </div>
       </div>
     </section>
+    <section class="tabsec" data-tab="audio" hidden>
+      <div class="col">
+        <div class="row">
+          <label for="sfxvol">master</label>
+          <input id="sfxvol" type="range" min="0" max="1" step="0.05">
+          <output id="sfxvol-out" for="sfxvol"></output>
+        </div>
+        <div class="row">
+          <label for="sfxmute">mute</label>
+          <span class="slot"><input id="sfxmute" type="checkbox"></span>
+          <output id="sfxmute-out" for="sfxmute"></output>
+        </div>
+        <div class="row">
+          <label for="sfxshot">shots</label>
+          <input id="sfxshot" type="range" min="0" max="1.5" step="0.05">
+          <output id="sfxshot-out" for="sfxshot"></output>
+        </div>
+        <div class="row">
+          <label for="sfxfoe">foes</label>
+          <input id="sfxfoe" type="range" min="0" max="1.5" step="0.05">
+          <output id="sfxfoe-out" for="sfxfoe"></output>
+        </div>
+        <div class="row">
+          <label for="sfxui">ui + waves</label>
+          <input id="sfxui" type="range" min="0" max="1.5" step="0.05">
+          <output id="sfxui-out" for="sfxui"></output>
+        </div>
+        <div class="row">
+          <label for="sfxeng">engine</label>
+          <input id="sfxeng" type="range" min="0" max="1.5" step="0.05">
+          <output id="sfxeng-out" for="sfxeng"></output>
+        </div>
+        <div class="row">
+          <label for="sfxtest">audition</label>
+          <span class="slot"><button id="sfxtest" type="button">play a cue</button></span>
+          <output id="sfxtest-out" for="sfxtest"></output>
+        </div>
+      </div>
+    </section>
   </div>
 </div>
 <script src="js/game.js"></script>
 <script src="js/encounter.js"></script>
+<script src="js/audio.js"></script>
 </body>
 </html>

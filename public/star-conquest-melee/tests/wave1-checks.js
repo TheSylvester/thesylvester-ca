@@ -2,7 +2,9 @@
 
 // Deterministic wave checks — the suite now covers the endless progressive
 // waves: the wave-1 slice, the wave transition, the pure scaling functions,
-// the charger archetype and the post-wave XP shop. Load this file in the
+// the post-wave XP shop, and all five archetypes — the charger's locked lunge,
+// the harrier's honest lock and the seeker missiles it launches, the anvil's
+// frontal shield, and the husk's death split. Load this file in the
 // page (fetch + eval
 // from the console, or a script tag), then call runWave1Checks(). The
 // suite drives the fixed-step sim through window.__test only — no RAF,
@@ -20,6 +22,9 @@ window.runWave1Checks = function () {
   const R = [];
   const ok = (name, cond, info) => R.push({ name, pass: !!cond, info: info === undefined ? "" : String(info) });
   const ship = () => t.G.ship;
+  const canvasEl = document.getElementById("field"); // the field itself — the shop's
+  // click target, and the dead screen's; hoisted here because section F now
+  // dispatches real mousedowns long before section J's first use of it
   const priorAim = t.aimState().AIMMODE;
   const priorEdge = t.camState().EDGEMARGIN;
   const priorFx = t.fxState();
@@ -240,9 +245,10 @@ window.runWave1Checks = function () {
   // ---- F. the post-wave shop: sweep, open, buy, refuse, continue ----
   // The U-key level flow is gone. XP is an uncapped wallet; every clear
   // holds the banner while the field's orbs sweep to the ship, then opens a
-  // FROZEN shop; digits buy while the wallet can pay, Enter deals the wave.
-  // The shop's keys land only while the game is LIVE — paused, they belong
-  // to the pause menu (section R pins that) — and a frozen shop keeps
+  // FROZEN shop. It is a MOUSE surface end to end: a click on a card buys it,
+  // a click on NEXT WAVE deals the wave, and no key does either.
+  // The shop's clicks land only while the game is LIVE — paused, the pointer
+  // belongs to the pause menu (section R pins that) — and a frozen shop keeps
   // G.running true in play, so dispatches here raise the flag R-style:
   // the flag only, the loop itself stays stopped.
   const liveKey = (code) => {
@@ -251,6 +257,32 @@ window.runWave1Checks = function () {
     document.dispatchEvent(new KeyboardEvent("keydown", { code }));
     t.G.running = was;
   };
+  // a REAL mousedown at a field point, through game.js's own handler and its
+  // client→field conversion — nothing here reaches buy() by a side door
+  const liveClick = (fx, fy) => {
+    const was = t.G.running;
+    t.G.running = true;
+    const c = t.fieldToClient(fx, fy);
+    canvasEl.dispatchEvent(new MouseEvent("mousedown", { button: 0, clientX: c.x, clientY: c.y, bubbles: true }));
+    t.G.running = was;
+  };
+  const liveMove = (fx, fy) => { // ...and the hover that precedes it
+    const was = t.G.running;
+    t.G.running = true;
+    const c = t.fieldToClient(fx, fy);
+    document.dispatchEvent(new MouseEvent("mousemove", { clientX: c.x, clientY: c.y, bubbles: true }));
+    t.G.running = was;
+  };
+  const cardMid = (i) => { const c = enc.shopLayout().cards[i]; return [c.x + c.w / 2, c.y + c.h / 2]; };
+  const clickCard = (i) => liveClick(...cardMid(i));
+  // ...and a reader for the predicates that only answer on a LIVE shop, so a
+  // check can ask them without the suite's paused page answering for them
+  const liveVal = (fn) => {
+    const was = t.G.running;
+    t.G.running = true;
+    try { return fn(); } finally { t.G.running = was; }
+  };
+  const clickNext = () => { const b = enc.shopLayout().btn; liveClick(b.x + b.w / 2, b.y + b.h / 2); };
   enc.reset();
   enc.E.hull = 99;
   enc.advance(130); // group 1 on the field
@@ -268,15 +300,16 @@ window.runWave1Checks = function () {
   const shopTick = s.waveTick;
   enc.advance(40);
   ok("the shop freezes the sim", enc.state().waveTick === shopTick && enc.state().state === "shop");
-  liveKey("Digit1");
+  const RL1 = 1 / 1.5; // rank 1 of the additive curve: +50% of the BASE rate
+  clickCard(0);
   s = enc.state();
-  ok("digit 1 buys RAPID LOADER and the shop stays open",
-    s.mods.cool === 0.7 && s.xp === 2 && s.owned[0] === 1 && s.state === "shop",
+  ok("a click on the first card buys RAPID LOADER and the shop stays open",
+    s.mods.cool === RL1 && s.xp === 2 && s.owned[0] === 1 && s.state === "shop",
     "cool=" + s.mods.cool + " xp=" + s.xp + " state=" + s.state);
-  liveKey("Digit1");
+  clickCard(0);
   s = enc.state();
   ok("an unaffordable rank is refused and the wallet is untouched",
-    s.mods.cool === 0.7 && s.xp === 2 && s.owned[0] === 1,
+    s.mods.cool === RL1 && s.xp === 2 && s.owned[0] === 1,
     "xp=" + s.xp + " owned=" + s.owned[0]);
   ok("buy() reports the refusal", enc.buy(0) === false && enc.state().xp === 2);
   enc.E.hull = enc.E.hullMax; // full hull — the patch must be off the shelf
@@ -284,22 +317,111 @@ window.runWave1Checks = function () {
   ok("HULL PATCH is refused at full hull",
     enc.buy(2) === false && enc.state().xp === 22 && enc.state().hull === enc.E.hullMax);
   enc.E.hull = 1;
-  liveKey("Digit3");
-  liveKey("Digit3");
+  clickCard(2);
+  clickCard(2);
   s = enc.state();
   ok("HULL PATCH repairs at a flat 6 per point", s.hull === 3 && s.xp === 10,
     "hull=" + s.hull + " xp=" + s.xp);
-  liveKey("Enter");
+  // a click that lands on no target at all is EATEN, never passed through: the
+  // shop owns the whole field, so the gap between two cards must not fire, and
+  // must not re-arm a pointer lock over a menu that needs the cursor
+  const gapCard = enc.shopLayout().cards[0];
+  liveClick(gapCard.x + gapCard.w + 5, gapCard.y + gapCard.h / 2);
   s = enc.state();
-  ok("enter continues into wave 2's warning",
+  ok("a click on the grid's gutter buys nothing and continues nothing",
+    s.state === "shop" && s.xp === 10 && s.hull === 3 && s.shopHover === -1 && s.shopBtn === false,
+    "state=" + s.state + " xp=" + s.xp + " hover=" + s.shopHover);
+  clickNext();
+  s = enc.state();
+  ok("a click on NEXT WAVE continues into wave 2's warning",
     s.state === "warning" && s.wave === 2 && s.waveTick === 0,
     "state=" + s.state + " wave=" + s.wave);
   enc.continueFromShop();
-  liveKey("NumpadEnter");
+  clickNext();
   s = enc.state();
   ok("a doubled continue deals exactly one wave — never two",
     s.wave === 2 && s.state === "warning" && s.waveTick === 0,
     "wave=" + s.wave + " state=" + s.state);
+  // The shop RELEASES the pointer lock to get its cursor back, and both
+  // lock-loss handlers read a release as a reason to pause. Left unguarded,
+  // clearing a wave in push mode (or in mouse-flight with the button still
+  // held) drops the lock, the handler pauses the shop behind the menu, and
+  // the resume grabs the lock straight back — a menu with no cursor to click
+  // it with. Both handlers must sit out the whole visit, and requestLock with
+  // them. Every leg dispatches the REAL event at the real listener.
+  const lockAimWas = t.aimState().AIMMODE;
+  const lockRightWas = t.G.rightHeld;
+  const lockSurvives = (mode, rightHeld, evt) => {
+    t.setAimMode(mode);
+    enc.E.state = "cleared";
+    enc.openShop();
+    const was = t.G.running;
+    t.G.running = true;      // the flag a frozen shop genuinely carries in play
+    t.G.rightHeld = rightHeld;
+    const claimed = t.shopOwnsPointer();
+    document.dispatchEvent(new Event(evt));
+    const alive = t.G.running === true && enc.state().state === "shop" && claimed;
+    t.G.running = was;
+    return alive;
+  };
+  ok("push mode's lock-loss handler sits out the shop instead of pausing it",
+    lockSurvives("push", false, "pointerlockchange"));
+  ok("mouse-flight's lock-loss handler sits out the shop too",
+    lockSurvives("mouse", true, "pointerlockchange"));
+  ok("a refused lock request over the shop is not a failure to pause over",
+    lockSurvives("push", false, "pointerlockerror"));
+  // ...and the claim covers the PAUSED shop too. shopOwnsPointer reads the
+  // SCREEN, not the loop's flag: the mouseup handler below has no running
+  // gate, so with INVERT off a right release over the pause menu is a genuine
+  // user gesture that would win a lock, and resume() would carry it into a
+  // mouse-only menu with no cursor and a hover frozen at one field pixel.
+  enc.E.state = "cleared";
+  enc.openShop();
+  const pausedClaim = t.G.running === false && t.shopOwnsPointer() === true;
+  const invWas = t.aimState().AIMMODE === "mouse" && document.getElementById("invert").checked;
+  t.setAimMode("mouse");
+  t.setInvert(false);          // the one configuration whose paused right-release re-arms
+  t.G.rightHeld = false;       // released: aiming() is false, the branch that asks for a lock
+  document.dispatchEvent(new MouseEvent("mouseup", { button: 2, bubbles: true }));
+  ok("a paused shop still owns the pointer, so an invert-off right release wins no lock",
+    pausedClaim && t.shopOwnsPointer() === true && enc.state().state === "shop" &&
+    t.G.running === false,
+    "claimed=" + pausedClaim + " state=" + enc.state().state);
+  // the resume takes the release branch, never the arm branch, and re-seeds
+  // the hover — a paused shop takes no mousemove, so the pointer may have
+  // travelled far from whatever card was lit when the pause began
+  const farCard = enc.shopLayout().cards[4];
+  enc.shopHover(farCard.x + farCard.w / 2, farCard.y + farCard.h / 2); // no-op paused...
+  enc.E.shopHover = 4;                                                 // ...so plant it
+  t.setMouseClient(0, 0); // the pointer now sits off every card
+  t.ui.resume(); // the REAL resume — which also starts the rAF loop, so it has
+  const seeded = enc.state().shopHover; // to be stopped by the real pause, not
+  // by dropping the flag: a running loop would step and repaint underneath
+  // every later section, and every pixel probe in the suite reads that canvas
+  document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape" }));
+  t.setInvert(invWas);
+  t.G.rightHeld = lockRightWas;
+  t.setAimMode(lockAimWas);
+  ok("resuming a paused shop re-seeds the hover instead of restoring a stale one",
+    seeded === -1, "hover=" + seeded);
+  enc.continueFromShop(); // the claim is the SCREEN's, so it has to end with it
+  ok("...and off the shop screen the pointer is the flight controls' again",
+    t.shopOwnsPointer() === false && enc.state().state !== "shop",
+    "state=" + enc.state().state);
+  // the keys the shop used to bind are GONE — a run of them over a live shop
+  // must change nothing at all, wallet, ranks and state alike
+  enc.E.state = "cleared";
+  enc.openShop();
+  enc.addXp(64);
+  const keyBefore = JSON.stringify(enc.state().owned) + "|" + enc.state().xp;
+  const keyWave = enc.state().wave; // whatever wave the staging above landed on
+  for (const code of ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6",
+                      "Numpad1", "Enter", "NumpadEnter", "Space"]) liveKey(code);
+  s = enc.state();
+  ok("the retired digit and enter bindings buy nothing and deal no wave",
+    s.state === "shop" && s.wave === keyWave && JSON.stringify(s.owned) + "|" + s.xp === keyBefore,
+    "state=" + s.state + " wave=" + s.wave + " want=" + keyWave + " " + JSON.stringify(s.owned) + " xp=" + s.xp);
+  enc.continueFromShop();
   // the bought terms reach the sim — expectations come from the live tuner
   // values, so an already-tuned page cannot fake a failure
   const tun = enc.tunables();
@@ -309,7 +431,7 @@ window.runWave1Checks = function () {
   t.G.cool = 0;
   enc.fireOnce();
   ok("the bought cooldown shortens the firing gate",
-    t.G.cool === Math.max(1, Math.round(tun.BCOOL * 0.7 / tun.TICK)), "cool=" + t.G.cool);
+    t.G.cool === Math.max(1, Math.round(tun.BCOOL * RL1 / tun.TICK)), "cool=" + t.G.cool);
   // the retired lifetime upgrade left no multiplier behind: a bullet fired
   // on a purchased page still carries exactly the BLIFE slider's ttl
   t.G.cool = 0;
@@ -487,7 +609,6 @@ window.runWave1Checks = function () {
   if (t.G.running) document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape" }));
   t.ui.closeDev(); // the dev screen eats a field click — this section needs the pause menu, not the panel
   ok("precondition: the loop sits stopped before the dead-click test", t.G.running === false);
-  const canvasEl = document.getElementById("field");
   canvasEl.dispatchEvent(new MouseEvent("mousedown", { button: 0, clientX: 40, clientY: 40, bubbles: true }));
   ok("a click while dead resumes the loop only — combat stays frozen", t.G.running === true && enc.frozen());
   document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape" }));
@@ -1322,18 +1443,27 @@ window.runWave1Checks = function () {
   enc.addXp(1000);
   ok("the wallet accrues without any level threshold", enc.state().xp === 1000);
   const rlCosts = [];
+  const rlCurve = []; // mods.cool after each rank — the fire-rate curve itself
   let rlPaid = true;
   for (let k = 0; k < 5; k++) {
     const rlInfo = enc.shopInfo()[0];
     rlCosts.push(rlInfo.cost);
     const rlBefore = enc.state().xp;
     if (enc.buy(0) !== true || enc.state().xp !== rlBefore - rlInfo.cost) rlPaid = false;
+    rlCurve.push(enc.state().mods.cool);
   }
   ok("RAPID LOADER's price doubles per rank: 4/8/16/32/64, each deducted exactly",
     JSON.stringify(rlCosts) === "[4,8,16,32,64]" && rlPaid, JSON.stringify(rlCosts));
+  // Each purchase adds 50% of the BASE rate, so rank n fires at (1 + n/2)×
+  // and mods.cool is 1/(1 + n/2) — never a compounded step. apply() SETS it
+  // from the rank rather than multiplying, which is what makes rank the only
+  // thing the effect depends on.
+  ok("the fire-rate curve is additive: 1.5/2/2.5/3/3.5x the base rate",
+    rlCurve.every((c, k) => Math.abs(c - 1 / (1 + 0.5 * (k + 1))) < 1e-12),
+    JSON.stringify(rlCurve.map((c) => +(1 / c).toFixed(3))));
   ok("rank six is refused at the hard cap and the row reads MAXED",
     enc.buy(0) === false && enc.shopInfo()[0].maxed === true && enc.state().owned[0] === 5 &&
-    Math.abs(enc.state().mods.cool - Math.pow(0.7, 5)) < 1e-12,
+    Math.abs(enc.state().mods.cool - 1 / 3.5) < 1e-12,
     "owned=" + enc.state().owned[0] + " cool=" + enc.state().mods.cool);
   const abCost0 = enc.shopInfo()[1].cost;
   enc.buy(1);
@@ -1404,28 +1534,43 @@ window.runWave1Checks = function () {
   let shopErr = "";
   try { liveRender(); } catch (err) { shopDrew = false; shopErr = String(err); }
   ok("the frame renders with the shop open", shopDrew, shopErr);
-  const shopStrip = () => { // a pixel strip across the shop title's row
+  // A coarse GRID over the whole card area, not a single row: the graphical
+  // shop's ink is borders, icons and centred labels with wide flat panels
+  // between them, and any one row can land entirely on panel — which reads
+  // the same dark as the paused field behind it and proves nothing.
+  const shopStrip = () => {
     const strip = [];
-    for (let fx = t.FW / 2 - 60; fx <= t.FW / 2 + 60; fx += 4) strip.push(arrPx(fx, t.FH / 2 - 66));
+    const gl = enc.shopLayout().grid;
+    for (let fy = gl.y + 3; fy < gl.y + gl.h; fy += 13) {
+      for (let fx = gl.x; fx < gl.x + gl.w; fx += 9) strip.push(arrPx(fx, fy));
+    }
     return strip.join("|");
   };
   const stripLive = shopStrip();
   // PAUSED over the open shop — reachable in play via Escape, alt-tab or a
   // lock loss, since a frozen shop keeps G.running true — the overlay must
-  // stand down (its fourth row and footer sit exactly in the pause copy's
-  // band) and its keys must go dead: capturing Enter would cancel a focused
-  // pause-menu button's click and deal the next wave behind the menu.
+  // stand down (its cards and button sit exactly in the pause copy's band)
+  // and the POINTER must go with it: a click belongs to the pause menu's
+  // buttons there, and one that reached a card would buy behind the menu.
   // G.running is genuinely false here — the suite's page IS a paused screen.
   t.render();
   ok("a paused shop keeps its overlay off the canvas for the pause copy",
     shopStrip() !== stripLive);
-  enc.addXp(10); // fund a buy the paused digit must NOT make
+  enc.addXp(10); // fund a buy no paused input may make
+  const pausedCard = enc.shopLayout().cards[0];
+  const pcx = pausedCard.x + pausedCard.w / 2;
+  const pcy = pausedCard.y + pausedCard.h / 2;
+  const hoverRefused = enc.shopHover(pcx, pcy); // both report NOT CONSUMED, which is
+  const clickRefused = enc.shopClick(pcx, pcy); // what hands the click to the menu
   document.dispatchEvent(new KeyboardEvent("keydown", { code: "Enter" }));
   document.dispatchEvent(new KeyboardEvent("keydown", { code: "Digit1" }));
   s = enc.state();
-  ok("a paused shop eats no keys — no continue, no buy, state holds",
-    s.state === "shop" && s.wave === 1 && s.xp === 10 && s.owned[0] === 0,
-    "state=" + s.state + " wave=" + s.wave + " xp=" + s.xp);
+  ok("a paused shop refuses the pointer and the retired keys — state holds",
+    enc.shopOpen() === false && hoverRefused === false && clickRefused === false &&
+    t.G.running === false && s.state === "shop" && s.wave === 1 && s.xp === 10 &&
+    s.owned[0] === 0 && s.shopHover === -1,
+    "open=" + enc.shopOpen() + " hover=" + hoverRefused + " click=" + clickRefused +
+    " state=" + s.state + " wave=" + s.wave + " xp=" + s.xp);
   enc.continueFromShop();
   liveRender();
   ok("the shop overlay paints real ink", stripLive !== shopStrip());
@@ -1464,7 +1609,7 @@ window.runWave1Checks = function () {
   ok("the staging really bought one of every row",
     preRestart.owned.join(",") === "1,1,1,1,1,1" && preRestart.xp === 500 - 4 - 4 - 8 - 6 - 8 - 8 &&
     preRestart.hullMax === ECFG.player.hull + 1 && preRestart.hull === 2 &&
-    preRestart.mods.cool === 0.7 && preRestart.mods.speed === 1 && preRestart.mods.keyThrust === true &&
+    preRestart.mods.cool === 1 / 1.5 && preRestart.mods.speed === 1 && preRestart.mods.keyThrust === true &&
     preRestart.mods.blast === 1,
     JSON.stringify({ owned: preRestart.owned, xp: preRestart.xp, hullMax: preRestart.hullMax }));
   enc.restart();
@@ -1472,10 +1617,10 @@ window.runWave1Checks = function () {
   ok("restart zeroes the wallet and every purchase field",
     s.xp === 0 && s.owned.every((n) => n === 0) && s.hullMax === ECFG.player.hull &&
     s.hull === ECFG.player.hull && s.mods.cool === 1 && s.mods.speed === 0 &&
-    s.mods.keyThrust === false && s.mods.blast === 0 && s.ringCard === false && s.state === "idle",
+    s.mods.keyThrust === false && s.mods.blast === 0 && s.shopHover === -1 && s.state === "idle",
     JSON.stringify({ xp: s.xp, owned: s.owned, hullMax: s.hullMax, ring: s.mods.keyThrust, blast: s.mods.blast }));
 
-  // ---- T. the THRUST RING: one gate, one sale, one reveal ----
+  // ---- T. the THRUST RING: one gate, one sale, one hover preview ----
   // The eight-way ring's THRUST role is an 8 XP one-time purchase; its AIM
   // role is not gated and must never be. The gate is a single predicate on
   // step()'s thrust sum, so these legs measure the ship's velocity rather than
@@ -1561,7 +1706,8 @@ window.runWave1Checks = function () {
   // the sale itself, on a staged shop visit — the natural flow is section F's
   enc.E.state = "cleared";
   enc.openShop();
-  ok("the shop opens without the reveal", enc.state().ringCard === false);
+  ok("the shop opens with nothing hovered, and so with no art up",
+    enc.state().shopHover === -1 && window.Encounter.ringCardShown() === false);
   ok("an empty wallet cannot buy the ring", enc.buy(ringIdx) === false && enc.state().mods.keyThrust === false);
   enc.addXp(20);
   ok("the sale lands at 8 and the row goes MAXED",
@@ -1570,14 +1716,27 @@ window.runWave1Checks = function () {
     "xp=" + enc.state().xp + " owned=" + enc.state().owned[ringIdx]);
   ok("the one-time row refuses a second sale and the wallet is untouched",
     enc.buy(ringIdx) === false && enc.state().xp === 12 && enc.state().owned[ringIdx] === 1);
-  ok("the sale raises the reveal, and game.js reads the unlock immediately",
-    enc.state().ringCard === true && t.keyThrustUnlocked() === true);
-  // the reveal: real ink on the shop screen, gated on the async load exactly
-  // as the first-run card is, and never modal — Enter still deals the wave
-  const rc = t.ringCardState();
-  ok("the reveal keeps the asset's 3:1 ratio inside the field",
-    rc.w === 3 * rc.h && rc.x === (t.FW - rc.w) / 2 && rc.x > 0 && rc.y >= 0 && rc.y + rc.h < t.FH,
-    JSON.stringify({ x: rc.x, y: rc.y, w: rc.w, h: rc.h, FH: t.FH }));
+  ok("game.js reads the unlock immediately", t.keyThrustUnlocked() === true);
+  // The art is a HOVER preview now, not a purchase reveal: it answers to where
+  // the pointer is and to nothing else, so a sale on its own must leave the
+  // screen exactly as it found it.
+  ok("the sale alone raises no art — the pointer is what raises it",
+    enc.state().shopHover === -1 && liveVal(() => window.Encounter.ringCardShown()) === false);
+  liveMove(...cardMid(ringIdx));
+  ok("resting the pointer on the row raises its art",
+    enc.state().shopHover === ringIdx &&
+    liveVal(() => window.Encounter.ringCardShown()) === true,
+    "hover=" + enc.state().shopHover);
+  // the rect: the asset's own ratio, inside the field, and — the whole point
+  // of choosing a band rather than a fixed slot — never over the card that
+  // raised it, so the pointer is never resting on covered ground
+  const rc = enc.shopPopupRect(ringIdx);
+  const rcCard = enc.shopLayout().cards[ringIdx];
+  ok("the art keeps the cropped asset's ratio, inside the field, clear of its own card",
+    Math.abs(rc.w / rc.h - t.ringCardState().ratio) < 0.05 && rc.x === Math.round((t.FW - rc.w) / 2) &&
+    rc.x > 0 && rc.y >= 0 && rc.y + rc.h < t.FH &&
+    (rc.y + rc.h <= rcCard.y || rc.y >= rcCard.y + rcCard.h),
+    JSON.stringify({ pop: rc, card: { y: rcCard.y, h: rcCard.h }, FH: t.FH }));
   const ringBand = () => ringRegion(rc.x + 8, rc.y + 8, rc.w - 16, 40); // inside the art
   liveRender();
   const ringInk = ringBand();
@@ -1587,47 +1746,98 @@ window.runWave1Checks = function () {
   t.setRingReady(ringReadyWas);
   liveRender();
   const ringBack = ringBand();
-  ok("the reveal paints its bitmap, and paints it again once the load flag returns",
+  ok("the art paints its bitmap, and paints it again once the load flag returns",
     ringReadyWas === true && ringInk !== ringPending && ringBack === ringInk,
     "loaded=" + ringReadyWas + " drew=" + (ringInk !== ringPending) + " repaint=" + (ringBack === ringInk));
-  // ...and the two layers it lands on top of stand down while it is up. The
-  // bitmap is opaque, so a layer left drawing under it is not dimmed by the
-  // card — it is cut in half by the card's edges. Both legs probe the column
-  // the card does NOT reach (left of rc.x, right of rc.x + rc.w), so the only
-  // thing that can change there is whether that layer drew at all, and both
-  // are two-sided: the ink goes when the card arrives and comes back when it
-  // does not. Three renders of ONE frame — no sim advance between them.
+  // ...and the two layers the SHOP screen would duplicate stand down for the
+  // whole visit, art or no art. The shop header already prints the wave, the
+  // hull pips and the wallet, so the top-left status stack is the same facts
+  // twice; the corner map sits under a scrim it cannot be read through, and
+  // inside the hover art's rect it would show as a sliced-off sliver. Both
+  // legs are two-sided: the ink goes when the shop opens and comes back on the
+  // cleared beat, which is the live screen one state either side of it. Three
+  // renders of ONE frame — no sim advance between them.
+  // The LEVER matters more than the probe here. Comparing the shop screen with
+  // any other screen proves nothing: the shop paints a full-field scrim, so
+  // every pixel on the field differs whether or not the suppressed layer drew
+  // — that comparison passes with the suppression deleted. Each leg instead
+  // moves something ONLY the suppressed layer answers to, and asserts the
+  // screen does not flinch: MINIMAP toggles the corner map and nothing else,
+  // and E.hull moves the status stack's pip row and nothing else in its column
+  // (the shop header's own pips are centred, far outside the probe). Both legs
+  // are two-sided against the cleared beat one state earlier, where the very
+  // same lever must move the very same pixels.
   const ringMapWas = t.minimapInfo().on;
-  t.setMinimap(true); // the map leg needs the map on however a human left it
-  const stackCol = () => ringRegion(4, 8, rc.x - 5, 48);       // WAVE · CLEAR, the pips, XP, FOES
-  const mapCol = () => ringRegion(rc.x + rc.w + 1, 8, 12, 94); // the corner map's right column
-  liveRender();
-  const stackUnder = stackCol();
-  const mapUnder = mapCol();
-  t.setRingReady(false); // the same shop screen, minus the art
-  liveRender();
-  const stackBare = stackCol();
-  const mapBare = mapCol();
-  t.setRingReady(ringReadyWas);
-  liveRender();
-  const stackAgain = stackCol();
-  const mapAgain = mapCol();
+  const mm = t.minimapInfo();
+  const stackCol = () => ringRegion(4, 8, 60, 56);  // WAVE · CLEAR, the pips, XP, FOES
+  const mapCol = () => ringRegion(t.FW - mm.W - mm.M, mm.M, mm.W, 12); // the map's own top band
+  const shopWas = enc.state().state;
+  const hullWas = enc.E.hull;
+  const underState = (st, fn) => { enc.E.state = st; const v = fn(); enc.E.state = shopWas; return v; };
+  const mapLever = () => { // true = the toggle moved nothing = the map is down
+    t.setMinimap(true);
+    liveRender();
+    const on = mapCol();
+    t.setMinimap(false);
+    liveRender();
+    return on === mapCol();
+  };
+  const stackLever = () => { // true = the pips moved nothing = the stack is down
+    enc.E.hull = enc.E.hullMax;
+    liveRender();
+    const full = stackCol();
+    enc.E.hull = 1;
+    liveRender();
+    return full === stackCol();
+  };
+  const mapDownShop = underState("shop", mapLever);
+  const mapDownClear = underState("cleared", mapLever);
+  const stackDownShop = underState("shop", stackLever);
+  const stackDownClear = underState("cleared", stackLever);
+  enc.E.hull = hullWas;
   t.setMinimap(ringMapWas);
-  ok("the reveal stands the status stack down instead of slicing its column",
-    stackUnder !== stackBare && stackAgain === stackUnder,
-    "cleared=" + (stackUnder !== stackBare) + " stable=" + (stackAgain === stackUnder));
-  ok("the reveal stands the corner map down instead of clipping its frame",
-    mapUnder !== mapBare && mapAgain === mapUnder,
-    "cleared=" + (mapUnder !== mapBare) + " stable=" + (mapAgain === mapUnder));
-  liveKey("Enter");
+  liveRender();
+  ok("the shop screen stands the status stack down instead of printing it twice",
+    stackDownShop === true && stackDownClear === false,
+    "shopInert=" + stackDownShop + " clearedInert=" + stackDownClear);
+  ok("the shop screen stands the corner map down instead of scrimming over it",
+    mapDownShop === true && mapDownClear === false,
+    "shopInert=" + mapDownShop + " clearedInert=" + mapDownClear);
+  ok("hudSuppressed answers for the whole visit, and for the art on its own",
+    liveVal(() => window.Encounter.hudSuppressed()) === true &&
+    window.Encounter.hudSuppressed() === false); // paused, the pause menu owns it
+  // the art is DECORATION and never a hit target: it lands over a band of the
+  // grid, and a click into that band still buys the card underneath it
+  enc.addXp(64); // fund the click-through before the row is chosen, so the
+                 // finder can insist on a row that would actually sell
+  const underIdx = enc.shopLayout().cards.findIndex((c) => {
+    const info = enc.shopInfo()[c.i];
+    return c.i !== ringIdx && !info.maxed && info.available &&
+      c.x + c.w / 2 > rc.x && c.x + c.w / 2 < rc.x + rc.w &&
+      c.y + c.h / 2 > rc.y && c.y + c.h / 2 < rc.y + rc.h;
+  });
+  ok("the art covers a band of the grid, so there is something to click through",
+    underIdx >= 0, "under=" + underIdx + " pop=" + JSON.stringify(rc));
+  if (underIdx >= 0) {
+    const ownedBefore = enc.state().owned[underIdx];
+    clickCard(underIdx);
+    ok("a click lands on the card under the art, not on the art",
+      enc.state().owned[underIdx] === ownedBefore + 1,
+      "before=" + ownedBefore + " after=" + enc.state().owned[underIdx]);
+  }
+  liveMove(4, 4); // off every card — the field's top-left corner
+  ok("the art drops the moment the pointer leaves the card",
+    enc.state().shopHover === -1 &&
+    liveVal(() => window.Encounter.ringCardShown()) === false);
+  clickNext();
   s = enc.state();
-  ok("the reveal is never modal — enter still deals the next wave",
+  ok("the art is never modal — NEXT WAVE still deals the next wave",
     s.state === "warning" && s.wave === 2 && s.waveTick === 0,
     "state=" + s.state + " wave=" + s.wave);
   enc.E.state = "cleared";
   enc.openShop();
-  ok("the next shop opens clean — the reveal was the sale's, not the unlock's",
-    enc.state().ringCard === false && enc.state().mods.keyThrust === true);
+  ok("the next shop opens clean — no hover, no art, and the unlock kept",
+    enc.state().shopHover === -1 && enc.state().mods.keyThrust === true);
 
   // the purchase reaches the sim, and the HUD notice deletes itself
   enc.E.state = "active";
@@ -1674,7 +1884,7 @@ window.runWave1Checks = function () {
   const thrustRelocked = ringThrust();
   ok("restart re-locks the ring in the sim, not just on the flag",
     enc.state().mods.keyThrust === false && t.keyThrustUnlocked() === false &&
-    enc.state().ringCard === false && thrustRelocked === 0,
+    enc.state().shopHover === -1 && thrustRelocked === 0,
     "speed=" + thrustRelocked + " flag=" + enc.state().mods.keyThrust);
   t.setInvert(ringInvWas);
   t.setAimMode(ringAimWas);
@@ -1857,27 +2067,72 @@ window.runWave1Checks = function () {
     enc.buy(blastIdx) === false && enc.shopInfo()[blastIdx].maxed === true &&
     enc.state().owned[blastIdx] === 3 && enc.state().mods.blast === 3,
     "owned=" + enc.state().owned[blastIdx] + " rank=" + enc.state().mods.blast);
-  // the sixth digit reaches the sixth row through the real key handler
+  // the sixth card sells through the real pointer path, click and all
   enc.restart();
   enc.advance(1);
   enc.E.state = "cleared";
   enc.openShop();
   enc.addXp(8);
-  liveKey("Digit6");
+  clickCard(blastIdx);
   s = enc.state();
-  ok("digit six buys the sixth row and the shop stays open",
+  ok("a click on the sixth card buys the sixth row and the shop stays open",
     s.mods.blast === 1 && s.owned[blastIdx] === 1 && s.xp === 0 && s.state === "shop",
     "rank=" + s.mods.blast + " xp=" + s.xp + " state=" + s.state);
-  // six rows still fit: card down the list is centred, card up it hangs off the
-  // reveal's bottom edge, and either way the footer lands above the field floor
-  const rcBox = t.ringCardState();
-  const layUp = enc.shopLayout(true);
-  const layDown = enc.shopLayout(false);
-  ok("the six-row list and its footer fit the field, reveal up and reveal down",
-    layUp.rows === 6 && layDown.rows === 6 &&
-    layUp.titleY >= rcBox.y + rcBox.h && layUp.footY + 4 <= t.FH &&
-    layDown.titleY > 0 && layDown.footY + 4 <= t.FH,
-    JSON.stringify({ up: layUp, down: layDown, cardBottom: rcBox.y + rcBox.h, FH: t.FH }));
+  // The grid itself: every card and the button land wholly on the field, no
+  // two cards overlap, and the detail line and the button sit clear below the
+  // last row. This is the check that fails the day a seventh row is appended —
+  // three columns of two rows is what 512 × 342 holds.
+  const lay = enc.shopLayout();
+  const onField = lay.cards.every((c) => c.x >= 0 && c.y >= 0 && c.x + c.w <= t.FW && c.y + c.h <= t.FH);
+  const gridBottom = Math.max(...lay.cards.map((c) => c.y + c.h));
+  let overlap = false;
+  for (let a = 0; a < lay.cards.length; a++) {
+    for (let b = a + 1; b < lay.cards.length; b++) {
+      const p = lay.cards[a], q = lay.cards[b];
+      if (p.x < q.x + q.w && q.x < p.x + p.w && p.y < q.y + q.h && q.y < p.y + p.h) overlap = true;
+    }
+  }
+  ok("six cards, the detail line and the button all fit the field without overlapping",
+    lay.cards.length === 6 && lay.rows === 2 && onField && !overlap &&
+    lay.titleY < lay.grid.y && lay.detailY > gridBottom &&
+    lay.btn.y > lay.detailY && lay.btn.y + lay.btn.h < t.FH &&
+    lay.btn.x >= 0 && lay.btn.x + lay.btn.w <= t.FW && lay.noteY <= t.FH,
+    JSON.stringify({ rows: lay.rows, gridBottom, detailY: lay.detailY, btn: lay.btn,
+                     noteY: lay.noteY, onField, overlap, FH: t.FH }));
+  // ...and the hit test agrees with the draw for every one of the six, corner
+  // to corner: a card's own rect hits it, and one pixel outside does not
+  const hitAgrees = liveVal(() => lay.cards.every((c) => {
+    enc.shopHover(c.x + c.w / 2, c.y + c.h / 2);
+    if (enc.state().shopHover !== c.i) return false;
+    enc.shopHover(c.x + 0.5, c.y + 0.5);            // the top-left pixel is inside
+    if (enc.state().shopHover !== c.i) return false;
+    enc.shopHover(c.x + c.w - 0.5, c.y + c.h - 0.5); // ...and so is the bottom-right
+    if (enc.state().shopHover !== c.i) return false;
+    enc.shopHover(c.x - 1, c.y + c.h / 2);           // one pixel left of it is not
+    return enc.state().shopHover !== c.i;
+  }));
+  ok("the hit test resolves every card to its own rect and nothing else", hitAgrees);
+  const btnHit = liveVal(() => {
+    enc.shopHover(lay.btn.x + lay.btn.w / 2, lay.btn.y + lay.btn.h / 2);
+    const on = enc.state().shopBtn === true && enc.state().shopHover === -1;
+    enc.shopHover(lay.btn.x + lay.btn.w / 2, lay.btn.y - 2);
+    return on && enc.state().shopBtn === false;
+  });
+  ok("the NEXT WAVE button hit-tests to its own rect and no further", btnHit);
+  // shopPopupRect picks the band with the most room, so a top-row card sends
+  // the art DOWN and a bottom-row card sends it UP. Only one row carries art
+  // today and it is a bottom-row card, so the other branch would otherwise
+  // ship untested — check every card, and check both branches were taken.
+  const popRects = lay.cards.map((c) => ({ c, p: enc.shopPopupRect(c.i) }));
+  const popClear = popRects.every(({ c, p }) =>
+    p.x >= 0 && p.y >= 0 && p.x + p.w <= t.FW && p.y + p.h <= t.FH &&
+    (p.y + p.h <= c.y || p.y >= c.y + c.h));
+  const popBothWays = popRects.some(({ c, p }) => p.y + p.h <= c.y) &&
+                      popRects.some(({ c, p }) => p.y >= c.y + c.h);
+  ok("every row's hover art lands on the field and clear of its own card",
+    popClear && popBothWays,
+    JSON.stringify({ clear: popClear, bothWays: popBothWays,
+      rects: popRects.map(({ c, p }) => [c.i, p.y, p.y + p.h, c.y, c.y + c.h]) }));
   // and the rank dies with the run — the splash is a purchase, never a meta-unlock
   enc.restart();
   enc.advance(1);
@@ -1891,6 +2146,778 @@ window.runWave1Checks = function () {
     rankBefore === 3 && rankAfter === 0 && enc.state().owned[blastIdx] === 0 &&
     rDead.hits === 1 && rDead.target === dartHp - 1 && rDead.near[0] === dartHp,
     "before=" + rankBefore + " after=" + rankAfter + " " + JSON.stringify(rDead));
+
+  // ---- W. the harrier: the standoff carrier and its honest lock ----
+  // The roster's RANGE axis, and the first body that can reach the player from
+  // outside the viewport. Every leg stages through the real spawnEnemy hook and
+  // then drives WHOLE ticks, so the movement, the lock and the launch are the
+  // production ones; nothing here re-derives a bearing the sim already computes.
+  const HAR = ECFG.harrier;
+  const MIS = ECFG.missile;
+  const ANV = ECFG.anvil;
+  const HSK = ECFG.husk;
+  // the wrapped gap between two bearings — the suite's own yardstick for angles
+  // it reads back off the sim, never a copy of the file's angDiff
+  const angGap = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+  // the staging the five roster sections share: a reset field, one tick out of
+  // idle, and wave 1's dart schedule dropped — a 400-tick observation of one
+  // body must not be joined by a pack of lances at tick 126. restart() re-deals
+  // E.groups from waveGroups(), so nothing here leaks past the section.
+  const bare = () => {
+    enc.reset();
+    enc.advance(1);
+    enc.E.groups.length = 0;
+    enc.E.hull = 99; // observation, not survival: a lance must not end a leg early
+  };
+  // walk the REAL wave transitions up to wave w (cleared → shop → continue),
+  // because no hook deals a wave directly and the per-wave scaling is exactly
+  // what the late-wave legs are about
+  const jumpTo = (w) => {
+    enc.reset();
+    while (enc.state().wave < w) { enc.E.state = "cleared"; enc.openShop(); enc.continueFromShop(); }
+    enc.advance(1);
+    enc.E.groups.length = 0;
+    enc.E.hull = 99;
+  };
+  t.setFxInt(1); // these sections read burst positions and kinds; the restore
+                 // tail below puts the page's own intensity back
+  t.G.leftHeld = false; // no autofire bullet may wander into a staged shot
+
+  bare();
+  enc.spawnEnemy(ship().x + 300, ship().y, 0, "harrier");
+  const harBody = enc.E.enemies[0];
+  ok("a spawned harrier carries its stamped type and stats",
+    harBody.type === "harrier" && harBody.r === HAR.r && harBody.hp === HAR.hp &&
+    harBody.orbDrop === HAR.orbDrop && harBody.stats.engage === HAR.engage && harBody.mode === "seek",
+    "type=" + harBody.type + " hp=" + harBody.hp + " engage=" + harBody.stats.engage);
+  // the requirement in one check: three rested bodies at the same 300 px, and
+  // only the carrier can do anything about it from there
+  bare();
+  enc.spawnEnemy(ship().x + 300, ship().y, 0, "harrier");
+  enc.spawnEnemy(ship().x - 300, ship().y, 0, "charger");
+  enc.spawnEnemy(ship().x, ship().y + 300, 0, "dart");
+  for (const e of enc.E.enemies) e.cd = 0; // every one of them rested and in the open
+  enc.advance(1);
+  const harReach = {};
+  for (const e of enc.E.enemies) harReach[e.type] = e.mode;
+  ok("at 300 px only the harrier can reach the player at all",
+    harReach.harrier === "lockon" && harReach.charger === "seek" && harReach.dart === "seek",
+    JSON.stringify(harReach));
+  // the lock is honest: it latches at ENTRY, so the break the telegraph buys
+  // actually beats it
+  bare();
+  enc.spawnEnemy(ship().x + 300, ship().y, 0, "harrier");
+  const harLock = enc.E.enemies[0];
+  harLock.cd = 0;
+  enc.advance(1); // the lock opens on the live bearing...
+  const harLockA = harLock.lockA;
+  const harLockMode = harLock.mode;
+  ship().y += 260;                 // ...and the player breaks laterally while the body plants
+  harLock.face = harLockA + 1.2;   // ...and the hull is even turned away under it, so a
+                                   // launch that read the LIVE facing instead of the
+                                   // latched angle cannot come out on the same bearing
+  enc.advance(HAR.lockon);
+  const harShot = enc.E.missiles[0];
+  const harHeading = harShot ? Math.atan2(harShot.vy, harShot.vx) : 0;
+  const harLive = harShot ? Math.atan2(ship().y - harLock.y, ship().x - harLock.x) : 0;
+  ok("the lock latches its bearing — a player who breaks mid-lock is missed",
+    harLockMode === "lockon" && !!harShot && angGap(harHeading, harLockA) < 1e-9 &&
+    angGap(harHeading, harLive) > 0.5,
+    "heading=" + harHeading.toFixed(4) + " locked=" + harLockA.toFixed(4) + " live=" + harLive.toFixed(4));
+  ok("exactly one missile leaves per lock, and the body goes back to seek owing its cadence",
+    enc.E.missiles.length === 1 && harLock.mode === "seek" && harLock.cd === harLock.stats.cooldown,
+    "missiles=" + enc.E.missiles.length + " mode=" + harLock.mode + " cd=" + harLock.cd);
+  ok("a launched missile leaves the rail clear of its launcher's own hull",
+    Math.hypot(harShot.x - harLock.x, harShot.y - harLock.y) > harLock.r + harShot.r,
+    "off=" + Math.hypot(harShot.x - harLock.x, harShot.y - harLock.y).toFixed(2));
+  // the plant is what makes the telegraph readable — a body still coasting
+  // through its own lock would drag the launch point off the drawn lane
+  bare();
+  enc.spawnEnemy(ship().x + 300, ship().y, 0, "harrier");
+  const harPlant = enc.E.enemies[0];
+  harPlant.cd = 0;
+  enc.advance(1);
+  harPlant.vx = 2; // hand it real speed mid-lock
+  harPlant.vy = 0;
+  enc.advance(10);
+  ok("a locking harrier sinks to a stop instead of coasting through its own telegraph",
+    harPlant.mode === "lockon" && Math.hypot(harPlant.vx, harPlant.vy) < 1,
+    "mode=" + harPlant.mode + " speed=" + Math.hypot(harPlant.vx, harPlant.vy).toFixed(3));
+  // the cadence: two launches are a cooldown plus a lock apart, never less
+  bare();
+  enc.spawnEnemy(ship().x + 300, ship().y, 0, "harrier");
+  const harPace = enc.E.enemies[0];
+  harPace.cd = 0;
+  enc.E.invuln = 9999; // the player is not the subject here — the missiles that
+                       // arrive must not end the run mid-measurement
+  const harFires = [];
+  let harPrevMode = harPace.mode;
+  for (let k = 1; k <= 480 && harFires.length < 2; k++) {
+    enc.advance(1);
+    if (harPrevMode === "lockon" && harPace.mode === "seek") harFires.push(k);
+    harPrevMode = harPace.mode;
+  }
+  const harGap = harFires.length === 2 ? harFires[1] - harFires[0] : -1;
+  const harWant = harPace.stats.cooldown + HAR.lockon;
+  ok("the cooldown paces the next lock: two launches are a full cadence apart",
+    harGap >= harWant && harGap <= harWant + 2,
+    "gap=" + harGap + " cooldown+lock=" + harWant);
+  // the archetype itself: crowding it makes it run. The retreat has to beat the
+  // APPROACH cap as well as the approach speed — a shared clamp taken off
+  // maxSpeed alone would silently delete the whole kite and still pass "it moves".
+  const harGait = (d) => {
+    bare();
+    enc.spawnEnemy(ship().x + d, ship().y, 0, "harrier");
+    const h = enc.E.enemies[0];
+    h.cd = 9999; // movement only — no lock, no launch
+    enc.advance(40);
+    return Math.hypot(h.vx, h.vy);
+  };
+  const harIn = harGait(500);
+  const harOut = harGait(120);
+  const harStats = enc.statsFor(1).harrier;
+  ok("a crowded harrier backs off faster than it ever closes, and faster than its own approach cap",
+    harOut > harIn && harOut > harStats.maxSpeed && harIn <= harStats.maxSpeed + 1e-9,
+    "approach=" + harIn.toFixed(3) + " retreat=" + harOut.toFixed(3) + " maxSpeed=" + harStats.maxSpeed);
+
+  // ---- X. the seeker missile: reach, minor homing, an honest fuse ----
+  // A projectile family the encounter owns outright. Every leg drives the real
+  // constructor through the hook, so a check can never build a missile the sim
+  // would not have made.
+  ok("a missile's fuse carries it clear across the field",
+    MIS.life * MIS.speed > t.FW, "reach=" + MIS.life * MIS.speed + " FW=" + t.FW);
+  // the ±π seam is where wrap bugs live, so the fuzz walks every bearing —
+  // exactly ahead (heading straight at the ship) and exactly behind included
+  let misWorst = 0;
+  let misSpeedErr = 0;
+  let misLost = "";
+  for (let k = 0; k < 24; k++) {
+    bare();
+    const m = enc.spawnMissile(ship().x + 220, ship().y, (k * 2 * Math.PI) / 24);
+    m.age = MIS.arm; // armed, and well clear of the fuse's decay window
+    const h0 = Math.atan2(m.vy, m.vx);
+    enc.advance(1);
+    misWorst = Math.max(misWorst, angGap(Math.atan2(m.vy, m.vx), h0));
+    misSpeedErr = Math.max(misSpeedErr, Math.abs(Math.hypot(m.vx, m.vy) - MIS.speed));
+    if (enc.E.missiles.length !== 1) misLost += "gone@" + k + " ";
+  }
+  ok("a missile never turns faster than its live limit, at any bearing including the ±π seam",
+    misWorst <= MIS.turn + 1e-9 && !misLost,
+    "worst=" + misWorst.toFixed(8) + " limit=" + MIS.turn + " " + misLost);
+  ok("homing changes heading only — the missile's speed is preserved exactly",
+    misSpeedErr < 1e-9, "err=" + misSpeedErr);
+  // ballistic while it arms, and bending the moment it is armed
+  bare();
+  const misArm = enc.spawnMissile(ship().x + 220, ship().y, -Math.PI / 2); // hard across the bearing
+  const misArmH0 = Math.atan2(misArm.vy, misArm.vx);
+  enc.advance(MIS.arm);
+  const misArmH1 = Math.atan2(misArm.vy, misArm.vx);
+  enc.advance(1);
+  const misArmH2 = Math.atan2(misArm.vy, misArm.vx);
+  ok("a missile flies straight while it arms, and bends on the very next tick",
+    angGap(misArmH1, misArmH0) === 0 && angGap(misArmH2, misArmH1) > 0,
+    "armed=" + angGap(misArmH1, misArmH0) + " after=" + angGap(misArmH2, misArmH1).toFixed(6));
+  // the live turn limit, MEASURED: a missile aimed hard across the player's
+  // bearing has its steering clamped every tick, so the heading change it
+  // actually makes is the limit itself
+  const misBend = (age) => {
+    bare();
+    const m = enc.spawnMissile(ship().x + 220, ship().y, -Math.PI / 2);
+    m.age = age;
+    const h0 = Math.atan2(m.vy, m.vx);
+    enc.advance(1);
+    return angGap(Math.atan2(m.vy, m.vx), h0);
+  };
+  const misFull = misBend(MIS.arm);
+  const misFuse = [];
+  for (let a = MIS.life - MIS.decay; a < MIS.life; a += 5) misFuse.push(misBend(a));
+  let misFade = true;
+  for (let i = 1; i < misFuse.length; i++) if (misFuse[i] >= misFuse[i - 1]) misFade = false;
+  ok("the steering fades over the fuse's last ticks and is spent by the time it expires",
+    misBend(MIS.arm - 1) === 0 && misFull > 0 && Math.abs(misFuse[0] - misFull) < 1e-9 && misFade &&
+    misBend(MIS.life - 1) <= MIS.turn / MIS.decay + 1e-12,
+    "full=" + misFull.toFixed(6) + " fuse=" + JSON.stringify(misFuse.map((v) => +v.toFixed(5))));
+  // The pair the whole speed/turn choice was made for, driven through the REAL
+  // launcher, at every range the harrier actually fires from: a committed
+  // lateral break beats the homing, and standing still never does.
+  //
+  // The staging matters more than the assertion here. A hand-placed, pre-armed
+  // missile at ONE distance certifies the FUSE rather than the homing — past
+  // about 350 px the life runs out before a 3×-speed pursuer converges, so that
+  // check passes at any turn rate, including rates at which the break is a
+  // guaranteed hit at every range the harrier really uses. The band below is
+  // the harrier's own: it holds prefer ± band and fires at engage.
+  const misBreak = (range, dodge) => {
+    bare();
+    enc.E.invuln = 0;
+    enc.spawnEnemy(ship().x + range, ship().y, 0, "harrier");
+    const h = enc.E.enemies[0];
+    h.cd = 0; // rested and in range — the next tick opens the lock
+    let fired = false;
+    for (let k = 0; k < HAR.lockon + MIS.life + 8; k++) {
+      // the break starts when the LOCK does, which is when a player who reads
+      // the telegraph would start it
+      if (dodge && (fired || h.mode === "lockon")) ship().y -= enc.tunables().VMAX;
+      enc.advance(1);
+      if (enc.state().missiles) fired = true;
+      else if (fired) break; // the round resolved, one way or the other
+    }
+    return { taken: enc.state().hitsTaken, fired };
+  };
+  const misBand = [250, 300, HAR.engage];
+  const misParked = misBand.map((d) => misBreak(d, false));
+  const misDodged = misBand.map((d) => misBreak(d, true));
+  ok("every launch in the harrier's own band lands on a player who stands still",
+    misParked.every((r) => r.fired && r.taken === 1),
+    JSON.stringify(misBand.map((d, i) => d + ":" + misParked[i].taken)));
+  ok("a committed lateral break beats the homing at every one of those ranges",
+    misDodged.every((r) => r.fired && r.taken === 0),
+    JSON.stringify(misBand.map((d, i) => d + ":" + misDodged[i].taken)));
+  // one hull, once, and the missile is spent on the hull it found
+  bare();
+  enc.E.invuln = 0;
+  const misHull0 = enc.state().hull;
+  enc.spawnMissile(ship().x + 20, ship().y, Math.PI);
+  enc.advance(4);
+  const misHit = enc.state();
+  enc.advance(20);
+  ok("a missile detonates on the hull for exactly one hull, exactly once",
+    misHit.hitsTaken === 1 && misHit.hull === misHull0 - 1 && misHit.missiles === 0 &&
+    enc.state().hitsTaken === 1,
+    "taken=" + misHit.hitsTaken + " hull=" + misHit.hull + " live=" + misHit.missiles);
+  bare();
+  enc.E.invuln = 500; // deep post-hit grace
+  enc.spawnMissile(ship().x + 20, ship().y, Math.PI);
+  enc.advance(4);
+  ok("an i-framed player still eats the missile — the grace is the player's, never the ordnance's",
+    enc.state().hitsTaken === 0 && enc.state().missiles === 0,
+    "taken=" + enc.state().hitsTaken + " live=" + enc.state().missiles);
+  // both motions are swept, exactly as the lance and the dash sweep theirs: the
+  // control leg parks shipPrev on the ship, so a plain-distance implementation
+  // cannot pass both halves
+  const misSweep = (swept) => {
+    bare();
+    enc.E.invuln = 0;
+    const X = ship().x;
+    const Y = ship().y;
+    enc.spawnMissile(X, Y, Math.PI / 2); // parked across the ship's lane
+    ship().x = X + 40;                   // ...with the ship 40 px clear of it
+    enc.E.shipPrev = swept ? { x: X - 40, y: Y } : { x: X + 40, y: Y };
+    enc.advance(1);
+    return { taken: enc.state().hitsTaken, live: enc.state().missiles };
+  };
+  const misStill = misSweep(false);
+  const misCross = misSweep(true);
+  ok("a fast ship cannot cross a missile's path untouched",
+    misStill.taken === 0 && misStill.live === 1 && misCross.taken === 1 && misCross.live === 0,
+    "still=" + JSON.stringify(misStill) + " swept=" + JSON.stringify(misCross));
+  // shootable — and a shootdown is not a kill: no orb, no XP, no entry in kills
+  bare();
+  const misXp0 = enc.state().xp;
+  enc.spawnMissile(ship().x + 150, ship().y, 0);
+  t.G.bullets.push({ x: ship().x, y: ship().y, px: ship().x, py: ship().y, vx: 40, vy: 0,
+    r: 2.2, dmg: 1, owner: "player", dead: false, spent: false, ttl: 60 });
+  enc.advance(8);
+  s = enc.state();
+  ok("a player bullet shoots a missile down, and the shootdown is not a kill",
+    s.missiles === 0 && s.missilesShot === 1 && t.G.bullets.length === 0 &&
+    s.kills === 0 && s.hitsDealt === 0 && s.orbs === 0 && s.xp === misXp0,
+    "shot=" + s.missilesShot + " kills=" + s.kills + " orbs=" + s.orbs + " bullets=" + t.G.bullets.length);
+  // ONE first-along-the-path pass over bodies AND ordnance: the nearer thing
+  // always wins and the bullet is never billed twice. Two legs, the same two
+  // targets swapped, so neither family can be quietly resolved first.
+  const misFirst = (ordnanceNearer) => {
+    bare();
+    const X = ship().x;
+    const Y = ship().y;
+    enc.spawnEnemy(X + (ordnanceNearer ? 165 : 150), Y);
+    const body = enc.E.enemies[0];
+    enc.spawnMissile(X + (ordnanceNearer ? 150 : 165), Y, Math.PI); // closing, so both
+                                                                    // sit on the bullet's line
+    t.G.bullets.push({ x: X + 120, y: Y, px: X + 120, py: Y, vx: 40, vy: 0,
+      r: 2.2, dmg: 1, owner: "player", dead: false, spent: false, ttl: 60 });
+    enc.advance(1);
+    return { shot: enc.state().missilesShot, live: enc.state().missiles,
+      dealt: enc.state().hitsDealt, drop: ECFG.enemy.hp - body.hp };
+  };
+  const misNear = misFirst(true);
+  const misFar = misFirst(false);
+  ok("a bullet stops on whichever comes first — body or ordnance — and pays only that one",
+    misNear.shot === 1 && misNear.live === 0 && misNear.dealt === 0 && misNear.drop === 0 &&
+    misFar.shot === 0 && misFar.live === 1 && misFar.dealt === 1 && misFar.drop === 1,
+    "ordnance-first=" + JSON.stringify(misNear) + " body-first=" + JSON.stringify(misFar));
+  // a missile that leaves the world dies ON the wall it hit, not wherever the
+  // overshoot landed
+  bare();
+  enc.spawnMissile(t.WW - 10, ship().y - 400, 0);
+  enc.advance(2);
+  const misWallB = t.fx.bursts[t.fx.bursts.length - 1];
+  ok("a missile dies at the world wall, on the wall plane",
+    enc.state().missiles === 0 && !!misWallB && misWallB.x === t.WW,
+    "live=" + enc.state().missiles + " burst=" + (misWallB ? misWallB.kind + "@" + misWallB.x : "none"));
+  // the fuse running out: a dodged missile always confirms itself, and hurts
+  // nothing on the way out
+  bare();
+  const misFizz = enc.spawnMissile(ship().x, ship().y - 1400, 0); // far enough that the
+  // homing cannot bring 540 px of flight back to the ship before the fuse ends
+  enc.advance(MIS.life - 1);
+  const misAlive = enc.state().missiles;
+  enc.advance(1);
+  s = enc.state();
+  const misFizzB = t.fx.bursts[t.fx.bursts.length - 1];
+  ok("a fuse runs out where the missile flew, with a burst and no damage",
+    misAlive === 1 && s.missiles === 0 && s.hitsTaken === 0 && !!misFizzB &&
+    Math.abs(misFizzB.x - misFizz.x) < 1e-9 && Math.abs(misFizzB.y - misFizz.y) < 1e-9,
+    "aliveAt=" + misAlive + " taken=" + s.hitsTaken);
+  // the cap is a guard, not a mechanic — but a guard has to actually refuse
+  bare();
+  const misMade = [];
+  for (let k = 0; k < MIS.max + 3; k++) misMade.push(enc.spawnMissile(ship().x, ship().y - 1400, 0));
+  ok("the live-ordnance cap refuses the launch above it instead of queueing it",
+    misMade.slice(0, MIS.max).every((m) => !!m) && misMade.slice(MIS.max).every((m) => m === null) &&
+    enc.state().missiles === MIS.max,
+    "made=" + misMade.filter(Boolean).length + " live=" + enc.state().missiles);
+  enc.spawnEnemy(ship().x + 300, ship().y, 0, "harrier");
+  const misCapped = enc.E.enemies[0];
+  misCapped.mode = "lockon"; // staged one tick from launching into a full sky
+  misCapped.t = 1;
+  misCapped.lockA = Math.PI;
+  enc.advance(1);
+  ok("a harrier refused by the cap still pays its cadence, so it cannot spin the lock",
+    misCapped.mode === "seek" && misCapped.cd === misCapped.stats.cooldown &&
+    enc.state().missiles === MIS.max,
+    "mode=" + misCapped.mode + " cd=" + misCapped.cd + " live=" + enc.state().missiles);
+  // the splash is enemies-only: a blast that swept ordnance out of the air would
+  // quietly delete the harrier's whole threat. A witness body sits at the SAME
+  // offset from the impact, so "the blast never reached that far" cannot pass.
+  bare();
+  blastRanks(3);
+  const misBlastR = enc.blastRadius();
+  const misOff = misBlastR - 8;
+  enc.spawnEnemy(ship().x + 150, ship().y);
+  const misTarget = enc.E.enemies[0];
+  const misIx = misTarget.x - (misTarget.r + 2.2); // the entry point on the inflated body
+  enc.spawnEnemy(misIx, ship().y - misOff);
+  const misWitness = enc.E.enemies[1];
+  const misSafe = enc.spawnMissile(misIx, ship().y + misOff, -Math.PI / 2); // ...flying INTO the splash
+  t.G.bullets.push({ x: misTarget.x - 40, y: ship().y, px: misTarget.x - 40, py: ship().y,
+    vx: 40, vy: 0, r: 2.2, dmg: 1, owner: "player", dead: false, spent: false, ttl: 60 });
+  enc.advance(1);
+  ok("the splash never sweeps ordnance out of the air, at any rank",
+    enc.state().hitsDealt === 1 && misWitness.hp === ECFG.enemy.hp - 1 &&
+    enc.state().missiles === 1 && enc.state().missilesShot === 0 &&
+    Math.hypot(misSafe.x - misIx, misSafe.y - ship().y) < misBlastR,
+    "witness=" + misWitness.hp + " live=" + enc.state().missiles +
+    " missileAt=" + Math.hypot(misSafe.x - misIx, misSafe.y - ship().y).toFixed(1) + " R=" + misBlastR);
+  // a dead harrier's last missile is still the wave: the banner and its orb
+  // sweep must never run under live ordnance
+  bare();
+  enc.spawnEnemy(ship().x + 200, ship().y);
+  enc.advance(1); // the landing turns the wave active
+  enc.spawnMissile(ship().x, ship().y - 1400, 0);
+  enc.E.enemies[0].hp = 0;
+  enc.advance(1);
+  const misGate = enc.state();
+  enc.advance(MIS.life);
+  const misCleared = enc.state();
+  ok("a wave cannot clear while ordnance is still in the air",
+    misGate.enemies === 0 && misGate.queued === 0 && misGate.missiles === 1 &&
+    misGate.state === "active" && misCleared.missiles === 0 && misCleared.state === "cleared",
+    "underFire=" + misGate.state + " after=" + misCleared.state);
+  // ordnance joins the chevrons: a 512×342 window on a 3072×3762 world makes an
+  // unheralded off-screen seeker unfair, and a harrier firing from outside the
+  // view is exactly the case that layer was built for
+  bare();
+  enc.spawnMissile(ship().x + 600, ship().y, 0);
+  const misArrow = enc.edgeArrows();
+  bare();
+  enc.spawnMissile(ship().x + 120, ship().y, 0);
+  const misSeen = enc.edgeArrows();
+  ok("an off-screen missile earns its own edge chevron, and an on-screen one does not",
+    misArrow.length === 1 && misArrow[0].type === "missile" && misSeen.length === 0,
+    "off=" + JSON.stringify(misArrow.map((a) => a.type)) + " on=" + misSeen.length);
+  // ordnance lives inside encStep, so every screen that freezes the sim freezes
+  // it too — a shop visit must not be a free 90 ticks of flight
+  bare();
+  const misHeld = enc.spawnMissile(ship().x, ship().y - 1400, 0);
+  enc.E.state = "cleared";
+  enc.openShop();
+  const misHeldX = misHeld.x;
+  const misHeldY = misHeld.y;
+  enc.advance(40);
+  ok("a frozen shop holds the ordnance mid-flight, like everything else in the sim",
+    enc.frozen() && misHeld.x === misHeldX && misHeld.y === misHeldY && enc.state().missiles === 1,
+    "frozen=" + enc.frozen() + " moved=" + (misHeld.x !== misHeldX || misHeld.y !== misHeldY));
+  // and none of it survives a restart, counter included
+  bare();
+  enc.spawnMissile(ship().x + 150, ship().y, 0);
+  t.G.bullets.push({ x: ship().x, y: ship().y, px: ship().x, py: ship().y, vx: 40, vy: 0,
+    r: 2.2, dmg: 1, owner: "player", dead: false, spent: false, ttl: 60 });
+  enc.advance(8);
+  const misShotCount = enc.state().missilesShot;
+  enc.spawnMissile(ship().x + 200, ship().y, 0);
+  const misBefore = enc.state().missiles;
+  enc.restart();
+  s = enc.state();
+  ok("a restart takes the ordnance and its counter with it",
+    misShotCount === 1 && misBefore === 1 && s.missiles === 0 && s.missilesShot === 0,
+    "before=" + misBefore + "/" + misShotCount + " after=" + s.missiles + "/" + s.missilesShot);
+
+  // ---- Y. the anvil: a shield you have to walk around ----
+  // The roster's FACING axis. Every shield leg fires ONE bullet that resolves on
+  // the tick it lands, with the anvil's facing handed in as an offset from the
+  // bearing that bullet arrives on — so both sides of the arc boundary are a
+  // single number apart and neither is a restatement of the constant.
+  const anvShot = (faceA, ranks) => {
+    bare();
+    if (ranks) blastRanks(ranks);
+    enc.spawnEnemy(ship().x + 150, ship().y, 0, "anvil");
+    const a = enc.E.enemies[0];
+    a.face = faceA;
+    const hp0 = a.hp;
+    t.G.bullets.push({ x: a.x - 40, y: a.y, px: a.x - 40, py: a.y, vx: 40, vy: 0,
+      r: 2.2, dmg: 1, owner: "player", dead: false, spent: false, ttl: 60 });
+    enc.advance(1);
+    return { drop: hp0 - a.hp, dealt: enc.state().hitsDealt,
+      flying: t.G.bullets.filter((b) => !b.dead).length,
+      fx: t.fx.bursts.map((b) => b.kind).join(",") };
+  };
+  const anvFront = anvShot(Math.PI);
+  const anvBack = anvShot(0);
+  ok("a bullet into the frontal arc deals no damage and is consumed anyway",
+    anvFront.drop === 0 && anvFront.dealt === 0 && anvFront.flying === 0,
+    JSON.stringify(anvFront));
+  ok("a blocked bullet sparks as an inert thing struck, not as a hit",
+    anvFront.fx === "wall" && anvBack.fx === "enemy", "blocked=" + anvFront.fx + " landed=" + anvBack.fx);
+  ok("the same bullet from behind the wedge deals its damage",
+    anvBack.drop === 1 && anvBack.dealt === 1, JSON.stringify(anvBack));
+  // both sides of the arc, and both edges of it. The margin is wide enough to
+  // swallow the one tick of turn the body takes before the bullet resolves.
+  const anvEdge = [anvShot(Math.PI - ANV.arc + 0.05), anvShot(Math.PI - ANV.arc - 0.05),
+                   anvShot(Math.PI + ANV.arc - 0.05), anvShot(Math.PI + ANV.arc + 0.05)];
+  ok("the arc boundary holds on both edges: just inside is eaten, just outside bites",
+    anvEdge[0].drop === 0 && anvEdge[1].drop === 1 && anvEdge[2].drop === 0 && anvEdge[3].drop === 1,
+    JSON.stringify(anvEdge.map((r) => r.drop)));
+  // The payoff the shield was priced against, and its exact limit. A round the
+  // SHIELD stopped is excluded from its own splash at every rank — otherwise an
+  // 8 XP purchase would deal full damage through the shield on every blocked
+  // shot (the impact point sits 13 px off the body's centre and BLASTR alone is
+  // 18) and the archetype would evaporate at rank 1. The splash still applies
+  // at a POINT, so a round that terminates on anything ELSE nearby washes over
+  // the shield — which is how BLAST CHARGE answers this body honestly.
+  const anvBlast = anvShot(Math.PI, 3);
+  ok("the shield holds at every blast rank: a stopped round never splashes the body that stopped it",
+    anvBlast.dealt === 0 && anvBlast.drop === 0, JSON.stringify(anvBlast));
+  bare();
+  blastRanks(3);
+  enc.spawnEnemy(ship().x + 150, ship().y, 0, "anvil");
+  const anvNear = enc.E.enemies[0];
+  anvNear.face = Math.PI; // shield square to the incoming round
+  const anvHp0 = anvNear.hp;
+  enc.spawnEnemy(anvNear.x - 30, anvNear.y, 0, "dart"); // a neighbour to stop it instead
+  t.G.bullets.push({ x: anvNear.x - 60, y: anvNear.y, px: anvNear.x - 60, py: anvNear.y,
+    vx: 40, vy: 0, r: 2.2, dmg: 1, owner: "player", dead: false, spent: false, ttl: 60 });
+  enc.advance(1);
+  ok("a round that stops on a NEIGHBOUR still washes its splash over the shield",
+    anvHp0 - anvNear.hp === 1, "drop=" + (anvHp0 - anvNear.hp) +
+    " blastR=" + enc.blastRadius());
+  // the facing is the skill check: it TURNS, at its own rate, and never snaps
+  bare();
+  enc.spawnEnemy(ship().x + 150, ship().y, 0, "anvil");
+  const anvTurn = enc.E.enemies[0];
+  anvTurn.face = 0; // dealt looking away, so the whole sweep is observable
+  const anvSteps = [];
+  let anvPrev = anvTurn.face;
+  for (let k = 0; k < 40; k++) {
+    enc.advance(1);
+    anvSteps.push(angGap(anvTurn.face, anvPrev));
+    anvPrev = anvTurn.face;
+  }
+  const anvAim = Math.atan2(ship().y - anvTurn.y, ship().x - anvTurn.x);
+  ok("the anvil turns toward the player at its own rate and no faster",
+    Math.max.apply(null, anvSteps) <= ANV.turnRate + 1e-12 && anvSteps.every((d) => d > 0) &&
+    angGap(anvTurn.face, anvAim) > 0.5,
+    "worst=" + Math.max.apply(null, anvSteps) + " rate=" + ANV.turnRate +
+    " gapLeft=" + angGap(anvTurn.face, anvAim).toFixed(3));
+  bare();
+  enc.spawnEnemy(ship().x + 150, ship().y);
+  const anvDart = enc.E.enemies[0];
+  anvDart.face = 0;
+  enc.advance(1);
+  ok("every other body still snaps its facing — only the shielded one has to turn",
+    angGap(anvDart.face, Math.atan2(ship().y - anvDart.y, ship().x - anvDart.x)) < 1e-9,
+    "gap=" + angGap(anvDart.face, Math.atan2(ship().y - anvDart.y, ship().x - anvDart.x)));
+  // contact is NOT blocked: this is a bullet shield, and melee stays a tactic
+  bare();
+  const anvRam = ctPin(10, 0, "anvil");
+  anvRam.face = Math.PI; // shield straight at the ship — a bullet here would bounce
+  const anvRamHp = anvRam.hp;
+  enc.E.invuln = 0;
+  enc.advance(1);
+  s = enc.state();
+  ok("ramming the shield still bites both ways — contact is not blocked",
+    s.hitsTaken === 1 && s.contactsDealt === 1 && anvRam.hp === anvRamHp - enc.tunables().BDMG,
+    "taken=" + s.hitsTaken + " dealt=" + s.contactsDealt + " hp=" + anvRam.hp);
+  // and the flank is a moving problem: walked around, it runs along its own
+  // facing instead of closing
+  const anvRun = (faceA) => {
+    bare();
+    enc.spawnEnemy(ship().x + 150, ship().y, 0, "anvil");
+    const a = enc.E.enemies[0];
+    a.face = faceA;
+    const d0 = Math.hypot(a.x - ship().x, a.y - ship().y);
+    enc.advance(30);
+    return Math.hypot(a.x - ship().x, a.y - ship().y) - d0;
+  };
+  const anvClosing = anvRun(Math.PI);
+  const anvFleeing = anvRun(0);
+  ok("a flanked anvil runs forward instead of closing",
+    anvClosing < -10 && anvFleeing > 5,
+    "faced=" + anvClosing.toFixed(2) + " flanked=" + anvFleeing.toFixed(2));
+
+  // ---- Z. the husk: a kill that is a decision ----
+  // The roster's DEATH TIME axis: no attack but contact, and a burst the player
+  // themself triggers.
+  bare();
+  enc.spawnEnemy(ship().x + 200, ship().y, 0, "husk");
+  const hskBody = enc.E.enemies[0];
+  hskBody.hp = 0;
+  enc.advance(1);
+  s = enc.state();
+  const hskParts = enc.E.enemies.slice();
+  const hskOut = hskParts.map((e) => Math.hypot(e.x - hskBody.x, e.y - hskBody.y));
+  const hskFan = hskParts.map((e) => Math.atan2(e.y - hskBody.y, e.x - hskBody.x)).sort((a, b) => a - b);
+  const hskSpread = hskFan.length === 3
+    ? [angGap(hskFan[1], hskFan[0]), angGap(hskFan[2], hskFan[1]), angGap(hskFan[0], hskFan[2])] : [];
+  ok("a killed husk leaves exactly three shards at the death point",
+    s.byType.shard === 3 && s.byType.husk === 0 && s.enemies === 3 &&
+    hskOut.every((d) => Math.abs(d - HSK.r * HSK.push) < 1e-9),
+    "byType=" + JSON.stringify(s.byType) + " out=" + JSON.stringify(hskOut.map((d) => +d.toFixed(3))));
+  ok("the three shards are dealt on an even fan and thrown outward from the corpse",
+    hskSpread.every((d) => Math.abs(d - (2 * Math.PI) / 3) < 1e-9) &&
+    hskParts.every((e) => Math.abs(Math.hypot(e.vx, e.vy) - HSK.kick) < 1e-9 &&
+      angGap(Math.atan2(e.vy, e.vx), Math.atan2(e.y - hskBody.y, e.x - hskBody.x)) < 1e-9),
+    "spread=" + JSON.stringify(hskSpread.map((d) => +d.toFixed(4))));
+  for (const e of enc.E.enemies) e.hp = 0;
+  enc.advance(1);
+  s = enc.state();
+  ok("a shard never splits again, and the husk plus its shards pay four orbs",
+    s.enemies === 0 && s.kills === 4 && s.orbs === 4,
+    "enemies=" + s.enemies + " kills=" + s.kills + " orbs=" + s.orbs);
+  // the burst does NOT respect the spawn push-out: a husk killed in your face is
+  // supposed to burst in your face
+  bare();
+  const hskClose = ctPin(20, 0, "husk");
+  hskClose.hp = 0;
+  enc.advance(1);
+  const hskNear = enc.E.enemies.map((e) => Math.hypot(e.x - ship().x, e.y - ship().y));
+  ok("a husk killed in your face bursts in your face — the split skips the spawn push-out",
+    hskNear.length === 3 && Math.max.apply(null, hskNear) < ECFG.minPlayerDist,
+    "distances=" + JSON.stringify(hskNear.map((d) => +d.toFixed(1))) + " ring=" + ECFG.minPlayerDist);
+  // shards scale like every other body in hp, and deliberately not in speed —
+  // the charger's dashSpeed precedent: a dodge stays fair forever
+  const hskS1 = enc.statsFor(1).shard;
+  const hskS9 = enc.statsFor(9).shard;
+  jumpTo(9);
+  enc.spawnEnemy(ship().x + 200, ship().y, 0, "husk");
+  enc.E.enemies[0].hp = 0;
+  enc.advance(1);
+  ok("a husk that dies on wave 9 bursts into wave-9 shards: harder, never faster",
+    hskS9.hp > hskS1.hp && hskS9.maxSpeed === hskS1.maxSpeed && enc.E.enemies.length === 3 &&
+    enc.E.enemies.every((e) => e.hp === hskS9.hp && e.stats.maxSpeed === hskS1.maxSpeed),
+    "hp1=" + hskS1.hp + " hp9=" + hskS9.hp + " speed=" + hskS9.maxSpeed);
+  // the fan comes off the seeded stream, so two identical runs burst identically
+  const hskBurst = () => {
+    bare();
+    enc.spawnEnemy(ship().x + 200, ship().y, 0, "husk");
+    enc.E.enemies[0].hp = 0;
+    enc.advance(1);
+    return JSON.stringify(enc.E.enemies.map((e) => [+e.x.toFixed(6), +e.y.toFixed(6)]));
+  };
+  const hskRunA = hskBurst();
+  const hskRunB = hskBurst();
+  ok("the burst is dealt from the seeded stream — two identical runs split identically",
+    hskRunA === hskRunB && hskRunA.length > 10, hskRunA);
+  // engage 0 is no attack mode at all, at any range, however long you wait
+  const hskQuiet = (type) => {
+    bare();
+    enc.spawnEnemy(ship().x + 150, ship().y, 0, type);
+    const e = enc.E.enemies[0];
+    e.hp = 999; // cadence, not death: a rammer that reaches the hull must survive the watch
+    e.cd = 0;   // rested — the one state that opens an attack for every armed body
+    const seen = {};
+    for (let k = 0; k < 90; k++) { enc.advance(1); seen[e.mode] = 1; }
+    return Object.keys(seen).join(",");
+  };
+  ok("the drifters and the shards have no attack mode to enter at any range",
+    hskQuiet("husk") === "seek" && hskQuiet("anvil") === "seek" && hskQuiet("shard") === "seek",
+    "husk=" + hskQuiet("husk") + " anvil=" + hskQuiet("anvil") + " shard=" + hskQuiet("shard"));
+
+  // Every new archetype scales in HP and cadence and NEVER in speed, which is
+  // what keeps each one's fairness claim from expiring: the harrier has to
+  // flee faster than it closes at every wave (crowd it and it runs), and both
+  // it and the anvil have to stay under a 2.0 px/tick ship, or a shielded body
+  // you cannot outrun and cannot shoot from the front arrives at wave 10. The
+  // dart and the charger still carry the roster's speed curve — asserted here
+  // too, so this check cannot be satisfied by freezing everything.
+  const spd = (w) => enc.statsFor(w);
+  const spd1 = spd(1);
+  const spd30 = spd(30);
+  const vcap = enc.tunables().VMAX;
+  ok("the three new archetypes get tougher with the wave but never faster",
+    ["harrier", "anvil", "husk"].every((k) => spd30[k].hp > spd1[k].hp &&
+      spd30[k].maxSpeed === spd1[k].maxSpeed) &&
+      spd30.harrier.cooldown < spd1.harrier.cooldown &&
+      spd30.dart.maxSpeed > spd1.dart.maxSpeed && spd30.charger.maxSpeed > spd1.charger.maxSpeed,
+    JSON.stringify(["harrier", "anvil", "husk"].map((k) => k + " " + spd1[k].maxSpeed + "->" + spd30[k].maxSpeed +
+      " hp " + spd1[k].hp + "->" + spd30[k].hp)));
+  ok("the harrier still backs off faster than it closes at wave 30, and neither gait outruns the ship",
+    spd30.harrier.backSpeed > spd30.harrier.maxSpeed && spd30.harrier.backSpeed < vcap &&
+    spd30.anvil.maxSpeed < vcap && spd30.husk.maxSpeed < vcap,
+    "harrier " + spd30.harrier.maxSpeed + "/" + spd30.harrier.backSpeed +
+    " anvil " + spd30.anvil.maxSpeed + " husk " + spd30.husk.maxSpeed + " vmax " + vcap);
+  // spawnEnemy resolves its type against the ROSTER, never with a bare
+  // E.stats[type] read: that read walks Object.prototype, and a body stamped
+  // from Object.constructor carries undefined hp and radius — NaN coordinates
+  // on the next tick and a phantom kill on the one after.
+  bare();
+  const protoBefore = enc.state().kills;
+  for (const k of ["constructor", "toString", "__proto__", "hasOwnProperty", "Husk"]) {
+    enc.spawnEnemy(ship().x + 200, ship().y, 0, k);
+  }
+  const protoBodies = enc.E.enemies.slice();
+  enc.advance(2);
+  ok("an unknown type name spawns a dart, prototype keys included — never a body with no stats",
+    protoBodies.length === 5 && protoBodies.every((e) => e.type === "dart" && e.hp > 0 && e.r > 0) &&
+    enc.E.enemies.every((e) => Number.isFinite(e.x) && Number.isFinite(e.y)) &&
+    enc.state().kills === protoBefore,
+    JSON.stringify(protoBodies.map((e) => e.type + ":" + e.hp)) + " kills=" + enc.state().kills);
+
+  // ---- AA. the generator: composition by interleave, bounded by pitch ----
+  // countsFor/waveGroups stay pure functions of the wave number, so every leg
+  // here is arithmetic on the real generator rather than a played wave.
+  const genKeys = ["darts", "chargers", "harriers", "husks", "anvils"];
+  const genPlural = { dart: "darts", charger: "chargers", harrier: "harriers", husk: "husks", anvil: "anvils" };
+  const genCounts = [];
+  for (let w = 1; w <= 30; w++) genCounts.push(enc.countsFor(w));
+  ok("waveGroups(1) is still the hand-tuned slice, byte for byte",
+    JSON.stringify(W1) === JSON.stringify([{ count: 3, type: "dart", warnAt: 36, spawnAt: 126 },
+                                           { count: 2, type: "dart", warnAt: 810, spawnAt: 900 }]),
+    JSON.stringify(W1));
+  ok("wave 1 still deals five darts and nothing else",
+    genCounts[0].darts === 5 && genKeys.slice(1).every((k) => genCounts[0][k] === 0),
+    JSON.stringify(genCounts[0]));
+  let genMono = true;
+  let genShrank = "";
+  for (let w = 1; w < 30; w++) {
+    for (const k of genKeys) if (genCounts[w][k] < genCounts[w - 1][k]) { genMono = false; genShrank += k + "@" + (w + 1) + " "; }
+  }
+  ok("no type's count ever shrinks from one wave to the next", genMono, genShrank);
+  const genDebut = (k) => genCounts.findIndex((c) => c[k] > 0) + 1;
+  ok("one new idea per wave, each archetype debuting as a single body",
+    genDebut("darts") === 1 && genDebut("harriers") === 2 && genDebut("chargers") === 3 &&
+    genDebut("husks") === 4 && genDebut("anvils") === 5 &&
+    genKeys.slice(1).every((k) => genCounts[genDebut(k) - 1][k] === 1),
+    genKeys.map((k) => k + "@" + genDebut(k)).join(" "));
+  // caps, asserted as caps rather than as numbers: past wave 30 nothing grows
+  const gen60 = enc.countsFor(60);
+  ok("every count has stopped growing by wave 30",
+    genKeys.every((k) => genCounts[29][k] === gen60[k]),
+    "w30=" + JSON.stringify(genCounts[29]) + " w60=" + JSON.stringify(gen60));
+  const gen30s = enc.statsFor(30);
+  const gen60s = enc.statsFor(60);
+  ok("the harrier's cadence bottoms out, and even at the floor it never has two of its own missiles in the air",
+    gen30s.harrier.cooldown === gen60s.harrier.cooldown &&
+    gen30s.harrier.cooldown + HAR.lockon > MIS.life,
+    "cooldown=" + gen30s.harrier.cooldown + " +lock=" + (gen30s.harrier.cooldown + HAR.lockon) +
+    " life=" + MIS.life);
+  // every wave deals exactly what its counts promise, group by group
+  let genSum = true;
+  let genOff = "";
+  let genGapMin = 1e9;
+  let genGapMax = -1;
+  let genLast = 0;
+  let genWarn = true;
+  let genOpen = true;
+  for (let w = 1; w <= 30; w++) {
+    const gs = enc.waveGroups(w);
+    const tally = {};
+    for (const g of gs) tally[g.type] = (tally[g.type] || 0) + g.count;
+    for (const type of Object.keys(genPlural)) {
+      if ((tally[type] || 0) !== genCounts[w - 1][genPlural[type]]) { genSum = false; genOff += type + "@" + w + " "; }
+    }
+    // ...and nothing else: the shard is the husk's payload, never a scheduled body
+    for (const type of Object.keys(tally)) if (!genPlural[type]) { genSum = false; genOff += "unscheduled:" + type + "@" + w + " "; }
+    if (w === 1) continue; // wave 1 keeps its own hand-tuned pitch, checked above
+    if (gs[0].spawnAt !== 126) genOpen = false;
+    for (let i = 0; i < gs.length; i++) {
+      if (gs[i].spawnAt - gs[i].warnAt !== 90) genWarn = false;
+      if (i) {
+        const gap = gs[i].spawnAt - gs[i - 1].spawnAt;
+        genGapMin = Math.min(genGapMin, gap);
+        genGapMax = Math.max(genGapMax, gap);
+      }
+    }
+    genLast = Math.max(genLast, gs[gs.length - 1].spawnAt);
+  }
+  ok("every wave's schedule deals exactly the bodies its counts promise", genSum, genOff);
+  ok("every wave keeps the 126-tick opening and the 90-tick warning", genOpen && genWarn);
+  ok("the pitch bounds a wave's length: groups land 2.5 to 5 s apart and no wave runs past 50 s",
+    genGapMin >= 150 && genGapMax <= 300 && genLast < 3000,
+    "pitch=" + genGapMin + ".." + genGapMax + " lastSpawn=" + genLast);
+  // the interleave itself — this is what makes a wave a composition rather than
+  // all the darts and then all the heavies
+  const genSeq = enc.waveGroups(30).map((g) => g.type);
+  const genTypes = new Set(genSeq);
+  let genInter = true;
+  for (let i = 1; i < genSeq.length; i++) {
+    // a repeat is only legitimate once every other queue has run dry — that tail
+    // is the dart remainder, and nothing else may double up before it
+    if (genSeq[i] === genSeq[i - 1] && genSeq.slice(i).some((tp) => tp !== genSeq[i])) genInter = false;
+  }
+  ok("a late wave opens with one group of every type it deals and never doubles up before the tail",
+    genTypes.size === 5 && new Set(genSeq.slice(0, genTypes.size)).size === genTypes.size && genInter,
+    genSeq.join(","));
+
+  // ---- AB. determinism with the whole roster on the field ----
+  // The suite's snapshot idiom, widened to the wave that first deals every
+  // archetype. The run fires on a fixed sweep so bodies actually die: orb drift
+  // and the husk's fan are the only rand() draws the sim makes, so a single
+  // stolen or reordered number moves them and the two keys separate.
+  const detRun = () => {
+    enc.reset();
+    while (enc.state().wave < 5) { enc.E.state = "cleared"; enc.openShop(); enc.continueFromShop(); }
+    enc.E.hull = 99999; // a parked ship in wave 5 is a target — the run must not end early
+    let shards = 0;
+    let air = 0;
+    for (let k = 0; k < 1500; k++) {
+      if (k % 6 === 0) { // a fixed sweep: deterministic, and it reaches every ring
+        const a = k * 0.37;
+        t.G.bullets.push({ x: ship().x, y: ship().y, px: ship().x, py: ship().y,
+          vx: Math.cos(a) * 30, vy: Math.sin(a) * 30, r: 2.2, dmg: 1, owner: "player",
+          dead: false, spent: false, ttl: 60 });
+      }
+      enc.advance(1);
+      const st = enc.state();
+      shards = Math.max(shards, st.byType.shard);
+      air = Math.max(air, st.missiles);
+    }
+    const st = enc.state();
+    return { shards, air, kills: st.kills, shot: st.missilesShot,
+      key: JSON.stringify([
+        enc.E.enemies.map((e) => [e.type, e.mode, e.hp, +e.x.toFixed(3), +e.y.toFixed(3)]),
+        enc.E.missiles.map((m) => [+m.x.toFixed(3), +m.y.toFixed(3)]),
+        enc.E.orbs.map((o) => [+o.x.toFixed(3), +o.y.toFixed(3)]),
+        st.kills, st.missilesShot, st.hitsTaken, st.xp]) };
+  };
+  const detA = detRun();
+  const detB = detRun();
+  ok("a wave-5 run with missiles, splits and shields in play replays identically",
+    detA.key === detB.key && detA.key.length > 40, "len=" + detA.key.length);
+  ok("...and that run really put the whole roster through its paces",
+    detA.shards > 0 && detA.air > 0 && detA.kills > 0 &&
+    detA.shards === detB.shards && detA.air === detB.air && detA.shot === detB.shot,
+    "shards=" + detA.shards + " ordnance=" + detA.air + " kills=" + detA.kills + " shot=" + detA.shot);
 
   // ---- restore the page for a human ----
   t.setFxInt(priorFx.FXINT);

@@ -35,6 +35,7 @@ window.runPauseUiChecks = function () {
     camera: ["cammode", "camease", "cambox", "camlead", "leadsrc", "aimlead", "leadblend", "leaddz", "edgemargin"],
     world: ["stardens", "reseed", "minimap", "edgearrows"],
     combat: ["contactcd"],
+    audio: ["sfxvol", "sfxmute", "sfxshot", "sfxfoe", "sfxui", "sfxeng", "sfxtest"],
   };
   const ALL = [].concat(...Object.values(TABS));
   // the five id-less outputs showTuner() must never overwrite, and their prose
@@ -99,11 +100,20 @@ window.runPauseUiChecks = function () {
     "marked=" + marked.map((b) => b.dataset.tab).join("+"));
   ok("the tab strip is built from real buttons",
     [...document.querySelectorAll("#devpanel .tab")].every((b) => b.tagName === "BUTTON" && b.type === "button"));
+  // the coverage the audio tab's arrival demanded: a tab wired into the strip
+  // but missing its section (or vice versa, or absent from this contract)
+  // used to ship green, because every check above starts FROM the TABS map —
+  // this one starts from the page and makes the three lists name each other
+  const stripTabs = [...document.querySelectorAll("#devpanel .tab")].map((b) => b.dataset.tab);
+  const secTabs = [...document.querySelectorAll("#devpanel .tabsec")].map((s) => s.dataset.tab);
+  ok("the tab strip, the sections and the TABS contract name the same tabs",
+    stripTabs.join(" ") === Object.keys(TABS).join(" ") && secTabs.join(" ") === Object.keys(TABS).join(" "),
+    "strip=[" + stripTabs.join(" ") + "] secs=[" + secTabs.join(" ") + "]");
   ui.setDevTab("no-such-tab");
   ok("an unknown tab name is ignored", ui.UI.tab === "camera", "tab=" + ui.UI.tab);
 
   // ---- D. the control-id contract the move had to preserve ----
-  ok("the 28 split controls plus 2 fx, 2 blast, 1 combat and 1 world control are all present", ALL.length === 34, "n=" + ALL.length);
+  ok("the 28 split controls plus 2 fx, 2 blast, 1 combat, 1 world and 7 audio controls are all present", ALL.length === 41, "n=" + ALL.length);
   let idErr = "";
   for (const id of ALL) {
     const n = document.querySelectorAll("#" + id).length;
@@ -115,7 +125,7 @@ window.runPauseUiChecks = function () {
     const live = !!document.getElementById(id + "-out");
     if (live === (STATIC[id] !== undefined)) outErr += id + " ";
   }
-  ok("29 controls carry a live readout and 5 carry none", !outErr, outErr);
+  ok("36 controls carry a live readout and 5 carry none", !outErr, outErr);
   let proseErr = "";
   for (const id of Object.keys(STATIC)) {
     const o = document.querySelector('#devpanel output[for="' + id + '"]');

@@ -81,6 +81,17 @@ let CONTACTCD = 62;     // ticks before one enemy body can take contact damage a
 let BOUNCE = false;     // bullets bounce off walls instead of dying at them
 let BLASTR = 18;        // BLAST CHARGE splash radius at rank 1, px — the shop row's reach; slider, weapons tab
 let BLASTGAIN = 8;      // px the radius grows per rank past the first: BLASTR + BLASTGAIN × (rank − 1)
+// ---- audio ---------------------------------------------------------------
+// js/audio.js reads every one of these LIVE at cue time and every frame — the
+// same deal encounter.js has with BDMG and CONTACTCD: that module owns the
+// synthesis, this file owns the numbers, and a page without js/audio.js still
+// has a complete, harmless audio tab whose sliders drive nothing.
+let SFXVOL = 0.65;   // master, 0..1 — audio.js applies SFXVOL^1.6 × 0.4, the ancestor's own curve
+let SFXMUTE = false; // the hard switch: a muted page allocates no voices at all, it does not gain them to zero
+let SFXSHOT = 1;     // bus trim — fire, wall ticks, hits, kills, the blast splash
+let SFXFOE = 1;      // bus trim — lance and lunge tells, spawns, damage taken, death
+let SFXUI = 1;       // bus trim — orb pickups, wave alarms and banners, the shop
+let SFXENG = 1;      // engine hum trim — the hum tracks G.flame, so this trims what the flame sounds like; 0 is off
 let INVERT = true;      // swap right-button roles — off: hold right to aim; on: mouse aims until right is held to fly
 const AIM_R = 16;       // push-model offset clamp radius, px
 const MIN_FIRE_V = 0.25; // cq-scale refuses to fire below this ship speed — the original's rule
@@ -111,7 +122,7 @@ const resumebtn = document.getElementById("resumebtn");  // the same button with
 // registered long before the boot tail — a declaration further down would turn
 // any early event into a temporal-dead-zone ReferenceError.
 const UI = { dev: false, tab: "flight" };
-const DEV_TABS = ["flight", "aim", "weapons", "camera", "world", "combat"];
+const DEV_TABS = ["flight", "aim", "weapons", "camera", "world", "combat", "audio"];
 
 const G = {
   running: false,
@@ -319,9 +330,20 @@ function updateCamera() {
 
 // ---- control roles -------------------------------------------------------
 const mouseMode = () => AIMMODE === "mouse";
-const cursorHidden = () => mouseMode() && G.running && G.rightHeld;
+// The right button hides the cursor because in mouse mode it means "the mouse
+// is flying the ship now". A FROZEN overlay owns the field instead, and the
+// shop is a mouse UI — the cursor is the only way to click a card — so the
+// hide stands down for as long as the freeze lasts, however the button sits.
+const cursorHidden = () => mouseMode() && G.running && G.rightHeld &&
+                           !(window.Encounter && Encounter.frozen());
 function syncCursor() {
   canvas.classList.toggle("hide-cursor", cursorHidden());
+  // ...and the pointer over a live frozen overlay is a menu pointer, not the
+  // crosshair the field wears. Both classes are set from one place so they
+  // cannot contradict: hide-cursor only ever applies in flight, this only
+  // ever over a freeze, and the two states are mutually exclusive above.
+  canvas.classList.toggle("ui-cursor",
+    G.running && !!(window.Encounter && Encounter.frozen()));
 }
 // One boolean preserves the original invertible role swap in both modes:
 // while aiming(), the mouse owns the aim and the keys thrust; otherwise the
@@ -387,16 +409,24 @@ function aimImpulse(dx, dy) {
 // backing buffer and letterbox transform. Comparing that viewport point to
 // ship - camera makes the direction follow the ship's CURRENT screen
 // position even when the camera or ship moves without another mouse event.
-function mouseAimDir() {
-  if (!G.mouse.seen) return null;
+// client coordinates → LOGICAL FIELD coordinates: the letterbox transform
+// only, with no camera, so the result lands in the space the UI pass draws in
+// (the HUD, the overlays, the shop's cards). Null while the canvas has no box
+// yet. Aim wants the same conversion, so it reads through this too.
+function pointerField(clientX, clientY) {
   const r = canvas.getBoundingClientRect();
   if (!r.width || !r.height) return null;
-  const bx = (G.mouse.x - r.left) * canvas.width / r.width;
-  const by = (G.mouse.y - r.top) * canvas.height / r.height;
-  const pointerX = (bx - ox) / scale;
-  const pointerY = (by - oy) / scale;
-  const dx = pointerX - (G.ship.x - cam.x);
-  const dy = pointerY - (G.ship.y - cam.y);
+  const bx = (clientX - r.left) * canvas.width / r.width;
+  const by = (clientY - r.top) * canvas.height / r.height;
+  return { x: (bx - ox) / scale, y: (by - oy) / scale };
+}
+
+function mouseAimDir() {
+  if (!G.mouse.seen) return null;
+  const p = pointerField(G.mouse.x, G.mouse.y);
+  if (!p) return null;
+  const dx = p.x - (G.ship.x - cam.x);
+  const dy = p.y - (G.ship.y - cam.y);
   const m = Math.hypot(dx, dy);
   return m < 0.001 ? null : { x: dx / m, y: dy / m };
 }
@@ -458,6 +488,7 @@ function fire() {
                    r: 2.2, dmg: BDMG, owner: "player", dead: false, spent: false,
                    ttl: Math.max(1, Math.round(BLIFE * 1000 / TICK)) }); // no upgrade touches lifetime — BLIFE is the only knob
   G.cool = Math.max(1, Math.round(BCOOL * (em ? em.cool : 1) / TICK));
+  if (window.Sfx) Sfx.cue("fire"); // after every gate above — a refused shot is silent
 }
 
 // ---- simulation step (one ~16.7ms update) --------------------------------
@@ -494,10 +525,15 @@ function step() {
   const keep = WALLLOSS - 1; // negated: flip and damp in one multiply
   G.ship.x += G.vel.x;
   G.ship.y += G.vel.y;
-  if (G.ship.x < SHIP_R) { G.ship.x = SHIP_R * 2 - G.ship.x; G.vel.x *= keep; }
-  else if (G.ship.x > WW - SHIP_R) { G.ship.x = (WW - SHIP_R) * 2 - G.ship.x; G.vel.x *= keep; }
-  if (G.ship.y < SHIP_R) { G.ship.y = SHIP_R * 2 - G.ship.y; G.vel.y *= keep; }
-  else if (G.ship.y > WH - SHIP_R) { G.ship.y = (WH - SHIP_R) * 2 - G.ship.y; G.vel.y *= keep; }
+  let wallHit = 0; // the flipped component's pre-bounce speed — audio reads it, nothing else
+  if (G.ship.x < SHIP_R) { G.ship.x = SHIP_R * 2 - G.ship.x; wallHit = Math.abs(G.vel.x); G.vel.x *= keep; }
+  else if (G.ship.x > WW - SHIP_R) { G.ship.x = (WW - SHIP_R) * 2 - G.ship.x; wallHit = Math.abs(G.vel.x); G.vel.x *= keep; }
+  if (G.ship.y < SHIP_R) { G.ship.y = SHIP_R * 2 - G.ship.y; wallHit = Math.max(wallHit, Math.abs(G.vel.y)); G.vel.y *= keep; }
+  else if (G.ship.y > WH - SHIP_R) { G.ship.y = (WH - SHIP_R) * 2 - G.ship.y; wallHit = Math.max(wallHit, Math.abs(G.vel.y)); G.vel.y *= keep; }
+  // the Math.max above is what makes a corner bounce one sound instead of
+  // two; the magnitude rides through as the thud's volume, so a graze
+  // whispers and a full-speed slam lands
+  if (wallHit > 0 && window.Sfx) Sfx.cue("thud", null, Math.min(1, wallHit / 4));
   updateCamera(); // the view follows once the ship has settled for this tick
   G.flame.x += (G.thrustAcc.x - G.flame.x) * FLAME_EASE;
   G.flame.y += (G.thrustAcc.y - G.flame.y) * FLAME_EASE;
@@ -758,28 +794,35 @@ function guideEligible() {
 function guideShown() { return guideEligible() && guideReady; }
 
 // ---- the eight-way thrust card ---------------------------------------------
-// The THRUST RING purchase's reveal. This file owns the asset — exactly as it
-// owns the first-run card — and encounter.js owns where it lands: the shop
-// overlay draws it the instant the sale registers, and slides its own list
-// down to clear RING_Y + RING_H. It is NEVER modal: every digit and Enter stay
-// live underneath it, so a player can keep buying and continue at any moment.
+// The THRUST RING row's explainer art. This file owns the ASSET — exactly as
+// it owns the first-run card — and encounter.js owns the RECT: the shop pops
+// this up while the pointer rests on that row's card, on the half of the grid
+// the hovered card is not in, and drops it the moment the pointer leaves. It
+// is a hover preview, not a purchase reveal and not a modal: every card and
+// the NEXT WAVE button stay clickable underneath it.
 //
 // The load is asynchronous on the same contract as the first-run card:
 // ringReady opens false, the handler asks for one repaint and nothing else,
-// and a load that never completes simply leaves the shop drawing its one-line
-// text stand-in instead of the art.
+// and a load that never completes simply leaves the shop's hover showing the
+// row's own description line and no art at all.
+// The asset is 2172 × 724 and carries a footer band — "PRESS ENTER TO
+// CONTINUE" — left from the flow that used to raise it on the sale. The shop
+// binds no keys at all now, so that line is simply false, and a preview must
+// not instruct. Only the CONTENT band is drawn: source rows 0..RING_CROP_H,
+// cut just above the footer's own top rule at y=612. The popup's clay border
+// stands in for the frame the crop takes off.
 const RING_SRC = "assets/ui/eight-way-thrust-explainer.png";
-const RING_W = 480;                  // the same 3:1 logical slot the first-run card uses
-const RING_H = 160;
-const RING_X = (FW - RING_W) / 2;    // 16 px of field either side
-const RING_Y = 6;                    // hard against the top — the shop list takes the rest
-const RING_BOTTOM = RING_Y + RING_H; // encDrawHud lays its title out from here
+const RING_SRC_W = 2172;
+const RING_CROP_H = 610;
+const RING_RATIO = RING_SRC_W / RING_CROP_H; // ≈3.56 — encounter.js sizes the popup to this
 const ringImg = new Image();
 let ringReady = false;
 ringImg.addEventListener("load", () => { ringReady = true; render(); });
 ringImg.src = RING_SRC;
 function ringCardReady() { return ringReady; }
-function drawRingCard() { ctx.drawImage(ringImg, RING_X, RING_Y, RING_W, RING_H); }
+function drawRingCard(x, y, w, h) {
+  ctx.drawImage(ringImg, 0, 0, RING_SRC_W, RING_CROP_H, x, y, w, h);
+}
 
 // ---- bullet impact fx ------------------------------------------------------
 // Purely visual. Bursts are spawned by resolveBulletHits() (enemy hits, in
@@ -823,10 +866,23 @@ function resetImpactFx() { fx.bursts.length = 0; fx.count = 0; fxWall.length = 0
 // eaten by a body short of the wall it was heading for. Only the bullets that
 // survive that sweep actually reached the wall, so the queue drains at the end
 // of step() and drops the entries whose bullet died on the way.
+// The FXINT gate used to live on the queue push; it now lives in
+// spawnImpactFx alone (whose first line already early-returns on FXINT <= 0,
+// so the visual side is byte-identical at every slider value). What changes
+// is that the wall EVENT survives to the flush and can be heard — a
+// decoration slider must not silently double as a mute switch for wall
+// ticks. The audio cue sits HERE, in the survivor loop, never at the
+// bullet-loop spent sites: the queue exists precisely because the encounter
+// sweep can eat a bullet short of the wall it was heading for, and the sound
+// inherits that arbitration exactly as the spark does.
 const fxWall = [];
-function queueWallFx(b, x, y, dx, dy) { if (FXINT > 0) fxWall.push({ b, x, y, dx, dy }); }
+function queueWallFx(b, x, y, dx, dy) { fxWall.push({ b, x, y, dx, dy }); }
 function flushWallFx() {
-  for (const q of fxWall) if (!q.b.dead) spawnImpactFx(q.x, q.y, q.dx, q.dy, "wall");
+  for (const q of fxWall) {
+    if (q.b.dead) continue;
+    spawnImpactFx(q.x, q.y, q.dx, q.dy, "wall");
+    if (window.Sfx) Sfx.cue("wall", q); // q carries x/y — the same contact point as the spark
+  }
   fxWall.length = 0;
 }
 // Where a segment crosses a wall plane: the parameter on the crossing axis,
@@ -966,18 +1022,21 @@ function render() {
   // one read of the card gate, so the map, the copy and the art cannot
   // disagree inside a single frame
   const guide = guideShown();
-  // ...and the same read for the shop's THRUST RING reveal, which encounter.js
-  // owns. Both cards are opaque bitmaps whose rect swallows the corner map's
-  // frame, so the map would show as a sliced-off sliver beside the art rather
-  // than as a map. It comes back the moment the card goes.
-  const ringUp = !!(window.Encounter && Encounter.ringCardShown());
+  // ...and the same read for the encounter's own overlay suppression. Two
+  // things claim the screen: an opaque hover bitmap, whose rect swallows the
+  // corner map's frame so the map would show as a sliced-off sliver rather
+  // than as a map, and the shop screen itself, which paints a scrim over the
+  // field and carries the wave, the hull and the wallet in its own header —
+  // leaving the map and the status stack as duplicates over the top of it.
+  // Both come back the moment the screen does.
+  const ringUp = !!(window.Encounter && Encounter.hudSuppressed());
   if (MINIMAP && !guide && !ringUp) drawMinimap(); // the card screens keep one hierarchy — see guideShown()
   if (window.Encounter) Encounter.drawHud(ctx); // encounter HUD and overlays — screen space, no camera
   // the pause text, and the dev screen's claim on it: while the panel is open
   // it owns the screen, so none of this draws. render() reads UI.dev directly
   // rather than taking a flag, so every foreign caller — the resize listener,
   // the stardens/minimap/reseed repaints, setAimMode/setInvert and the
-  // encounter's own R/digit/Enter repaint — inherits the suppression for free.
+  // encounter's own R-restart repaint — inherits the suppression for free.
   if (!G.running && !UI.dev) {
     if (guide) {
       // the card already says LEFT CLICK TO START and states the whole
@@ -997,6 +1056,9 @@ function render() {
     }
   }
   ctx.restore(); // drop the field clip
+  if (window.Sfx) Sfx.frame(); // the draw path drives the engine hum, never step():
+                               // five coalesced sim ticks cost one param write, and
+                               // a suite's advance() never touches audio at all
 }
 
 // ---- loop control ----------------------------------------------------------
@@ -1067,7 +1129,26 @@ function pause() {
 // after both the raw and standard requests fail. Mouse mode asks for the
 // standard lock directly: rejecting a raw request can consume the one user
 // gesture its fallback needs, while standard lock still gives unbounded deltas.
+// The open shop is a MOUSE UI: it asked for the native cursor, released any
+// lock to get it, and must not be handed one back. Three flight-control paths
+// would otherwise fight it — requestLock's callers (a resume over the frozen
+// screen, a right-button release with INVERT off), and the two lock-loss
+// handlers, which would read the release the shop itself performed as a lock
+// loss and pause the shop behind the menu. Left in flight, that sequence ends
+// with the player looking at a menu with no cursor to click it with. One
+// predicate answers all three. It is deliberately the SHOP and not frozen():
+// the death screen has no click targets, and its resume still re-arms the
+// lock so an R-restart lands with working flight controls.
+//
+// It reads shopScreen() — the SCREEN — and not shopOpen(), which also demands
+// the loop's flag. A paused shop is still the screen the resume lands back on,
+// and the mouseup below has no running gate: with INVERT off, a right release
+// over the pause menu reaches requestLock with a genuine user gesture, Chrome
+// grants the lock, and resume() carries it into a mouse-only menu with no
+// cursor, a frozen hover and every click landing on one field pixel.
+const shopOwnsPointer = () => !!(window.Encounter && Encounter.shopScreen && Encounter.shopScreen());
 function requestLock(pauseOnFailure = true, preferRaw = true) {
+  if (shopOwnsPointer()) return;
   if (!lockSupported || locked()) return;
   // unadjustedMovement disables OS mouse acceleration — closest to the raw
   // quadrature mouse the physics were designed around
@@ -1085,6 +1166,25 @@ function requestLock(pauseOnFailure = true, preferRaw = true) {
     }
   };
   attempt(preferRaw);
+}
+// The frozen shop is a MOUSE UI: it needs the native cursor back, whatever the
+// flight controls were doing when the wave cleared. encounter.js calls these
+// two from openShop/continueFromShop — the release is unconditional, and the
+// restore re-arms exactly what resume() would arm for the current mode, so a
+// player who cleared a wave mid-flight lands back in the same controls. Both
+// are safe off a user gesture: the restore only ever runs from the click on
+// NEXT WAVE, and a lock request that fails without one is caught by
+// requestLock's own guard (pauseOnFailure stays off for mouse mode).
+function overlayPointerRelease() {
+  if (locked() && typeof document.exitPointerLock === "function") document.exitPointerLock();
+  syncCursor();
+}
+function overlayPointerRestore() {
+  syncCursor();
+  if (!G.running) return; // a paused page has no lock to re-arm and no gesture to
+                          // arm it with — resume() is what puts the controls back
+  if (!mouseMode()) requestLock();
+  else if (!aiming()) requestLock(false, false);
 }
 function setRightHeld(held) {
   const wasMouseAim = mouseMode() && aiming();
@@ -1115,15 +1215,28 @@ function blurPanels() {
 // difference observable, so it is preserved rather than tidied.
 function resume() {
   if (G.running) return; // a focused resume button re-fires on Space/Enter — never re-enter mid-flight
+  if (window.Sfx) Sfx.unlock(); // the page's one entry gesture — ABOVE the frozen
+                                // branch, so a death-screen resume arms audio too
   UI.dev = false; // whichever screen the gesture came from, the resume ends on the field
   if (window.Encounter && Encounter.frozen()) {
     // dead/shop overlays: the click resumes only the loop — combat stays
-    // frozen and the overlay's own keys (R, the digits, Enter) are the way on.
+    // frozen, and the overlay's own input is the way on: R on the death
+    // screen, the cards and the NEXT WAVE button in the shop.
     // Lock-dependent modes still re-arm their pointer lock here, so an
-    // R-restart after this resume has working flight controls.
+    // R-restart after this resume has working flight controls — but the SHOP
+    // takes the opposite branch, because that screen needs the cursor.
     G.running = true;
     syncCursor();
-    if (!mouseMode()) requestLock();
+    if (shopOwnsPointer()) {
+      // REFUSING to arm one is not enough: a lock can already be held coming
+      // in — the mouseup below grants one over the pause menu with INVERT off
+      // — and it would ride into the shop, killing the cursor and freezing
+      // clientX/clientY so the hover never moves again. Drop it, then re-seed
+      // the hover: a paused shop takes no mousemove, so the pointer may have
+      // travelled far from whatever card was lit when the pause began.
+      overlayPointerRelease();
+      if (Encounter.shopSeedHover) Encounter.shopSeedHover();
+    } else if (!mouseMode()) requestLock();
     else if (!aiming()) requestLock(false, false);
     blurPanels(); // the overlay keys live on document — nothing may be holding them
     syncTuner();
@@ -1157,6 +1270,15 @@ canvas.addEventListener("mousedown", (e) => {
     }
     resume();
     return; // the click that starts or resumes never fires
+  }
+  // The open shop owns EVERY click on the field, hit or miss. A frozen shop
+  // keeps G.running true, so without this the branches below would re-arm a
+  // pointer lock over a menu that needs the cursor, or run fire() (which the
+  // freeze refuses anyway) instead of buying the card under the pointer.
+  if (window.Encounter && Encounter.shopOpen()) {
+    const p = pointerField(e.clientX, e.clientY);
+    if (p && e.button === 0) Encounter.shopClick(p.x, p.y);
+    return;
   }
   if (!mouseMode() && lockSupported && !locked()) {
     if (e.button === 0) requestLock(); // steering lost mid-run — this click re-arms it, never fires
@@ -1233,6 +1355,14 @@ function trackMouse(e) {
   G.mouse.seen = true;
 }
 document.addEventListener("mousemove", (e) => {
+  // the shop's hover, ahead of everything and never instead of it: trackMouse
+  // below must keep running so the aim the player left does not go stale over
+  // a visit, and thrustImpulse already refuses to pump a frozen sim. The
+  // shopOpen() gate is what keeps the layout read off the flight path.
+  if (window.Encounter && Encounter.shopOpen()) {
+    const p = pointerField(e.clientX, e.clientY);
+    if (p) Encounter.shopHover(p.x, p.y);
+  }
   if (mouseMode()) {
     if (!locked()) trackMouse(e); // locked deltas fly the ship; preserve the pre-lock cursor target for release
     if (locked() && G.running && !aiming()) thrustImpulse(e.movementX, e.movementY);
@@ -1243,6 +1373,7 @@ document.addEventListener("mousemove", (e) => {
   else thrustImpulse(e.movementX, e.movementY);
 });
 document.addEventListener("pointerlockchange", () => {
+  if (shopOwnsPointer()) return; // the shop dropped the lock on purpose — see shopOwnsPointer
   if (!mouseMode()) {
     if (!locked()) pause();
     return;
@@ -1254,6 +1385,7 @@ document.addEventListener("pointerlockchange", () => {
   }
 });
 document.addEventListener("pointerlockerror", () => {
+  if (shopOwnsPointer()) return; // ...and a request it refused is not a failure to pause over
   if (!mouseMode() || (G.running && !aiming())) pause();
 });
 document.addEventListener("visibilitychange", () => {
@@ -1289,6 +1421,10 @@ function syncTuner() {
   pausemenu.style.display = !G.running && !UI.dev ? "flex" : "none";
   devpanel.style.display = !G.running && UI.dev ? "flex" : "none";
   placeDevPanel(); // a panel that just appeared has never been measured
+  showTuner(); // the audio readouts change without any input event — a
+               // suspended context becomes running on the first click — so
+               // every transition that can put a paused screen up refreshes
+               // them; every other readout rewrites its identical string
 }
 // one visible tab section at a time, and one marked tab button
 function syncDevTabs() {
@@ -1351,6 +1487,17 @@ function showTuner() {
   out("edgemargin-out", EDGEMARGIN + " px the ship keeps from the view edge");
   out("stardens-out", STARDENS.toFixed(1) + " stars per cell (avg)");
   out("contactcd-out", CONTACTCD + " ticks · " + (CONTACTCD * TICK / 1000).toFixed(2) + " s between contact hits on one body");
+  // the audio tab. Every control here carries a live readout — the mute
+  // checkbox states a STATE, not a rule, so unlike autofire it earns a live
+  // line — and the audition row's readout is Sfx.state()'s ready-made string:
+  // audio.js formats its own internals, this file only prints them.
+  out("sfxvol-out", Math.round(SFXVOL * 100) + "% master · gain " + (Math.pow(SFXVOL, 1.6) * 0.4).toFixed(3));
+  out("sfxmute-out", SFXMUTE ? "muted — every cue is dropped" : "sound on");
+  out("sfxshot-out", Math.round(SFXSHOT * 100) + "% · fire, wall ticks, hits, kills, the blast");
+  out("sfxfoe-out", Math.round(SFXFOE * 100) + "% · enemy tells, spawns, damage taken");
+  out("sfxui-out", Math.round(SFXUI * 100) + "% · pickups, waves, the shop");
+  out("sfxeng-out", Math.round(SFXENG * 100) + "% engine hum · follows the flame");
+  out("sfxtest-out", window.Sfx ? Sfx.state().line : "no audio module — the page is silent");
 }
 const CAMDESC = { // one-line reminders beside the camera selector
   lock: "hard-centers the ship",
@@ -1412,6 +1559,22 @@ bind("stardens", (v) => { STARDENS = v; render(); }).value = String(STARDENS); /
 bind("minimap", (v) => { MINIMAP = v; render(); }).checked = MINIMAP;
 bind("edgearrows", (v) => { EDGEARROWS = v; render(); }).checked = EDGEARROWS;
 bind("contactcd", (v) => { CONTACTCD = v; }).value = String(CONTACTCD);
+// The audio tab's own gesture. This panel is only reachable while the game is
+// paused, which is exactly when the game is silent — so without this every
+// slider here would be a deaf knob you tune by reading numbers. One helper
+// serves all seven controls: it auditions the whole mix (test hits all four
+// buses and bumps the engine), and it unlocks on the way, because a real drag
+// or click on these controls is a user gesture — the only one the page has
+// besides the start click. cue("test") carries a 350 ms gap of its own, so
+// sweeping a slider ticks about three times a second, not once per input event.
+function audition() { if (window.Sfx) { Sfx.unlock(); Sfx.cue("test"); } }
+bind("sfxvol", (v) => { SFXVOL = v; audition(); }).value = String(SFXVOL);
+bind("sfxmute", (v) => { SFXMUTE = v; audition(); }).checked = SFXMUTE;
+bind("sfxshot", (v) => { SFXSHOT = v; audition(); }).value = String(SFXSHOT);
+bind("sfxfoe", (v) => { SFXFOE = v; audition(); }).value = String(SFXFOE);
+bind("sfxui", (v) => { SFXUI = v; audition(); }).value = String(SFXUI);
+bind("sfxeng", (v) => { SFXENG = v; audition(); }).value = String(SFXENG);
+document.getElementById("sfxtest").addEventListener("click", audition); // "click", like reseed
 document.getElementById("reseed").addEventListener("click", () => {
   SEED = (Math.random() * 0x100000000) >>> 0;
   render(); // a whole new sky, same ship
@@ -1483,11 +1646,24 @@ window.__test = { G, cam, step, setCamMode, render, WW, WH, FW, FH,
   // the time a suite runs, so the pre-load screen has to be driven on purpose.
   // Returns the flag it replaced, so the caller can put it back.
   setGuideReady: (v) => { const was = guideReady; guideReady = !!v; return was; },
-  // the THRUST RING reveal: the same two halves as the first-run card — the
-  // rect the shop overlay draws into, the load flag, and a writer for it, so a
-  // check can drive the pre-load screen the shop's text stand-in is for
-  ringCardState: () => ({ ready: ringReady, x: RING_X, y: RING_Y, w: RING_W, h: RING_H, src: RING_SRC }),
+  // the THRUST RING hover art: this file owns only the asset and its load
+  // flag now — encounter.js owns the rect, and hands it out as
+  // enc.shopPopupRect(i). The writer is the one half of the contract a check
+  // cannot otherwise reach: the bytes have long arrived by the time a suite
+  // runs, so the pre-load screen has to be driven on purpose.
+  ringCardState: () => ({ ready: ringReady, ratio: RING_RATIO, src: RING_SRC }),
   setRingReady: (v) => { const was = ringReady; ringReady = !!v; return was; },
+  // the UI-space pointer conversion the shop's hit test runs on, and its
+  // inverse — so a check can dispatch a REAL mousedown at a known field point
+  // (a card's center, the NEXT WAVE button) instead of guessing at pixels, and
+  // exercise the whole path from the native event down to the sale
+  pointerField,
+  fieldToClient: (fx, fy) => {
+    const r = canvas.getBoundingClientRect();
+    return { x: r.left + (ox + fx * scale) * r.width / canvas.width,
+             y: r.top + (oy + fy * scale) * r.height / canvas.height };
+  },
+  shopOwnsPointer,   // the shop's claim on the pointer — the lock guard's own predicate
   keyThrustUnlocked, // the ring's thrust gate, read exactly as step() reads it
   pauseLines, // the copy the idle screen would print — the card's text stand-in included
   aimState: () => ({ AIMMODE, mouse: { ...G.mouse }, direction: fireDir(), aiming: aiming(), rightHeld: G.rightHeld, cursorHidden: cursorHidden(), locked: locked() }),
