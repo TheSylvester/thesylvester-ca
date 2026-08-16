@@ -8,10 +8,10 @@
 // replaces the per-axis clamp, so a sideways push at full speed rotates the
 // heading into an arc instead of pinning the old axis.
 // Tuning began as the 30 Hz original rescaled to a 60 Hz sim, then feel
-// testing settled it: top speed 9 px/tick (540 px/s — 2× the original
-// 270), gains 0.015/0.015 (600 counts from rest to top), and a flick
-// curve that amplifies fast deltas — a quick flick snaps the heading while
-// slow motion stays precise. Impulses split against the current heading:
+// testing settled it: top speed 2 px/tick (120 px/s baseline — the slider
+// drives it live), gains 0.015/0.015 (~133 counts from rest to top), and a
+// flick curve that amplifies fast deltas — a quick flick snaps the heading
+// while slow motion stays precise. Impulses split against the current heading:
 // ACCEL drives the along component (speed up / brake), TURN the across one
 // (curve), so speed build-up and turn agility tune independently. Sliders
 // drive VMAX, ACCEL and TURN live — they now sit one screen deeper, on the
@@ -57,13 +57,29 @@ let VMAX = 2;           // px per tick — 120 px/s baseline; the pause-screen s
                         // CLAMP in step() — a purchase never writes the tuner value
 let ACCEL = 0.015;      // speed gain — velocity px/tick per count ALONG the heading (slider); default is the settled feel
 let TURN = 0.015;       // turn gain — the same, for the component ACROSS the heading (slider); equal gains = the old single-gain model
-const FLICK = 0.01;     // flick curve — gain × (1 + |delta| × FLICK); a 100-count flick doubles its push
+let FLICK = 0.01;       // flick curve — gain × (1 + |delta| × FLICK); a 100-count flick doubles its push.
+                        // No slider — a let only so the measurement harness (__test.setFlick) can
+                        // isolate the curve from the heading resample; the default never moves here
 const DAMP = 1;         // per-tick velocity retention — 1 = no friction, like the original; try 0.98 to coast down
 let KEYTHRUST = 16;     // keyboard thrust — synthetic mouse counts per tick, through the same impulse pipeline
 let WALLLOSS = 0.5;     // fraction of the flipped velocity component the ship loses on a wall bounce
 let AIMSENS = 0.03;     // push-mode aim gain — offset px per count
 let AIMDIST = 20;       // direction-marker distance from the ship, px
-let AIMMODE = "mouse";  // mouse = visible absolute pointer (default); push = legacy relative/pointer-lock controls
+let AIMMODE = "locked"; // locked = the default; mouse = visible absolute pointer; push = legacy relative/pointer-lock
+                        // controls; locked = mouse-mode roles under ONE held pointer lock, aiming with a
+                        // cursor drawn on the canvas — the lock never cycles, so the browser's takeover
+                        // banner fires once per resume instead of once per right press
+let INPUTMODE = "tick";  // tick = the default: sum the reports and apply once
+                         // per fixed step, so the ship flies the same on a
+                         // 125 Hz and a 1000 Hz mouse; event = apply each OS
+                         // mouse report as it arrives. The two differ twice
+                         // over: the flick curve is superlinear in the delta,
+                         // and the along/across split re-reads G.vel per call.
+let INPUTLAG = 0;        // ms of artificial input delay — the playability probe for a
+                         // future networked build. It delays the APPLIED INPUT only:
+                         // never the render, the audio or the enemies. Tick mode only —
+                         // a tick delay is a ring of per-tick sums, and an OS event has
+                         // no tick to be late against, so event mode disables the slider
 let BCOOL = 400;        // ms between shots — 2.5 shots/s; one gate for click fire and autofire
 let AUTOFIRE = true;    // hold LEFT to keep firing at the cooldown rate
 let BMODE = "off";      // bullet physics — off | newtonian (adds ship vel × factor) | cq-scale (ship speed × factor); code-only, no menu knob
@@ -106,6 +122,8 @@ const C = {
   bright: "#f2f3f5",
   clay: "#d97757",
   dim: "#5c6370",
+  radar: "#4fd1c5", // the radar variants' sensor cyan — reads as "looks ahead",
+                    // and collides with nothing: clay is attack, steel is hull
 };
 const FONT = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 
@@ -122,7 +140,7 @@ const resumebtn = document.getElementById("resumebtn");  // the same button with
 // registered long before the boot tail — a declaration further down would turn
 // any early event into a temporal-dead-zone ReferenceError.
 const UI = { dev: false, tab: "flight" };
-const DEV_TABS = ["flight", "aim", "weapons", "camera", "world", "combat", "audio"];
+const DEV_TABS = ["flight", "aim", "weapons", "camera", "world", "combat", "audio", "enemies"];
 
 const G = {
   running: false,
@@ -330,6 +348,10 @@ function updateCamera() {
 
 // ---- control roles -------------------------------------------------------
 const mouseMode = () => AIMMODE === "mouse";
+const lockedMode = () => AIMMODE === "locked";
+// the absolute-cursor aim family: the visible native pointer (mouse) and the
+// drawn synthetic one (locked) share every aim decision; push stays apart
+const cursorAim = () => mouseMode() || lockedMode();
 // The right button hides the cursor because in mouse mode it means "the mouse
 // is flying the ship now". A FROZEN overlay owns the field instead, and the
 // shop is a mouse UI — the cursor is the only way to click a card — so the
@@ -337,13 +359,16 @@ const mouseMode = () => AIMMODE === "mouse";
 const cursorHidden = () => mouseMode() && G.running && G.rightHeld &&
                            !(window.Encounter && Encounter.frozen());
 function syncCursor() {
-  canvas.classList.toggle("hide-cursor", cursorHidden());
+  // locked mode hides the CSS cursor for the whole running session: the held
+  // lock hides the native pointer anyway, and the canvas draws its own
+  canvas.classList.toggle("hide-cursor", cursorHidden() || (lockedMode() && G.running));
   // ...and the pointer over a live frozen overlay is a menu pointer, not the
   // crosshair the field wears. Both classes are set from one place so they
   // cannot contradict: hide-cursor only ever applies in flight, this only
   // ever over a freeze, and the two states are mutually exclusive above.
+  // Locked mode opts out — its frozen shop runs on the drawn cursor.
   canvas.classList.toggle("ui-cursor",
-    G.running && !!(window.Encounter && Encounter.frozen()));
+    !lockedMode() && G.running && !!(window.Encounter && Encounter.frozen()));
 }
 // One boolean preserves the original invertible role swap in both modes:
 // while aiming(), the mouse owns the aim and the keys thrust; otherwise the
@@ -404,6 +429,62 @@ function aimImpulse(dx, dy) {
   }
 }
 
+// ---- per-tick input path (INPUTMODE "tick") --------------------------------
+// The listener no longer decides how input lands; these dispatchers do. In
+// event mode they are pass-throughs to the impulse functions above — the
+// shipped path, byte-identical. In tick mode they bank RAW deltas (never
+// pre-multiplied impulses: applying the flick curve and the along/across
+// split once, at the tick, is the whole point) and step() applies the sums.
+const inAcc = { tx: 0, ty: 0, ax: 0, ay: 0, cx: 0, cy: 0, n: 0 };
+// the lag ring: one accumulated entry per tick, applied round(INPUTLAG/TICK)
+// ticks late. Tick mode only — see the INPUTLAG comment.
+const lagBuf = [];
+function inputThrust(dx, dy) {
+  if (INPUTMODE === "tick") { inAcc.tx += dx; inAcc.ty += dy; inAcc.n++; return; }
+  thrustImpulse(dx, dy);
+}
+function inputAim(dx, dy) {
+  if (INPUTMODE === "tick") { inAcc.ax += dx; inAcc.ay += dy; inAcc.n++; return; }
+  aimImpulse(dx, dy);
+}
+function inputCursor(dx, dy) {
+  if (INPUTMODE === "tick") { inAcc.cx += dx; inAcc.cy += dy; inAcc.n++; return; }
+  moveLockedCursor(dx, dy);
+}
+function clearTickInput() {
+  inAcc.tx = inAcc.ty = inAcc.ax = inAcc.ay = inAcc.cx = inAcc.cy = 0;
+  inAcc.n = 0;
+  lagBuf.length = 0;
+}
+// One call per step(), beside the keyboard thrust so both per-tick sources
+// land in the same slot ahead of the damping and the radial clamp. Every tick
+// consumes the accumulator — a catch-up frame's later steps see zeros, which
+// is correct: the hand moved once. At most two lag entries leave per tick:
+// the due one, plus one overdue after the slider shrank mid-flight — applied
+// in order, none dropped, never the whole backlog in one tick.
+function applyTickInput() {
+  if (INPUTMODE !== "tick") return;
+  lagBuf.push({ tx: inAcc.tx, ty: inAcc.ty, ax: inAcc.ax, ay: inAcc.ay, cx: inAcc.cx, cy: inAcc.cy });
+  inAcc.tx = inAcc.ty = inAcc.ax = inAcc.ay = inAcc.cx = inAcc.cy = 0;
+  inAcc.n = 0;
+  const delay = Math.max(0, Math.round(INPUTLAG / TICK));
+  for (let k = 0; k < 2 && lagBuf.length > delay; k++) {
+    const a = lagBuf.shift();
+    if (a.cx || a.cy) moveLockedCursor(a.cx, a.cy);
+    if (a.ax || a.ay) aimImpulse(a.ax, a.ay);
+    if (a.tx || a.ty) thrustImpulse(a.tx, a.ty);
+  }
+}
+function setInputMode(m) {
+  INPUTMODE = m === "tick" ? "tick" : "event";
+  clearTickInput(); // a banked half-tick must not cross the mode line
+  syncInputLagUi();
+}
+function syncInputLagUi() {
+  const el = document.getElementById("inputlag");
+  if (el) el.disabled = INPUTMODE !== "tick";
+}
+
 // ---- shooting ------------------------------------------------------------
 // Convert the native pointer's CSS/client coordinates through the canvas
 // backing buffer and letterbox transform. Comparing that viewport point to
@@ -421,7 +502,57 @@ function pointerField(clientX, clientY) {
   return { x: (bx - ox) / scale, y: (by - oy) / scale };
 }
 
+// field → client, pointerField's inverse. The locked cursor keeps a client-
+// space mirror in G.mouse through it, so encounter.js's shop paths and the
+// aim snapshots read the synthetic cursor through the code they already use.
+function fieldToClient(fx, fy) {
+  const r = canvas.getBoundingClientRect();
+  return { x: r.left + (ox + fx * scale) * r.width / canvas.width,
+           y: r.top + (oy + fy * scale) * r.height / canvas.height };
+}
+
+// ---- the locked-mode synthetic cursor --------------------------------------
+// Field coordinates, clamped to the field rectangle. Input state, never
+// simulation state: it feeds the same aim-target read trackMouse feeds, and
+// it stays out of every hash allow-list.
+const lcur = { x: FW / 2, y: FH / 2 };
+function mirrorLockedCursor() {
+  const c = fieldToClient(lcur.x, lcur.y);
+  G.mouse.x = c.x;
+  G.mouse.y = c.y;
+  G.mouse.seen = true;
+}
+function moveLockedCursor(dx, dy) {
+  // client px → field px through the letterbox transform, so the drawn cursor
+  // travels exactly as far on screen as the native one would have — the OS
+  // curve still applies upstream (standard lock), and no extra gain does here
+  const r = canvas.getBoundingClientRect();
+  const k = r.width ? canvas.width / r.width / scale : 1;
+  lcur.x = Math.max(0, Math.min(FW, lcur.x + dx * k));
+  lcur.y = Math.max(0, Math.min(FH, lcur.y + dy * k));
+  mirrorLockedCursor();
+}
+// entry seeds from the last known aim, so nothing jumps on the mode flip
+function seedLockedCursor() {
+  const p = G.mouse.seen ? pointerField(G.mouse.x, G.mouse.y) : null;
+  if (p) {
+    lcur.x = Math.max(0, Math.min(FW, p.x));
+    lcur.y = Math.max(0, Math.min(FH, p.y));
+  } else {
+    const d = fireDir();
+    lcur.x = Math.max(0, Math.min(FW, G.ship.x - cam.x + (d ? d.x * AIMDIST : 0)));
+    lcur.y = Math.max(0, Math.min(FH, G.ship.y - cam.y + (d ? d.y * AIMDIST : 0)));
+  }
+  mirrorLockedCursor();
+}
+
 function mouseAimDir() {
+  if (lockedMode()) { // the drawn cursor IS the pointer — no client roundtrip noise
+    const dx = lcur.x - (G.ship.x - cam.x);
+    const dy = lcur.y - (G.ship.y - cam.y);
+    const m = Math.hypot(dx, dy);
+    return m < 0.001 ? null : { x: dx / m, y: dy / m };
+  }
   if (!G.mouse.seen) return null;
   const p = pointerField(G.mouse.x, G.mouse.y);
   if (!p) return null;
@@ -457,7 +588,7 @@ function enterAim() {
 // mouse motion owns flight (and in push mode), they use the last relative/
 // snapped aim, or the ship heading until the first aim (the CQ behavior).
 function fireDir() {
-  if (mouseMode() && aiming()) return mouseAimDir();
+  if (cursorAim() && aiming()) return mouseAimDir();
   if (G.aimed) return { x: Math.cos(G.aimAngle), y: Math.sin(G.aimAngle) };
   const s = Math.hypot(G.vel.x, G.vel.y);
   return s < 0.05 ? null : { x: G.vel.x / s, y: G.vel.y / s };
@@ -484,16 +615,32 @@ function fire() {
     }
   }
   const em = window.Encounter ? Encounter.mods : null; // upgrade terms — the tuner values stay untouched
-  G.bullets.push({ x: G.ship.x, y: G.ship.y, px: G.ship.x, py: G.ship.y, vx, vy,
+  // one id SPACE across bullets and bodies — a replication layer keys by id
+  // alone and cannot disambiguate by owning array; a page without the
+  // encounter has nothing to replicate, so 0 stands in there
+  G.bullets.push({ id: window.Encounter ? Encounter.nextId() : 0,
+                   x: G.ship.x, y: G.ship.y, px: G.ship.x, py: G.ship.y, vx, vy,
                    r: 2.2, dmg: BDMG, owner: "player", dead: false, spent: false,
                    ttl: Math.max(1, Math.round(BLIFE * 1000 / TICK)) }); // no upgrade touches lifetime — BLIFE is the only knob
   G.cool = Math.max(1, Math.round(BCOOL * (em ? em.cool : 1) / TICK));
-  if (window.Sfx) Sfx.cue("fire"); // after every gate above — a refused shot is silent
+  if (window.Encounter) Encounter.emit("fire"); // after every gate above — a refused shot is silent
 }
 
 // ---- simulation step (one ~16.7ms update) --------------------------------
+// simTick counts every step() call for the run's whole life — the input
+// recorder orders events against it, and E.waveTick cannot serve because it
+// resets per wave. It counts frozen calls too: a replay reproduces the raw
+// call stream, and the shop's frozen ticks are part of that stream.
+let simTick = 0;
 function step() {
-  if (window.Encounter && Encounter.frozen()) return; // shop/death overlays freeze the whole sim
+  simTick++;
+  if (window.Encounter && Encounter.frozen()) { // shop/death overlays freeze the whole sim
+    clearTickInput(); // frozen ticks DISCARD banked input, lag buffer included —
+                      // thrustImpulse's own refusal to pump a frozen sim, matched
+    return;
+  }
+  applyTickInput(); // the per-tick mouse path lands beside the keyboard thrust
+                    // below, before the damping and the radial clamp
   // the keys fly the ship while the mouse owns the aim — once the THRUST RING
   // has been bought. Locked, the ring keeps its aim role and only this sum
   // goes quiet; the HUD prints THRUST LOCKED — SHOP for the whole run.
@@ -525,15 +672,17 @@ function step() {
   const keep = WALLLOSS - 1; // negated: flip and damp in one multiply
   G.ship.x += G.vel.x;
   G.ship.y += G.vel.y;
-  let wallHit = 0; // the flipped component's pre-bounce speed — audio reads it, nothing else
+  let wallHit = 0; // the flipped component's pre-bounce speed — it rides out as the thud event's gain, nothing else reads it
   if (G.ship.x < SHIP_R) { G.ship.x = SHIP_R * 2 - G.ship.x; wallHit = Math.abs(G.vel.x); G.vel.x *= keep; }
   else if (G.ship.x > WW - SHIP_R) { G.ship.x = (WW - SHIP_R) * 2 - G.ship.x; wallHit = Math.abs(G.vel.x); G.vel.x *= keep; }
   if (G.ship.y < SHIP_R) { G.ship.y = SHIP_R * 2 - G.ship.y; wallHit = Math.max(wallHit, Math.abs(G.vel.y)); G.vel.y *= keep; }
   else if (G.ship.y > WH - SHIP_R) { G.ship.y = (WH - SHIP_R) * 2 - G.ship.y; wallHit = Math.max(wallHit, Math.abs(G.vel.y)); G.vel.y *= keep; }
-  // the Math.max above is what makes a corner bounce one sound instead of
+  // the Math.max above is what makes a corner bounce ONE event instead of
   // two; the magnitude rides through as the thud's volume, so a graze
-  // whispers and a full-speed slam lands
-  if (wallHit > 0 && window.Sfx) Sfx.cue("thud", null, Math.min(1, wallHit / 4));
+  // whispers and a full-speed slam lands. Queued through the encounter's
+  // event stream — the crossing that runs game → encounter, which is why
+  // Encounter.emit is published at all.
+  if (wallHit > 0 && window.Encounter) Encounter.emit("thud", null, Math.min(1, wallHit / 4));
   updateCamera(); // the view follows once the ship has settled for this tick
   G.flame.x += (G.thrustAcc.x - G.flame.x) * FLAME_EASE;
   G.flame.y += (G.thrustAcc.y - G.flame.y) * FLAME_EASE;
@@ -675,7 +824,7 @@ function drawAim() {
   if (!d) return; // at rest and never aimed — nothing to point
   const px = G.ship.x + d.x * AIMDIST;
   const py = G.ship.y + d.y * AIMDIST;
-  if (mouseMode()) {
+  if (cursorAim()) {
     // Nova Drift-style direction marker: a small triangle stays AIMDIST
     // from the ship and points along the active firing direction. Normally
     // that is the native cursor; during right-flight it is the stored/snap aim.
@@ -700,6 +849,23 @@ function drawAim() {
     ctx.lineTo(px + Math.cos(a) * 6.4, py + Math.sin(a) * 6.4);
   }
   ctx.stroke();
+}
+
+// the locked-mode pointer: drawn on the canvas because the held lock hides
+// the native one. Render pass ONLY, never step() — phase 4 moves the camera
+// out of the tick, and a tick-drawn cursor would be a fresh coupling of the
+// kind this chain removes. Hidden during right-hold flight, mirroring how
+// mouse mode's hidden native cursor holds still for the same stretch.
+function drawLockedCursor() {
+  if (!lockedMode() || !G.running) return;
+  if (!aiming() && !(window.Encounter && Encounter.frozen())) return;
+  ctx.strokeStyle = C.bright;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(lcur.x, lcur.y, 3.2, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = C.clay;
+  ctx.fillRect(lcur.x - 0.6, lcur.y - 0.6, 1.2, 1.2);
 }
 
 // the world map in the corner: world-aspect (3072:3762 ≈ 76:93), a dot for
@@ -763,11 +929,15 @@ let EDGEARROWS = true;
 // reload is a fresh first run again — deliberately, while the game is a
 // prototype people open cold.
 //
-// Accuracy is a precondition rather than a hope. The art draws the DEFAULT
-// roles only, so a player who picks push mode or clears "invert right" before
-// starting gets the text screen instead of a card that would lie to them, and
-// the same is true of the ring: the card names no keys, which is exactly the
-// contract a first-run player has. The bitmap also states LEFT CLICK TO START,
+// Accuracy is a precondition rather than a hope. The art draws the CURSOR-AIM
+// roles — move to aim, left fires, hold right and move to fly — which is the
+// contract of both mouse mode and the shipped locked mode: the two differ only
+// in whether that cursor is the native pointer or the one drawn on the canvas,
+// and the card teaches neither of those words. Push mode inverts the roles
+// outright, and clearing "invert right" swaps them, so either gets the text
+// screen instead of a card that would lie. The same is true of the ring: the
+// card names no keys, which is exactly the contract a first-run player has.
+// The bitmap also states LEFT CLICK TO START,
 // so while it is up render() drops the canvas start copy and the corner map
 // and leaves one hierarchy on the screen.
 //
@@ -789,7 +959,7 @@ guideImg.src = GUIDE_SRC;
 // "and there is a bitmap to draw". Everything the card suppresses keys off
 // SHOWN, so an unloaded frame is the plain text screen, unchanged.
 function guideEligible() {
-  return !G.running && !G.started && !UI.dev && mouseMode() && INVERT;
+  return !G.running && !G.started && !UI.dev && cursorAim() && INVERT;
 }
 function guideShown() { return guideEligible() && guideReady; }
 
@@ -881,7 +1051,7 @@ function flushWallFx() {
   for (const q of fxWall) {
     if (q.b.dead) continue;
     spawnImpactFx(q.x, q.y, q.dx, q.dy, "wall");
-    if (window.Sfx) Sfx.cue("wall", q); // q carries x/y — the same contact point as the spark
+    if (window.Encounter) Encounter.emit("wall", q); // q carries x/y — the same contact point as the spark
   }
   fxWall.length = 0;
 }
@@ -964,6 +1134,17 @@ function pauseLines() {
             "hold right and move the mouse to fly · release to aim again"];
   }
   const ring = keyThrustUnlocked();
+  if (lockedMode()) {
+    // the roles, in the same shape mouse mode states them. The lock is how the
+    // mode works, not how the game is played, so it is not in the copy; the
+    // keys are absent for the reason the card screen's are — the ring is a
+    // purchase, and this mode aims with the cursor either way
+    return INVERT
+      ? ["use the cursor to aim · click or hold left to fire",
+         "right held: mouse flies · release to aim again · esc pauses"]
+      : ["mouse motion flies · hold right to aim with the cursor",
+         "right held: the cursor aims · left fires · esc pauses"];
+  }
   if (mouseMode()) {
     return INVERT
       ? [ring ? "the visible cursor aims · keys thrust · hold right to swap"
@@ -1032,6 +1213,7 @@ function render() {
   const ringUp = !!(window.Encounter && Encounter.hudSuppressed());
   if (MINIMAP && !guide && !ringUp) drawMinimap(); // the card screens keep one hierarchy — see guideShown()
   if (window.Encounter) Encounter.drawHud(ctx); // encounter HUD and overlays — screen space, no camera
+  drawLockedCursor(); // the drawn pointer rides over every overlay it serves
   // the pause text, and the dev screen's claim on it: while the panel is open
   // it owns the screen, so none of this draws. render() reads UI.dev directly
   // rather than taking a flag, so every foreign caller — the resize listener,
@@ -1062,6 +1244,19 @@ function render() {
 }
 
 // ---- loop control ----------------------------------------------------------
+// The presentation-side drain of the simulation's event queue. The sim only
+// QUEUES cues now — forwarding them here, after step() has returned, is what
+// makes the audio path structurally unable to sit between two seeded rand()
+// draws. One call per step(), never per rendered frame: a catch-up frame runs
+// several ticks, and coalescing their cues into one burst would change what
+// the player hears. It always empties the queue, Sfx or no Sfx — a page
+// without audio must not bank events forever.
+function drainCues() {
+  if (!window.Encounter) return;
+  for (const ev of Encounter.drainEvents()) {
+    if (window.Sfx) Sfx.cue(ev.kind, ev.at, ev.gain);
+  }
+}
 let raf = 0;
 let looping = false;
 let last = 0;
@@ -1074,6 +1269,7 @@ function loop(now) {
   let n = 0;
   while (acc >= TICK && n < 5) {
     step();
+    drainCues(); // per step — see drainCues for why never per frame
     acc -= TICK;
     n++;
   }
@@ -1097,13 +1293,17 @@ function stopLoop() {
 const locked = () => document.pointerLockElement === canvas;
 const lockSupported = typeof canvas.requestPointerLock === "function";
 function setAimMode(m) {
-  const wasMouseAim = mouseMode() && aiming();
-  AIMMODE = m === "push" ? "push" : "mouse";
+  const wasMouseAim = cursorAim() && aiming();
+  const wasLocked = lockedMode();
+  AIMMODE = m === "push" ? "push" : m === "locked" ? "locked" : "mouse";
   G.rightHeld = false;
+  if (lockedMode() && !wasLocked) seedLockedCursor(); // enter at the aim the player left
   syncCursor();
-  if (wasMouseAim && (!mouseMode() || !aiming())) snapshotMouseAim();
+  if (wasMouseAim && (!cursorAim() || !aiming())) snapshotMouseAim();
   // This is mainly selected while paused, but keep programmatic/live mode
   // changes safe too: mouse mode must immediately give the pointer back.
+  // Locked mode keeps any lock it holds — one acquisition per session is
+  // the mode's whole point, and resume() is the only place that arms it.
   if (mouseMode() && locked() && typeof document.exitPointerLock === "function") document.exitPointerLock();
   syncAimUi();
   render();
@@ -1118,8 +1318,11 @@ function pause() {
   UI.dev = false;
   G.leftHeld = false; // a mouseup can vanish in the lock transition — never resume with a stuck button
   setRightHeld(false);
-  if (mouseMode() && locked() && typeof document.exitPointerLock === "function") document.exitPointerLock();
+  // locked mode releases its held lock here too — pause is real UI, and the
+  // resume click is the one gesture that re-arms it (one banner per resume)
+  if ((mouseMode() || lockedMode()) && locked() && typeof document.exitPointerLock === "function") document.exitPointerLock();
   G.keys.clear(); // keyups can vanish the same way
+  clearTickInput(); // a banked delta must never survive a pause and land on resume
   stopLoop();
   syncTuner();
   render();
@@ -1148,7 +1351,9 @@ function pause() {
 // cursor, a frozen hover and every click landing on one field pixel.
 const shopOwnsPointer = () => !!(window.Encounter && Encounter.shopScreen && Encounter.shopScreen());
 function requestLock(pauseOnFailure = true, preferRaw = true) {
-  if (shopOwnsPointer()) return;
+  // the locked-mode shop RUNS on the held lock — its resume must be allowed
+  // to re-arm one over the shop screen; every other mode's shop refuses
+  if (shopOwnsPointer() && !lockedMode()) return;
   if (!lockSupported || locked()) return;
   // unadjustedMovement disables OS mouse acceleration — closest to the raw
   // quadrature mouse the physics were designed around
@@ -1176,10 +1381,14 @@ function requestLock(pauseOnFailure = true, preferRaw = true) {
 // NEXT WAVE, and a lock request that fails without one is caught by
 // requestLock's own guard (pauseOnFailure stays off for mouse mode).
 function overlayPointerRelease() {
+  if (lockedMode()) return; // per-mode no-op: the locked-mode shop runs on the
+                            // synthetic cursor under the HELD lock — zero
+                            // releases, zero re-acquisitions, zero banners
   if (locked() && typeof document.exitPointerLock === "function") document.exitPointerLock();
   syncCursor();
 }
 function overlayPointerRestore() {
+  if (lockedMode()) return; // ...and hands nothing back: the lock never left
   syncCursor();
   if (!G.running) return; // a paused page has no lock to re-arm and no gesture to
                           // arm it with — resume() is what puts the controls back
@@ -1187,7 +1396,7 @@ function overlayPointerRestore() {
   else if (!aiming()) requestLock(false, false);
 }
 function setRightHeld(held) {
-  const wasMouseAim = mouseMode() && aiming();
+  const wasMouseAim = cursorAim() && aiming();
   G.rightHeld = held;
   syncCursor();
   if (wasMouseAim && !aiming()) snapshotMouseAim();
@@ -1217,6 +1426,7 @@ function resume() {
   if (G.running) return; // a focused resume button re-fires on Space/Enter — never re-enter mid-flight
   if (window.Sfx) Sfx.unlock(); // the page's one entry gesture — ABOVE the frozen
                                 // branch, so a death-screen resume arms audio too
+  clearTickInput(); // the paused stretch banked nothing that may land now
   UI.dev = false; // whichever screen the gesture came from, the resume ends on the field
   if (window.Encounter && Encounter.frozen()) {
     // dead/shop overlays: the click resumes only the loop — combat stays
@@ -1228,15 +1438,24 @@ function resume() {
     G.running = true;
     syncCursor();
     if (shopOwnsPointer()) {
-      // REFUSING to arm one is not enough: a lock can already be held coming
-      // in — the mouseup below grants one over the pause menu with INVERT off
-      // — and it would ride into the shop, killing the cursor and freezing
-      // clientX/clientY so the hover never moves again. Drop it, then re-seed
-      // the hover: a paused shop takes no mousemove, so the pointer may have
-      // travelled far from whatever card was lit when the pause began.
-      overlayPointerRelease();
-      if (Encounter.shopSeedHover) Encounter.shopSeedHover();
-    } else if (!mouseMode()) requestLock();
+      if (lockedMode()) {
+        // the mid-shop pause released the mode's one lock; this resume click
+        // is the gesture that re-arms it, and the synthetic cursor goes
+        // straight back to the shop — the native pointer never enters here
+        requestLock(true, false);
+        Encounter.shopHover(lcur.x, lcur.y);
+      } else {
+        // REFUSING to arm one is not enough: a lock can already be held coming
+        // in — the mouseup below grants one over the pause menu with INVERT off
+        // — and it would ride into the shop, killing the cursor and freezing
+        // clientX/clientY so the hover never moves again. Drop it, then re-seed
+        // the hover: a paused shop takes no mousemove, so the pointer may have
+        // travelled far from whatever card was lit when the pause began.
+        overlayPointerRelease();
+        if (Encounter.shopSeedHover) Encounter.shopSeedHover();
+      }
+    } else if (lockedMode()) requestLock(true, false); // the session's one (standard) lock
+    else if (!mouseMode()) requestLock();
     else if (!aiming()) requestLock(false, false);
     blurPanels(); // the overlay keys live on document — nothing may be holding them
     syncTuner();
@@ -1247,7 +1466,9 @@ function resume() {
     G.started = true;
     G.vel = { x: 0, y: 0 }; // the session starts from rest
   }
-  if (!mouseMode()) requestLock();
+  if (lockedMode()) requestLock(true, false); // the session's ONE acquisition — the
+                        // standard lock (OS acceleration intact), held until pause
+  else if (!mouseMode()) requestLock();
   else if (!aiming()) requestLock(false, false); // inverted-off starts in mouse-flight
   G.running = true;
   syncCursor();
@@ -1276,18 +1497,27 @@ canvas.addEventListener("mousedown", (e) => {
   // pointer lock over a menu that needs the cursor, or run fire() (which the
   // freeze refuses anyway) instead of buying the card under the pointer.
   if (window.Encounter && Encounter.shopOpen()) {
+    if (lockedMode()) { // clientX/Y freeze under the held lock — the synthetic
+                        // cursor is the shop's pointer, clicks and all
+      if (e.button === 0) Encounter.shopClick(lcur.x, lcur.y);
+      return;
+    }
     const p = pointerField(e.clientX, e.clientY);
     if (p && e.button === 0) Encounter.shopClick(p.x, p.y);
     return;
   }
   if (!mouseMode() && lockSupported && !locked()) {
-    if (e.button === 0) requestLock(); // steering lost mid-run — this click re-arms it, never fires
+    // steering lost mid-run — this click re-arms it, never fires. Locked mode
+    // shares the branch but asks for its standard lock, never the raw one.
+    if (e.button === 0) requestLock(true, !lockedMode());
     return;
   }
   if (e.button === 2) {
     const wasMouseFlight = mouseMode() && !aiming();
     setRightHeld(true);
-    if (mouseMode()) {
+    if (lockedMode()) {
+      // the lock never cycles on the buttons in this mode — held since resume
+    } else if (mouseMode()) {
       if (!aiming()) requestLock(false, false); // old flight path: pointer-locked, unbounded deltas
       else if (wasMouseFlight && locked() && typeof document.exitPointerLock === "function") document.exitPointerLock();
     } else if (aiming()) enterAim();
@@ -1301,11 +1531,12 @@ document.addEventListener("mouseup", (e) => {
   else if (e.button === 2) {
     const leavingMouseFlight = mouseMode() && !aiming();
     setRightHeld(false);
-    if (mouseMode()) {
+    if (mouseMode()) { // locked mode skips this whole dance — its lock is held either way
       if (leavingMouseFlight && locked() && typeof document.exitPointerLock === "function") document.exitPointerLock();
       else if (!aiming()) requestLock(false, false); // inverted-off release returns to mouse-flight
     }
-    if (G.running && !mouseMode() && aiming()) enterAim(); // inverted push mode re-enters aim
+    if (G.running && !mouseMode() && !lockedMode() && aiming()) enterAim(); // inverted push mode
+                        // re-enters its relative aim; locked keeps the drawn cursor
   }
 });
 // the 8-way ring — QWE/ADZXC around S, by e.code so any layout works; S
@@ -1360,19 +1591,41 @@ document.addEventListener("mousemove", (e) => {
   // a visit, and thrustImpulse already refuses to pump a frozen sim. The
   // shopOpen() gate is what keeps the layout read off the flight path.
   if (window.Encounter && Encounter.shopOpen()) {
+    if (lockedMode()) {
+      // clientX/clientY freeze under the held lock, so the shop's pointer is
+      // the synthetic cursor — moved per event even in tick mode, because a
+      // frozen sim has no tick to accumulate into (step() discards on freeze)
+      moveLockedCursor(e.movementX, e.movementY);
+      Encounter.shopHover(lcur.x, lcur.y);
+      return;
+    }
     const p = pointerField(e.clientX, e.clientY);
     if (p) Encounter.shopHover(p.x, p.y);
   }
+  if (lockedMode()) { // never trackMouse here — the frozen client coordinates would poison the mirror
+    if (!locked() || !G.running) return;
+    if (aiming()) inputCursor(e.movementX, e.movementY); // deltas move the drawn cursor...
+    else inputThrust(e.movementX, e.movementY);          // ...until the role swap flies the ship
+    return;
+  }
   if (mouseMode()) {
     if (!locked()) trackMouse(e); // locked deltas fly the ship; preserve the pre-lock cursor target for release
-    if (locked() && G.running && !aiming()) thrustImpulse(e.movementX, e.movementY);
+    if (locked() && G.running && !aiming()) inputThrust(e.movementX, e.movementY);
     return;
   }
   if (!locked() || !G.running) return;
-  if (aiming()) aimImpulse(e.movementX, e.movementY);
-  else thrustImpulse(e.movementX, e.movementY);
+  if (aiming()) inputAim(e.movementX, e.movementY);
+  else inputThrust(e.movementX, e.movementY);
 });
 document.addEventListener("pointerlockchange", () => {
+  if (!locked()) clearTickInput(); // the event stream just ended — nothing banked may land later
+  if (lockedMode()) {
+    // this mode holds its one lock for the whole running session: any loss —
+    // ESC, focus theft, the shop screen included — is a pause, and the
+    // resume click is what re-arms it
+    if (!locked() && G.running) pause();
+    return;
+  }
   if (shopOwnsPointer()) return; // the shop dropped the lock on purpose — see shopOwnsPointer
   if (!mouseMode()) {
     if (!locked()) pause();
@@ -1385,6 +1638,8 @@ document.addEventListener("pointerlockchange", () => {
   }
 });
 document.addEventListener("pointerlockerror", () => {
+  if (lockedMode()) { pause(); return; } // no lock, no mode — land on the menu; never
+                                         // a retry loop against Chrome's re-lock cooldown
   if (shopOwnsPointer()) return; // ...and a request it refused is not a failure to pause over
   if (!mouseMode() || (G.running && !aiming())) pause();
 });
@@ -1434,6 +1689,7 @@ function syncDevTabs() {
 function setDevTab(name) {
   if (!DEV_TABS.includes(name)) return; // __test can call this — an unknown name would hide every section
   UI.tab = name;
+  if (name === "enemies") buildEnemyTab(); // __test can land here without openDev() — same lazy gate
   syncDevTabs();
   placeDevPanel(); // tabs differ in height — the new one re-hangs the panel
   devbody.scrollTop = 0; // a tab opens at its own top, never at the last one's offset
@@ -1441,6 +1697,7 @@ function setDevTab(name) {
 }
 function openDev() {
   UI.dev = true;
+  buildEnemyTab(); // encounter.js loads after this file, so the tab can only exist by now
   syncTuner();
   render(); // the pause text goes away — the panel owns the screen now
 }
@@ -1450,7 +1707,9 @@ function closeDev() {
   render();
 }
 function syncAimUi() {
-  canvas.setAttribute("aria-label", mouseMode()
+  canvas.setAttribute("aria-label", lockedMode()
+    ? "Ship playground — use the cursor to aim, hold right to fly with the mouse, left fires, Escape pauses"
+    : mouseMode()
     ? INVERT
       ? "Ship playground — move the visible pointer to aim, hold right to fly with the mouse and aim with QWE/ASDZXC, left fires, Escape pauses"
       : "Ship playground — move the mouse to fly and QWE/ASDZXC to aim, hold right to aim with the visible pointer, left fires, Escape pauses"
@@ -1463,6 +1722,10 @@ function showTuner() {
   out("turn-out", TURN.toFixed(3));
   out("keythrust-out", KEYTHRUST.toFixed(1) + " counts/tick · " + (VMAX / (KEYTHRUST * ACCEL * (1 + KEYTHRUST * FLICK)) / 60).toFixed(1) + " s to top");
   out("wallloss-out", Math.round(WALLLOSS * 100) + "% speed lost per bounce");
+  out("inputmode-out", INPUTDESC[INPUTMODE]);
+  out("inputlag-out", INPUTMODE === "tick"
+    ? (INPUTLAG === 0 ? "no delay" : INPUTLAG + " ms · " + Math.round(INPUTLAG / TICK) + " ticks late")
+    : "per-tick input only — an OS event has no tick to be late against");
   out("aimmode-out", AIMDESC[AIMMODE]);
   out("aimsens-out", AIMSENS.toFixed(2) + (mouseMode() ? " · push mode only" : " relative gain"));
   out("aimdist-out", AIMDIST + " px to " + (mouseMode() ? "triangle" : "target"));
@@ -1498,6 +1761,57 @@ function showTuner() {
   out("sfxui-out", Math.round(SFXUI * 100) + "% · pickups, waves, the shop");
   out("sfxeng-out", Math.round(SFXENG * 100) + "% engine hum · follows the flame");
   out("sfxtest-out", window.Sfx ? Sfx.state().line : "no audio module — the page is silent");
+  showEnemyTuner(); // the generated tab rides every refresh path the authored readouts do
+}
+// The enemies tab is generated, not authored: encounter.js loads after this
+// file, so Encounter.tuning does not exist at parse time and the rows can only
+// be built on first open. The schema is consumed generically — no group or row
+// name is known here — and each input id is enemy-<row.id> by contract.
+const ENEMY_ROWS = []; // { row, out } pairs the builder fills; showEnemyTuner() rewrites them
+function buildEnemyTab() {
+  const body = document.getElementById("enemies-body");
+  if (!body || body.childElementCount || !window.Encounter || !Encounter.tuning) return;
+  for (const g of Encounter.tuning.groups) {
+    const col = document.createElement("div"); // same .col/.row markup as the authored tabs
+    col.className = "col";
+    const head = document.createElement("div");
+    head.className = "grouphead";
+    head.textContent = g.label;
+    col.appendChild(head);
+    for (const row of g.rows) {
+      const id = "enemy-" + row.id;
+      const rowEl = document.createElement("div");
+      rowEl.className = "row";
+      const label = document.createElement("label");
+      label.htmlFor = id;
+      label.textContent = row.label;
+      const input = document.createElement("input");
+      input.id = id;
+      input.type = "range";
+      input.min = String(row.min);
+      input.max = String(row.max);
+      input.step = String(row.step);
+      input.value = String(row.get());
+      const out = document.createElement("output");
+      out.id = id + "-out";
+      out.setAttribute("for", id);
+      input.addEventListener("input", () => {
+        row.set(Number(input.value));
+        Encounter.tuning.refresh(); // the live wave re-resolves in place
+        showEnemyTuner(); // stats interact — every readout rewrites, not just this row's
+      });
+      rowEl.append(label, input, out);
+      col.appendChild(rowEl);
+      ENEMY_ROWS.push({ row, out });
+    }
+    body.appendChild(col);
+  }
+  showEnemyTuner();
+}
+// no-op until the tab is built — ENEMY_ROWS stays empty and showTuner() calls
+// this on every refresh path, built or not
+function showEnemyTuner() {
+  for (const r of ENEMY_ROWS) r.out.textContent = r.row.fmt(r.row.get());
 }
 const CAMDESC = { // one-line reminders beside the camera selector
   lock: "hard-centers the ship",
@@ -1509,6 +1823,11 @@ const CAMDESC = { // one-line reminders beside the camera selector
 const AIMDESC = {
   mouse: "visible pointer aim · right swaps roles",
   push: "legacy relative / pointer lock",
+  locked: "one held lock · a drawn cursor aims",
+};
+const INPUTDESC = { // the A/B the human flies — see INPUTMODE
+  event: "apply each OS mouse report — the shipped feel",
+  tick: "sum reports, apply once per tick — rate-independent",
 };
 const LEADDESC = { // the same, for lookahead's lead source
   vel: "ahead of the velocity",
@@ -1531,6 +1850,8 @@ bind("accel", (v) => { ACCEL = v; }).value = String(ACCEL);
 bind("turn", (v) => { TURN = v; }).value = String(TURN);
 bind("keythrust", (v) => { KEYTHRUST = v; }).value = String(KEYTHRUST);
 bind("wallloss", (v) => { WALLLOSS = v; }).value = String(WALLLOSS);
+bind("inputmode", (v) => { setInputMode(v); }).value = INPUTMODE;
+bind("inputlag", (v) => { INPUTLAG = v; }).value = String(INPUTLAG);
 bind("aimmode", (v) => { setAimMode(v); }).value = AIMMODE;
 bind("aimsens", (v) => { AIMSENS = v; }).value = String(AIMSENS);
 bind("aimdist", (v) => { AIMDIST = v; }).value = String(AIMDIST);
@@ -1605,6 +1926,7 @@ for (const b of devpanel.querySelectorAll(".tab")) {
 }
 syncAimUi();
 syncCursor();
+syncInputLagUi(); // the lag slider opens matching the input mode's ability to honor it
 showTuner();
 syncDevTabs(); // the markup already ships the four inactive sections hidden — this keeps them honest
 
@@ -1673,16 +1995,179 @@ window.__test = { G, cam, step, setCamMode, render, WW, WH, FW, FH,
   // (a card's center, the NEXT WAVE button) instead of guessing at pixels, and
   // exercise the whole path from the native event down to the sale
   pointerField,
-  fieldToClient: (fx, fy) => {
-    const r = canvas.getBoundingClientRect();
-    return { x: r.left + (ox + fx * scale) * r.width / canvas.width,
-             y: r.top + (oy + fy * scale) * r.height / canvas.height };
-  },
+  fieldToClient, // hoisted to a real function — the locked cursor's mirror shares it
   shopOwnsPointer,   // the shop's claim on the pointer — the lock guard's own predicate
   keyThrustUnlocked, // the ring's thrust gate, read exactly as step() reads it
   pauseLines, // the copy the idle screen would print — the card's text stand-in included
   aimState: () => ({ AIMMODE, mouse: { ...G.mouse }, direction: fireDir(), aiming: aiming(), rightHeld: G.rightHeld, cursorHidden: cursorHidden(), locked: locked() }),
   camState: () => ({ CAMMODE, CAMEASE, CAMBOX, CAMLEAD, LEADSRC, AIMLEAD, LEADBLEND, LEADDZ, EDGEMARGIN }) };
+
+// ---- refactor instrument: state hash, input record/replay ------------------
+// An instrument, not a feature: everything below is reachable only through
+// window.__test, and nothing in the game calls it. The golden-trace suite is
+// the consumer — it pins committed magnitudes against these hashes so a
+// refactor that reproduces every mechanism but moves a number still fails.
+//
+// The hash is FLOAT-EXACT: every number folds through its raw IEEE-754 bits,
+// never through a rounded string, because the drift a reordered floating-point
+// expression produces is sub-ULP and a String(n) hash waves it through.
+const HB = new DataView(new ArrayBuffer(8)); // one shared bit-view — no per-call allocation
+function fnv() {
+  let h = 0x811c9dc5; // FNV-1a, folded a byte at a time
+  const u32 = (u) => {
+    for (let s = 24; s >= 0; s -= 8) {
+      h ^= (u >>> s) & 0xff;
+      h = Math.imul(h, 0x01000193);
+    }
+  };
+  const num = (n) => { HB.setFloat64(0, n); u32(HB.getUint32(0)); u32(HB.getUint32(4)); };
+  const str = (s) => { u32(s.length); for (let i = 0; i < s.length; i++) u32(s.charCodeAt(i)); };
+  // one dispatcher for the allow-list walks: numbers by bits, booleans and
+  // strings by their own folds — an unexpected type folds as its name so a
+  // list mistake surfaces as a stable wrong hash, never as a throw mid-suite
+  const val = (v) => {
+    if (typeof v === "number") num(v);
+    else if (typeof v === "boolean") u32(v ? 1 : 0);
+    else if (typeof v === "string") str(v);
+    else str(String(v));
+  };
+  return { u32, num, str, val, hex: () => (h >>> 0).toString(16).padStart(8, "0") };
+}
+// The allow-list contract: a field belongs in the hash iff it describes what
+// the simulation will do next. Labels and presentation hints (a missile's
+// trail, the flame's drawn length) stay out; so does every Math.random()
+// consumer — the starfield SEED and the flame flicker are cosmetic and
+// outside simulation state. The lists are declared, never enumerated with
+// Object.keys, so a later phase adding a field to these objects cannot
+// silently re-key every committed fixture — admitting a field is its own
+// reviewable decision. b.r, b.dmg and b.owner are IN: the encounter's sweep
+// reads all three (the inflated hit circle, the damage paid, the side test).
+const BULLET_HASH = ["x", "y", "px", "py", "vx", "vy", "r", "dmg", "owner", "ttl", "dead", "spent"];
+function hashShip() {
+  const h = fnv();
+  h.num(G.ship.x); h.num(G.ship.y);
+  h.num(G.vel.x); h.num(G.vel.y);
+  h.num(G.aimOff.x); h.num(G.aimOff.y);
+  h.num(G.aimAngle); h.u32(G.aimed ? 1 : 0);
+  h.num(G.cool);
+  h.num(G.thrustAcc.x); h.num(G.thrustAcc.y);
+  h.num(G.flame.x); h.num(G.flame.y);
+  return h;
+}
+function hashBullets() {
+  const h = fnv();
+  h.u32(G.bullets.length);
+  // live array order — the encounter's first-along-the-path arbitration walks
+  // this order, so the order itself is simulation state. Never sort.
+  for (const b of G.bullets) for (const f of BULLET_HASH) h.val(b[f]);
+  return h;
+}
+function hashCam() {
+  const h = fnv();
+  h.num(cam.x); h.num(cam.y);
+  h.num(cam.fromX); h.num(cam.fromY); h.num(cam.toX); h.num(cam.toY); h.num(cam.t);
+  // the lookahead commit gate decides where the camera goes next, and the
+  // camera rectangle is what rollAnchor deals spawns against — sim state
+  h.num(gate.x); h.num(gate.y); h.num(gate.cx); h.num(gate.cy);
+  h.num(gate.timer); h.u32(gate.seeded ? 1 : 0);
+  return h;
+}
+function hashParts() {
+  const enc = window.__test.enc;
+  const parts = {
+    ship: hashShip().hex(),
+    bullets: hashBullets().hex(),
+    cam: hashCam().hex(),
+    encounter: "00000000", // a page without encounter.js still hashes its flight
+    rng: "00000000",
+  };
+  if (enc && enc.hashInto) {
+    const eh = fnv();
+    enc.hashInto(eh);
+    parts.encounter = eh.hex();
+    const rh = fnv();
+    rh.u32(enc.rngState());
+    parts.rng = rh.hex();
+  }
+  return parts;
+}
+// one hash over everything, and the per-subsystem split beside it — a failing
+// trace reports WHICH part moved instead of only that something did
+function hashState() {
+  const p = hashParts();
+  const h = fnv();
+  h.str(p.ship); h.str(p.bullets); h.str(p.cam); h.str(p.encounter); h.str(p.rng);
+  return h.hex();
+}
+
+// The recorder captures the RAW event stream — deltas, buttons, arrival tick —
+// because a trace of positions alone is circular: it would replay results, not
+// input. Its own listener registers AFTER the flight listener above, so the
+// production path is untouched and capture still sees the same event object
+// and the same pre-step simTick. Off, it costs exactly one boolean test.
+const inputCap = { on: false, t0: 0, events: [] };
+document.addEventListener("mousemove", (e) => {
+  if (!inputCap.on) return;
+  inputCap.events.push({ t: performance.now() - inputCap.t0,
+    dx: e.movementX, dy: e.movementY, buttons: e.buttons, tick: simTick });
+});
+function recordInput() {
+  inputCap.events = [];
+  inputCap.t0 = performance.now();
+  inputCap.on = true;
+}
+function stopInput() {
+  inputCap.on = false;
+  return inputCap.events;
+}
+// Replay delivers each event through the SAME entry point a real mouse uses —
+// a dispatched mousemove on document — and advances the sim between events by
+// each entry's tick, so the event/tick interleaving reproduces exactly. The
+// flight listener's thrust branch demands a pointer lock, which headless
+// automation is never granted, so the replay shadows the document's own
+// accessor for its duration: locked() then answers as it did at record time,
+// while every gate and every impulse still runs the production path.
+function replayInput(script, opts) {
+  if (!script || !script.length) return;
+  const shimLock = !opts || opts.locked !== false;
+  if (shimLock) Object.defineProperty(document, "pointerLockElement", { value: canvas, configurable: true });
+  try {
+    const base = script[0].tick;
+    const start = simTick;
+    for (const ev of script) {
+      const target = start + (ev.tick - base);
+      while (simTick < target) { step(); drainCues(); } // drained per step, like the frame loop
+      const e = new MouseEvent("mousemove", { bubbles: true, buttons: ev.buttons || 0, clientX: 0, clientY: 0 });
+      // MouseEventInit's movement fields are not settable cross-browser — the
+      // own-property shadow is, and the listener reads through it untouched
+      Object.defineProperty(e, "movementX", { value: ev.dx });
+      Object.defineProperty(e, "movementY", { value: ev.dy });
+      document.dispatchEvent(e);
+    }
+  } finally {
+    if (shimLock) delete document.pointerLockElement;
+  }
+}
+Object.assign(window.__test, {
+  hashState, hashParts,
+  simTick: () => simTick,
+  recordInput, stopInput, replayInput,
+  // the flight constants beside enc.tunables() — the fixture records both, so
+  // a future failure is diagnosable as "the constants moved" vs "the code moved"
+  flightTunables: () => ({ VMAX, ACCEL, TURN, FLICK, DAMP, KEYTHRUST, WALLLOSS }),
+  // the phase-3 input path: the A/B toggle, the lag slider, the accumulator's
+  // live state, and the locked-mode cursor — all input state, none of it hashed
+  setInputMode,
+  setInputLag: (v) => { INPUTLAG = v; syncInputLagUi(); },
+  setFlick: (v) => { FLICK = v; }, // the measurement harness's reach — FLICK has no slider
+  inputState: () => ({ INPUTMODE, INPUTLAG, acc: { ...inAcc }, buffered: lagBuf.length }),
+  lockedCursor: () => ({ ...lcur }),
+  setLockedCursor: (x, y) => {
+    lcur.x = Math.max(0, Math.min(FW, x));
+    lcur.y = Math.max(0, Math.min(FH, y));
+    mirrorLockedCursor();
+  },
+});
 
 resize();
 render();

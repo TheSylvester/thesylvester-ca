@@ -251,6 +251,10 @@ window.runWave1Checks = function () {
   // belongs to the pause menu (section R pins that) — and a frozen shop keeps
   // G.running true in play, so dispatches here raise the flag R-style:
   // the flag only, the loop itself stays stopped.
+  // The shop reads a CLIENT-space pointer here: mouse mode converts clientX and
+  // clientY to field coordinates. The shipped default is locked mode now, which
+  // reads the drawn cursor instead, so this section pins the mode it asserts.
+  t.setAimMode("mouse");
   const liveKey = (code) => {
     const was = t.G.running;
     t.G.running = true;
@@ -469,7 +473,19 @@ window.runWave1Checks = function () {
     "state=" + s.state + " wave=" + s.wave + " queued=" + s.queued);
   enc.advance(W2[0].spawnAt);
   s = enc.state();
-  ok("the first wave-2 group lands darts only", s.enemies === W2[0].count && s.darts === s.enemies && s.chargers === 0, "enemies=" + s.enemies);
+  // the wave OPENS on a plain pack: the radar variant is the closer now, so
+  // the first thing wave 2 shows is the ordinary dart read
+  ok("the first wave-2 group lands a plain dart pack, no radar leader",
+    s.enemies === W2[0].count && s.darts === s.enemies && s.byType.radarDart === 0 && s.chargers === 0,
+    "enemies=" + s.enemies + " darts=" + s.darts + " radarDarts=" + s.byType.radarDart);
+  // ...and the LAST group carries the wave's ONE radarDart as member 0 — the
+  // body wearing the cyan ring is the beat wave 2 ends on
+  const w2Last = W2[W2.length - 1];
+  enc.advance(w2Last.spawnAt - W2[0].spawnAt);
+  s = enc.state();
+  ok("wave 2 closes on the stamped pack, its leader the radar variant",
+    w2Last.radar === 1 && s.byType.radarDart === 1,
+    "last=" + JSON.stringify(w2Last) + " radarDarts=" + s.byType.radarDart);
   // per-wave reseed: an identical wave-1 kill-through deals an identical
   // wave 2, no matter that both runs consumed rand() along the way. The
   // advance is SPLIT around continueFromShop(): a fused clearHold+1+130
@@ -2825,8 +2841,12 @@ window.runWave1Checks = function () {
   // ---- AA. the generator: composition by interleave, bounded by pitch ----
   // countsFor/waveGroups stay pure functions of the wave number, so every leg
   // here is arithmetic on the real generator rather than a played wave.
-  const genKeys = ["darts", "chargers", "harriers", "husks", "anvils"];
-  const genPlural = { dart: "darts", charger: "chargers", harrier: "harriers", husk: "husks", anvil: "anvils" };
+  const genKeys = ["darts", "chargers", "harriers", "husks", "anvils",
+                   "radarDarts", "radarHarriers", "radarChargers"];
+  // radarDart is absent on purpose: it is never its own scheduled group — it
+  // replaces member 0 inside a stamped dart pack, so the dart tally holds
+  const genPlural = { dart: "darts", charger: "chargers", harrier: "harriers", husk: "husks", anvil: "anvils",
+                      radarHarrier: "radarHarriers", radarCharger: "radarChargers" };
   const genCounts = [];
   for (let w = 1; w <= 30; w++) genCounts.push(enc.countsFor(w));
   ok("waveGroups(1) is still the hand-tuned slice, byte for byte",
@@ -2891,21 +2911,34 @@ window.runWave1Checks = function () {
   }
   ok("every wave's schedule deals exactly the bodies its counts promise", genSum, genOff);
   ok("every wave keeps the 126-tick opening and the 90-tick warning", genOpen && genWarn);
-  ok("the pitch bounds a wave's length: groups land 2.5 to 5 s apart and no wave runs past 50 s",
-    genGapMin >= 150 && genGapMax <= 300 && genLast < 3000,
+  // 55 s, not the pre-radar 50: the four radar singles raise the deepest wave
+  // to 22 groups, and 21 gaps at the 150-tick floor end at tick 3276
+  ok("the pitch bounds a wave's length: groups land 2.5 to 5 s apart and no wave runs past 55 s",
+    genGapMin >= 150 && genGapMax <= 300 && genLast < 3300,
     "pitch=" + genGapMin + ".." + genGapMax + " lastSpawn=" + genLast);
   // the interleave itself — this is what makes a wave a composition rather than
   // all the darts and then all the heavies
   const genSeq = enc.waveGroups(30).map((g) => g.type);
   const genTypes = new Set(genSeq);
+  // the wave is dealt in two parts: the ordinary archetypes compose its body,
+  // and the radar variants close it — a boss beat, not an opening statement
+  const genIsRadar = (tp) => tp === "radarHarrier" || tp === "radarCharger";
+  const genCut = genSeq.findIndex(genIsRadar);
+  const genBody = genCut < 0 ? genSeq : genSeq.slice(0, genCut);
+  const genTail = genCut < 0 ? [] : genSeq.slice(genCut);
+  const genBodyTypes = new Set(genBody);
   let genInter = true;
-  for (let i = 1; i < genSeq.length; i++) {
+  for (let i = 1; i < genBody.length; i++) {
     // a repeat is only legitimate once every other queue has run dry — that tail
     // is the dart remainder, and nothing else may double up before it
-    if (genSeq[i] === genSeq[i - 1] && genSeq.slice(i).some((tp) => tp !== genSeq[i])) genInter = false;
+    if (genBody[i] === genBody[i - 1] && genBody.slice(i).some((tp) => tp !== genBody[i])) genInter = false;
   }
-  ok("a late wave opens with one group of every type it deals and never doubles up before the tail",
-    genTypes.size === 5 && new Set(genSeq.slice(0, genTypes.size)).size === genTypes.size && genInter,
+  let genAlt = true; // ...and the closers alternate, so a pair never lands together
+  for (let i = 1; i < genTail.length; i++) if (genTail[i] === genTail[i - 1]) genAlt = false;
+  ok("a late wave opens with one group of every ordinary type, never doubles up before its tail, and closes on the alternating radar variants",
+    genTypes.size === 7 && genBodyTypes.size === 5 && !genBody.some(genIsRadar) &&
+    new Set(genBody.slice(0, 5)).size === 5 &&
+    genTail.length === 4 && genTail.every(genIsRadar) && genInter && genAlt,
     genSeq.join(","));
 
   // ---- AB. determinism with the whole roster on the field ----

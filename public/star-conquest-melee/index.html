@@ -48,6 +48,11 @@
      invisible sliders and the arrow keys retune the game */
   #devpanel .tabsec[hidden] { display: none; }
   #devpanel .col { display: flex; flex-direction: column; gap: 6px; }
+  /* the enemies tab builds its .col groups inside a shell div the builder can
+     find by id — display:contents hands them straight to the tabsec's flex,
+     so the generated columns lay out exactly like the hand-authored ones */
+  #devpanel #enemies-body { display: contents; }
+  #devpanel .grouphead { color: #9aa3b2; letter-spacing: 0.14em; }
   #devpanel .row { display: flex; align-items: center; gap: 10px; }
   #devpanel label { width: 84px; text-align: right; }
   #devpanel input { width: 180px; accent-color: #d97757; }
@@ -83,6 +88,7 @@
       <button class="tab" type="button" data-tab="world" aria-pressed="false">world</button>
       <button class="tab" type="button" data-tab="combat" aria-pressed="false">combat</button>
       <button class="tab" type="button" data-tab="audio" aria-pressed="false">audio</button>
+      <button class="tab" type="button" data-tab="enemies" aria-pressed="false">enemies</button>
     </div>
     <button id="devback" class="back" type="button">back</button>
   </div>
@@ -114,6 +120,19 @@
           <input id="wallloss" type="range" min="0" max="1" step="0.05">
           <output id="wallloss-out" for="wallloss"></output>
         </div>
+        <div class="row">
+          <label for="inputmode">input</label>
+          <select id="inputmode">
+            <option value="event">per event</option>
+            <option value="tick">per tick</option>
+          </select>
+          <output id="inputmode-out" for="inputmode"></output>
+        </div>
+        <div class="row">
+          <label for="inputlag">input lag</label>
+          <input id="inputlag" type="range" min="0" max="250" step="10">
+          <output id="inputlag-out" for="inputlag"></output>
+        </div>
       </div>
     </section>
     <section class="tabsec" data-tab="aim" hidden>
@@ -123,6 +142,7 @@
           <select id="aimmode">
             <option value="mouse">mouse mode</option>
             <option value="push">push mode (legacy)</option>
+            <option value="locked">locked (one lock)</option>
           </select>
           <output id="aimmode-out" for="aimmode"></output>
         </div>
@@ -339,6 +359,9 @@
         </div>
       </div>
     </section>
+    <!-- generated at first open from Encounter.tuning — encounter.js loads
+         after game.js, so the rows cannot be authored or bound at parse time -->
+    <section class="tabsec" data-tab="enemies" hidden><div id="enemies-body"></div></section>
   </div>
 </div>
 <script src="js/game.js"></script>

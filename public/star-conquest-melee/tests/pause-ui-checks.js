@@ -29,13 +29,16 @@ window.runPauseUiChecks = function () {
   // the tab membership the split is contracted to: every id, in its tab, in
   // the order the markup lays it out
   const TABS = {
-    flight: ["vmax", "accel", "turn", "keythrust", "wallloss"],
+    flight: ["vmax", "accel", "turn", "keythrust", "wallloss", "inputmode", "inputlag"],
     aim: ["aimmode", "aimsens", "aimdist", "invert"],
     weapons: ["cool", "autofire", "bspeed", "bfactor", "bmax", "blife", "bounce", "fxint", "fxdur", "blastr", "blastgain"],
     camera: ["cammode", "camease", "cambox", "camlead", "leadsrc", "aimlead", "leadblend", "leaddz", "edgemargin"],
     world: ["stardens", "reseed", "minimap", "edgearrows"],
     combat: ["contactcd"],
     audio: ["sfxvol", "sfxmute", "sfxshot", "sfxfoe", "sfxui", "sfxeng", "sfxtest"],
+    // generated at first open from Encounter.tuning, so no ids can be listed
+    // here: empty until the tab is opened, enemy-<row.id> sliders after
+    enemies: [],
   };
   const ALL = [].concat(...Object.values(TABS));
   // the five id-less outputs showTuner() must never overwrite, and their prose
@@ -83,8 +86,12 @@ window.runPauseUiChecks = function () {
   for (const tab of Object.keys(TABS)) {
     const sec = document.querySelector('#devpanel .tabsec[data-tab="' + tab + '"]');
     if (!sec) { membership += tab + ":missing "; continue; }
-    const got = [...sec.querySelectorAll("input, select, button")].map((c) => c.id).join(" ");
-    if (got !== TABS[tab].join(" ")) membership += tab + ":[" + got + "] ";
+    const ids = [...sec.querySelectorAll("input, select, button")].map((c) => c.id);
+    const got = ids.join(" ");
+    // the enemies tab's controls are generated on first open — the membership
+    // rule relaxes to the id contract itself: absent, or all enemy-<row.id>
+    if (tab === "enemies") { if (!ids.every((id) => /^enemy-./.test(id))) membership += tab + ":[" + got + "] "; }
+    else if (got !== TABS[tab].join(" ")) membership += tab + ":[" + got + "] ";
   }
   ok("every tab section holds exactly its own controls, in order", !membership, membership);
   let single = "";
@@ -113,7 +120,7 @@ window.runPauseUiChecks = function () {
   ok("an unknown tab name is ignored", ui.UI.tab === "camera", "tab=" + ui.UI.tab);
 
   // ---- D. the control-id contract the move had to preserve ----
-  ok("the 28 split controls plus 2 fx, 2 blast, 1 combat, 1 world and 7 audio controls are all present", ALL.length === 41, "n=" + ALL.length);
+  ok("the 28 split controls plus 2 fx, 2 blast, 1 combat, 1 world, 7 audio and 2 input-path controls are all present", ALL.length === 43, "n=" + ALL.length);
   let idErr = "";
   for (const id of ALL) {
     const n = document.querySelectorAll("#" + id).length;
@@ -125,7 +132,7 @@ window.runPauseUiChecks = function () {
     const live = !!document.getElementById(id + "-out");
     if (live === (STATIC[id] !== undefined)) outErr += id + " ";
   }
-  ok("36 controls carry a live readout and 5 carry none", !outErr, outErr);
+  ok("38 controls carry a live readout and 5 carry none", !outErr, outErr);
   let proseErr = "";
   for (const id of Object.keys(STATIC)) {
     const o = document.querySelector('#devpanel output[for="' + id + '"]');
@@ -337,6 +344,22 @@ window.runPauseUiChecks = function () {
   t.setAimMode("mouse");
   ok("push mode retires the card instead of teaching the wrong controls",
     pushElig === false && t.guideState().eligible === true, "push=" + pushElig);
+  // ...and the SHIPPED default earns the card rather than losing it: locked
+  // mode's roles are the card's roles — a cursor aims, hold right flies, left
+  // fires — and only the cursor's provenance differs, which the art never
+  // names. Its in-session copy is read with the session flag up, because the
+  // card screen's own stand-in owns the idle one.
+  t.setAimMode("locked");
+  const lockedElig = t.guideState().eligible;
+  t.G.started = true;
+  const lockedLines = t.pauseLines();
+  t.G.started = false;
+  t.setAimMode("mouse");
+  ok("locked mode keeps the card, and its copy states the roles instead of the lock",
+    lockedElig === true && lockedLines.length === 2 &&
+    lockedLines.every((l) => !/pointer lock|per session/i.test(l)) &&
+    /cursor/i.test(lockedLines[0]) && /fly|flies/i.test(lockedLines[1]),
+    "eligible=" + lockedElig + " " + JSON.stringify(lockedLines));
   // The text stand-in: what the card's own screen prints before the bitmap
   // arrives, or if it never does. It has to teach the SAME contract the art
   // does — mouse only, no ring, no key names — while every other screen keeps

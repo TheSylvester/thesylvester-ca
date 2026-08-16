@@ -139,6 +139,21 @@
       max: 6,                // a guard, not a mechanic: 3 harriers at one missile per
                              // 150 ticks with a 90-tick life cannot reach 6 in flight
     },
+    // The radar variants — the aim-attack archetypes' predictive siblings.
+    // Base attacks punish a still player; a predicted attack punishes CONSTANT
+    // VELOCITY, so the counter inverts: change velocity during the telegraph.
+    // The prediction is latched exactly once, at telegraph/windup/lockon start
+    // — the same honesty rule every base attack keeps.
+    radar: {
+      leadScale: 1,     // 0..1.5 — fraction of the computed lead actually taken
+      deadband: 0.3,    // px/tick — below it a ship reads as still and radar aim
+                        // collapses to the base bearing, so the variant is
+                        // legible only through motion
+      missileTurn: 0.010, // rad/tick for the RADAR missile only — the predicted
+                        // launch bearing spends less of the heading budget the
+                        // base 0.020 was tuned around, so this starts at half
+                        // and slides to 0 (pure ballistic predictor)
+    },
     // The shield — the roster's FACING axis. prefer 0 makes the shared
     // ring-hold code close forever, and maxSpeed below the ship's 2.0 means it
     // can always be escaped: its threat is that it is standing where you
@@ -282,14 +297,55 @@
   // ---- seeded RNG — the only randomness in the encounter -----------------
   function mulberry32(seed) {
     let a = seed >>> 0;
-    return () => {
+    // the generator's whole state is `a`; the harness hashes it so a trace can
+    // prove the stream is where it was, not merely that the same values came out
+    const f = () => {
       a = (a + 0x6D2B79F5) | 0;
       let t = Math.imul(a ^ (a >>> 15), 1 | a);
       t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
+    f.state = () => a >>> 0;
+    return f;
   }
   let rand = mulberry32(ECFG.seed);
+
+  // ---- the simulation event stream ---------------------------------------
+  // One simulation event. The simulation produces these and never touches
+  // audio. `kind` is the cue name Sfx already understands. `at` is the world
+  // point the cue pans from, or null for a cue with no position. `gain` is
+  // the 0..1 volume the call site computed, or undefined to let Sfx decide.
+  // { kind: string, at: {x, y} | null, gain?: number }
+  //
+  // The queue retires a whole class of bug rather than defending against it:
+  // a cue used to be a call INTO the audio layer from inside the step path,
+  // one edit away from consuming rand() between two seeded draws. An emit
+  // writes one plain object and reads nothing — no clock, no rand(), no
+  // allocation beyond the event — so the audio path can no longer sit
+  // between rand() calls at all. The presentation side drains the queue
+  // after step() returns, in order, on the same tick.
+  const EVENTS = [];
+  // the only way in. `at` may be a live entity — x and y are copied out
+  // rather than the entity retained, because a body can be reaped between
+  // the push and the drain.
+  function emit(kind, at, gain) {
+    EVENTS.push({ kind, at: at ? { x: at.x, y: at.y } : null, gain });
+  }
+  // Ordered: index 0 fired first. events() is a readonly view of the events
+  // queued this tick; drainEvents() hands them over and clears the queue.
+  const events = () => EVENTS;
+  const drainEvents = () => EVENTS.splice(0);
+
+  // ---- entity identity ----------------------------------------------------
+  // A plain monotonic counter, never a rand() draw — a draw here would shift
+  // the seeded stream and re-deal every wave in the game. restart() resets it
+  // so a seeded run reproduces its ids exactly, which is what lets a golden
+  // trace assert on them at all. One id space across enemies, missiles, orbs,
+  // shards AND game.js's bullets — a replication layer keys by id alone and
+  // cannot disambiguate by owning array. An id is never reused: shards take
+  // fresh ids and the dead husk's id retires with it.
+  let nextEntityId = 1;
+  const nextId = () => nextEntityId++;
 
   // ---- wave scaling — pure functions of the wave number ------------------
   // countsFor/statsFor/waveGroups read only ECFG constants: the same wave
@@ -308,23 +364,40 @@
       harriers: wave >= 2 ? Math.min(1 + Math.floor((wave - 2) / 3), 3) : 0,
       husks: wave >= 4 ? Math.min(1 + Math.floor((wave - 4) / 4), 2) : 0,
       anvils: wave >= 5 ? Math.min(1 + Math.floor((wave - 5) / 4), 2) : 0,
+      // the radar variants seed SPARSELY, each two waves after its parent has
+      // taught the base read: the lead is only legible against the aim it varies
+      radarDarts: wave >= 2 ? Math.min(1 + Math.floor((wave - 2) / 3), 3) : 0,
+      radarHarriers: wave >= 4 ? Math.min(1 + Math.floor((wave - 4) / 4), 2) : 0,
+      radarChargers: wave >= 5 ? Math.min(1 + Math.floor((wave - 5) / 4), 2) : 0,
     };
   }
 
-  // The one rotation the whole file orders types by: the wave generator
-  // interleaves over it, and snapState reports byType in it. shard is absent
-  // on purpose — it is the husk's payload, never scheduled.
-  const ROTATION = ["dart", "harrier", "charger", "husk", "anvil"];
-  // ...and the full roster, which is the rotation plus that payload. This is
-  // the membership test spawnEnemy uses, so an unknown name can never reach
+  // The one rotation the whole file REPORTS types by: snapState's byType and
+  // the state hash both walk it, so its order is a committed contract and the
+  // radar single stays beside its parent here. shard is absent on purpose — it
+  // is the husk's payload, never scheduled.
+  const ROTATION = ["dart", "harrier", "radarHarrier", "charger", "radarCharger", "husk", "anvil"];
+  // The DEAL order is a separate question, and the answer is not the report
+  // order. A wave interleaves its ordinary archetypes through the body of the
+  // schedule and CLOSES on the radar variants: the player reads what each
+  // archetype does first, then meets the sibling that leads its shot as the
+  // wave's last beat. The two radar heavies alternate so a pair never lands
+  // back to back, and the radarDart rides the LAST dart packs (see waveGroups).
+  const DEALFIRST = ["dart", "harrier", "charger", "husk", "anvil"];
+  const DEALLAST = ["radarHarrier", "radarCharger"];
+  // ...and the full roster, which is the rotation plus the bodies that are
+  // never their own scheduled group: the husk's shard payload, and the
+  // radarDart, which replaces a member inside a dart pack. This is the
+  // membership test spawnEnemy uses, so an unknown name can never reach
   // E.stats through the prototype chain.
-  const ROSTER = ROTATION.concat("shard");
+  const ROSTER = ROTATION.concat("shard", "radarDart");
 
   function statsFor(wave) {
     const hpBonus = Math.min(Math.floor((wave - 1) / 3), 4); // +1 hull every third wave, capped
     const mul = Math.min(1 + 0.08 * (wave - 1), 2); // shared speed multiplier — the cap doubles the base
-    return {
-      dart: {
+    // the parent entries resolve first as consts, so the radar variants below
+    // can derive from them instead of re-stating a curve they must never drift from
+    const dart = {
         r: ECFG.enemy.r,
         hp: ECFG.enemy.hp + hpBonus, // 2..6 — the hpBonus cap bounds it
         maxSpeed: ECFG.enemy.maxSpeed * mul, // 2.4..4.8
@@ -335,8 +408,8 @@
                                    // mode" — that is what lets stepEnemy ask P.engage
                                    // instead of type-testing for a range
         orbDrop: 1, // a dart still drops exactly one orb at every wave
-      },
-      charger: {
+    };
+    const charger = {
         r: ECFG.charger.r,
         hp: ECFG.charger.hp + hpBonus,
         maxSpeed: ECFG.charger.maxSpeed * mul,
@@ -345,8 +418,8 @@
         rest: Math.max(54, Math.round(ECFG.charger.rest * Math.pow(0.95, wave - 1))),
         engage: ECFG.charger.engage,
         orbDrop: 2, // the heavier body pays out double
-      },
-      // the same two scaling rules as above — hp + hpBonus, maxSpeed × mul —
+    };
+    // the same two scaling rules as above — hp + hpBonus, maxSpeed × mul —
       // govern the whole roster, so no type ever needs its own curve. The
       // launcher's CADENCE shortens on the dart's 0.95^(wave-1) curve; the
       // missile it fires does not scale at all (see ECFG.missile).
@@ -362,7 +435,7 @@
       // ship from wave 10 and becomes a shielded body you cannot escape OR
       // shoot from the front. The dart and the charger still carry the roster's
       // speed escalation, exactly as they always did — that curve is untouched.
-      harrier: {
+    const harrier = {
         r: ECFG.harrier.r,
         hp: ECFG.harrier.hp + hpBonus,
         maxSpeed: ECFG.harrier.maxSpeed, // invariant — see above
@@ -371,7 +444,18 @@
         engage: ECFG.harrier.engage,
         cooldown: Math.max(90, Math.round(ECFG.harrier.cooldown * Math.pow(0.95, wave - 1))),
         orbDrop: ECFG.harrier.orbDrop,
-      },
+    };
+    return {
+      dart, charger, harrier,
+      // The radar variants: the SAME body — every stat the parent resolved,
+      // by reference to the const above, never re-derived — except orbDrop
+      // (+1, the smarter aim pays a little more) and the two markers behavior
+      // code reads. `base` is how shared code resolves the archetype; `radar`
+      // is the aim switch. No hp or speed bump on purpose: the threat must be
+      // the aim, and a stat bump would blur that read.
+      radarDart: { ...dart, orbDrop: dart.orbDrop + 1, radar: true, base: "dart" },
+      radarCharger: { ...charger, orbDrop: charger.orbDrop + 1, radar: true, base: "charger" },
+      radarHarrier: { ...harrier, orbDrop: harrier.orbDrop + 1, radar: true, base: "harrier" },
       anvil: {
         r: ECFG.anvil.r,
         hp: ECFG.anvil.hp + hpBonus,
@@ -428,25 +512,40 @@
       ];
     }
     const n = countsFor(wave);
-    const queues = { dart: [], harrier: [], charger: [], husk: [], anvil: [] };
+    const queues = { dart: [], harrier: [], radarHarrier: [], charger: [], radarCharger: [], husk: [], anvil: [] };
     for (let left = n.darts; left > 0; left -= 3) queues.dart.push({ count: Math.min(3, left), type: "dart" });
     for (let i = 0; i < n.harriers; i++) queues.harrier.push({ count: 1, type: "harrier" });
     for (let i = 0; i < n.chargers; i++) queues.charger.push({ count: 1, type: "charger" });
     for (let i = 0; i < n.husks; i++) queues.husk.push({ count: 1, type: "husk" });
     for (let i = 0; i < n.anvils; i++) queues.anvil.push({ count: 1, type: "anvil" });
-    // round-robin over the fixed rotation, one group per non-empty queue per
+    // the radar heavies land as singles like their parents; the radarDart is
+    // never its own group — the LAST packs each carry ONE, as member 0, so the
+    // body wearing the cyan ring leads a pack the player meets late in the
+    // wave. Deterministic, and no rand() consumed.
+    for (let i = 0; i < n.radarHarriers; i++) queues.radarHarrier.push({ count: 1, type: "radarHarrier" });
+    for (let i = 0; i < n.radarChargers; i++) queues.radarCharger.push({ count: 1, type: "radarCharger" });
+    for (let i = 0; i < Math.min(n.radarDarts, queues.dart.length); i++) {
+      queues.dart[queues.dart.length - 1 - i].radar = 1;
+    }
+    // round-robin over the ordinary types, one group per non-empty queue per
     // pass. The total bounds the loop, so a queue running dry can never spin it.
-    const total = ROTATION.reduce((s, t) => s + queues[t].length, 0);
+    const total = DEALFIRST.reduce((s, t) => s + queues[t].length, 0);
     const groups = [];
     for (let pass = 0; groups.length < total; pass++) {
-      for (const t of ROTATION) if (queues[t][pass]) groups.push(queues[t][pass]);
+      for (const t of DEALFIRST) if (queues[t][pass]) groups.push(queues[t][pass]);
+    }
+    // ...then the radar tail closes the wave, alternating between the two
+    // heavies. Same round-robin, same determinism — a different queue set.
+    const tail = DEALLAST.reduce((s, t) => s + queues[t].length, 0);
+    for (let pass = 0; groups.length < total + tail; pass++) {
+      for (const t of DEALLAST) if (queues[t][pass]) groups.push(queues[t][pass]);
     }
     // the pitch bounds a wave's LENGTH as its group count grows: few groups
     // keep today's exact 5 s spacing, while an 18-group late wave tightens to
     // 2.5 s instead of running a minute and a half. The 90-tick warning and
     // the 126-tick first-spawn offset are untouched.
     const pitch = Math.max(150, Math.min(300, Math.round(1800 / groups.length)));
-    return groups.map((g, k) => ({ count: g.count, type: g.type, warnAt: 126 + pitch * k - 90, spawnAt: 126 + pitch * k }));
+    return groups.map((g, k) => ({ count: g.count, type: g.type, radar: g.radar, warnAt: 126 + pitch * k - 90, spawnAt: 126 + pitch * k }));
   }
 
   // ---- encounter state ---------------------------------------------------
@@ -546,6 +645,43 @@
     return Math.atan2(Math.sin(d), Math.cos(d));
   }
 
+  // Predicted-intercept aim for a radar body: advance the ship through the
+  // attack's fixed delay, then (for a real projectile) solve the intercept
+  // quadratic |rel + vel·t| = speed·t and take the smallest positive root.
+  // Falls back to the pure-pursuit time when no positive root exists (a
+  // faster-than-projectile or receding ship). Pure arithmetic on live state —
+  // no rand(), no clock — and clamped into the world so a lead can never
+  // point at a spot the ship cannot occupy.
+  function predictAim(e, delayTicks, projSpeed) {
+    const R = ECFG.radar;
+    let vx = G.vel.x, vy = G.vel.y;
+    if (Math.hypot(vx, vy) < R.deadband) { vx = 0; vy = 0; }
+    vx *= R.leadScale; vy *= R.leadScale;
+    let tx = G.ship.x + vx * delayTicks;
+    let ty = G.ship.y + vy * delayTicks;
+    if (projSpeed > 0 && (vx || vy)) {
+      const rx = tx - e.x, ry = ty - e.y;
+      const a = vx * vx + vy * vy - projSpeed * projSpeed;
+      const b = 2 * (rx * vx + ry * vy);
+      const c = rx * rx + ry * ry;
+      let t = -1;
+      if (Math.abs(a) < 1e-9) { if (b < 0) t = -c / b; }
+      else {
+        const disc = b * b - 4 * a * c;
+        if (disc >= 0) {
+          const sq = Math.sqrt(disc);
+          const t1 = (-b - sq) / (2 * a), t2 = (-b + sq) / (2 * a);
+          t = Math.min(t1, t2) > 0 ? Math.min(t1, t2) : Math.max(t1, t2);
+        }
+      }
+      if (!(t > 0)) t = Math.hypot(rx, ry) / projSpeed; // pure-pursuit fallback
+      tx += vx * t; ty += vy * t;
+    }
+    tx = Math.max(SHIP_R, Math.min(WW - SHIP_R, tx));
+    ty = Math.max(SHIP_R, Math.min(WH - SHIP_R, ty));
+    return { a: Math.atan2(ty - e.y, tx - e.x), x: tx, y: ty };
+  }
+
   // ---- spawning ----------------------------------------------------------
   // One anchor per group, dealt on an edge of the CURRENT camera rectangle,
   // spawnGap px outside it, clamped into the world and held off the player.
@@ -584,6 +720,7 @@
   function makeBody(x, y, kind, i, vx, vy) {
     const st = E.stats[kind];
     E.enemies.push({
+      id: nextId(), // identity, not simulation state — the hash allow-list ignores it
       x, y, vx: vx || 0, vy: vy || 0, r: st.r, hp: st.hp, type: kind,
       stats: st,      // the resolved per-wave stats ride on the body — a live
                       // enemy keeps them even after the wave clock moves on
@@ -599,6 +736,7 @@
       // on its first seek tick anyway and keeps the old 0
       face: st.turnRate ? Math.atan2(G.ship.y - y, G.ship.x - x) : 0,
       lockA: 0, flash: 0, pulseHit: false, dashHit: false,
+      predT: 0, // ticks left on a radar latch's ping at (predX, predY) — drawing only
       contactCd: 0, // ticks left before this body can take contact damage again
       contactTaken: false, // this body already paid a contact THIS tick — cleared in stepEnemy
     });
@@ -631,7 +769,9 @@
 
   function spawnGroup(g) {
     if (!g.points) g.points = rollGroupPoints(g.count);
-    g.points.pts.forEach((p, i) => spawnEnemy(p.x, p.y, i, g.type));
+    // a radar-stamped pack deals its variant as member 0 — the pack leader
+    // wearing the cyan ring is the first thing the pack shows
+    g.points.pts.forEach((p, i) => spawnEnemy(p.x, p.y, i, g.radar && i === 0 ? "radarDart" : g.type));
   }
 
   // ---- combat ------------------------------------------------------------
@@ -648,7 +788,7 @@
     // one cue per REGISTERED hit — the invuln early return above keeps graced
     // hits silent for free. The branch reads the state the block above just
     // settled, so the killing blow plays death alone, never hurt-then-death.
-    if (window.Sfx) Sfx.cue(E.state === "dead" ? "death" : "hurt");
+    emit(E.state === "dead" ? "death" : "hurt");
     return true;
   }
 
@@ -684,7 +824,7 @@
       spawnImpactFx(e.x - (cdx / cm) * e.r, e.y - (cdy / cm) * e.r, cdx / cm, cdy / cm, "enemy");
       // inside the claim block on purpose: the claim IS the damage edge, so a
       // sustained overlap sounds once per CONTACTCD window, never per tick
-      if (window.Sfx) Sfx.cue("hit", e);
+      emit("hit", e);
     }
     return playerHit;
   }
@@ -699,6 +839,8 @@
     const ux = dx / dist;
     const uy = dy / dist;
     if (e.flash > 0) e.flash--;
+    if (e.predT > 0) e.predT--; // the ping fades on the sim clock, like flash —
+                                // the draw path never mutates it
     if (e.contactCd > 0) e.contactCd--;
     e.contactTaken = false; // a fresh tick — this body's contact is unclaimed again
     if (e.mode === "seek") {
@@ -748,32 +890,49 @@
       // harrier 270 — and a type whose engage is 0 (the anvil, the husk, the
       // shards) has no attack mode to enter at any distance
       else if (P.engage > 0 && dist <= P.engage) {
-        if (e.type === "charger") { // rested and in range — plant to lunge
+        // a radar variant behaves as its base archetype everywhere but the
+        // latch itself: the bearing points at the predicted intercept instead
+        // of the ship, computed ONCE, right here — never re-aimed during the
+        // telegraph, the same honesty every base attack keeps
+        const kin = P.base || e.type;
+        const latch = (delay, projSpeed) => {
+          if (P.radar) {
+            const pr = predictAim(e, delay, projSpeed);
+            e.lockA = pr.a;
+            e.face = pr.a;        // the nose shows the lead — one more honest tell
+            e.predX = pr.x; e.predY = pr.y; e.predT = 20; // the latch ping, drawing only
+          } else {
+            e.lockA = e.face;
+          }
+        };
+        if (kin === "charger") { // rested and in range — plant to lunge
           e.mode = "windup";
           e.t = CH.windup;
-          e.lockA = e.face; // the dash line locks NOW, so the lunge can be dodged
-          e.dashHit = false;
+          latch(CH.windup, CH.dashSpeed); // the dash line locks NOW, so the lunge
+          e.dashHit = false;              // can be dodged; the dash IS the projectile
           // the tell starts the tick the line locks, so the sound and the
           // dodge window begin together — same deal as the dart's charge
-          if (window.Sfx) Sfx.cue("windup", e);
-        } else if (e.type === "harrier") { // standoff and rested — plant to launch
+          emit("windup", e);
+        } else if (kin === "harrier") { // standoff and rested — plant to launch
           e.mode = "lockon";
           e.t = ECFG.harrier.lockon;
-          e.lockA = e.face; // the missile leaves on THIS bearing, not the live one
-          if (window.Sfx) Sfx.cue("lock", e); // a smaller sibling of windup — the
-                                              // same family, a lighter body
+          latch(ECFG.harrier.lockon, ECFG.missile.speed); // the missile leaves on
+                                    // THIS bearing, not the live one
+          emit("lock", e); // a smaller sibling of windup — the
+                           // same family, a lighter body
         } else { // in range and rested — plant and telegraph
           e.mode = "tele";
           e.t = L.telegraph;
-          e.lockA = e.face; // the lance direction locks here, so it can be dodged
-          e.pulseHit = false;
-          if (window.Sfx) Sfx.cue("charge", e);
+          latch(L.telegraph, 0); // the lance direction locks here, so it can be
+          e.pulseHit = false;    // dodged; the beam is instant at fire — no
+                                 // intercept term, just the delay
+          emit("charge", e);
         }
       }
     } else if (e.mode === "tele") {
       e.vx *= 0.8; // plant to fire — the telegraph stays honest
       e.vy *= 0.8;
-      if (--e.t <= 0) { e.mode = "pulse"; e.t = ECFG.lance.pulse; if (window.Sfx) Sfx.cue("zap", e); }
+      if (--e.t <= 0) { e.mode = "pulse"; e.t = ECFG.lance.pulse; emit("zap", e); }
     } else if (e.mode === "pulse") {
       e.vx *= 0.8;
       e.vy *= 0.8;
@@ -809,7 +968,7 @@
     } else if (e.mode === "windup") {
       e.vx *= 0.85; // plant — the body sinks to rest while the intent line brightens
       e.vy *= 0.85;
-      if (--e.t <= 0) { e.mode = "dash"; e.t = CH.dashTicks; if (window.Sfx) Sfx.cue("dash", e); }
+      if (--e.t <= 0) { e.mode = "dash"; e.t = CH.dashTicks; emit("dash", e); }
     } else if (e.mode === "dash") {
       // constant-speed lunge along the LOCKED line — reassigned every tick
       // so no damping bleeds in; the wall clamp below can still end it
@@ -863,14 +1022,17 @@
   // The one constructor, shared by the launcher and the test hook, so a check
   // drives production code rather than a fixture. Returns the missile, or null
   // when the safety cap refuses it.
-  function spawnMissile(x, y, a) {
+  function spawnMissile(x, y, a, radar) {
     const M = ECFG.missile;
     if (E.missiles.length >= M.max) return null;
     const m = {
+      id: nextId(), // same id space as the bodies — see nextId
       x, y, vx: Math.cos(a) * M.speed, vy: Math.sin(a) * M.speed,
       r: M.r, hp: M.hp,
       age: 0,      // ticks flown — arm, decay and expiry all read this one clock
       trail: [],   // recent positions, newest last; drawing only
+      radar: !!radar, // a radar launcher's round steers on ECFG.radar.missileTurn
+                      // instead of the base turn — everything else is identical
     };
     E.missiles.push(m);
     return m;
@@ -883,10 +1045,10 @@
   function launchMissile(e) {
     const M = ECFG.missile;
     const off = e.r + M.r + 1;
-    const m = spawnMissile(e.x + Math.cos(e.lockA) * off, e.y + Math.sin(e.lockA) * off, e.lockA);
-    if (m && window.Sfx) Sfx.cue("launch", e); // positional, on the launcher — a
-                                               // harrier firing from the screen's
-                                               // edge is heard as well as seen
+    const m = spawnMissile(e.x + Math.cos(e.lockA) * off, e.y + Math.sin(e.lockA) * off, e.lockA, e.stats.radar);
+    if (m) emit("launch", e); // positional, on the launcher — a
+                              // harrier firing from the screen's
+                              // edge is heard as well as seen
   }
 
   // Every way a missile ends, in one place: the list removal, the burst and
@@ -901,7 +1063,7 @@
     // one cue per ending, however it ended: the audio table's boom is defined
     // as "a missile ending", and most endings are the player's own bullet
     // killing it — which is why it sits on the shot bus and not on foe
-    if (window.Sfx) Sfx.cue("boom", m);
+    emit("boom", m);
   }
 
   // Steer, then move, once per tick. The rotation form is provably
@@ -915,7 +1077,10 @@
       // 0 while arming (a straight opening segment is what makes the bearing
       // readable), full through the middle, then fading linearly to 0 over the
       // last decay ticks — the fuse tell and the anti-orbit fix in one term
-      const lim = m.age < M.arm ? 0 : ttl < M.decay ? M.turn * (ttl / M.decay) : M.turn;
+      // the radar round's turn reads LIVE, so the tuner slider acts on missiles
+      // already in flight; at 0 it is a pure ballistic predictor
+      const turn = m.radar ? ECFG.radar.missileTurn : M.turn;
+      const lim = m.age < M.arm ? 0 : ttl < M.decay ? turn * (ttl / M.decay) : turn;
       if (lim > 0) {
         const dx = G.ship.x - m.x;
         const dy = G.ship.y - m.y;
@@ -1001,7 +1166,7 @@
     spawnImpactFx(x, y, 0, -1, "blast", R); // visual only — sized to the radius the sim just used
     // below the R <= 0 return, which is what makes this cue mean "the
     // upgrade you bought went off" and never a phantom at rank 0
-    if (window.Sfx) Sfx.cue("blast", { x, y });
+    emit("blast", { x, y });
   }
 
   // Bullets arbitrate against enemies AND missiles in ONE first-along-the-path
@@ -1063,9 +1228,9 @@
         if (hit.stats.arc > 0 && Math.abs(angDiff(Math.atan2(iy - hit.y, ix - hit.x), hit.face)) <= hit.stats.arc) {
           b.dead = true;
           spawnImpactFx(ix, iy, b.vx / bm, b.vy / bm, "wall");
-          if (window.Sfx) Sfx.cue("clang", hit); // pitched and short, obviously not
-                                                 // the hit click — the shield is
-                                                 // learnable by ear in one volley
+          emit("clang", hit); // pitched and short, obviously not
+                              // the hit click — the shield is
+                              // learnable by ear in one volley
           blastAt(ix, iy, hit, b.dmg); // hit, not null: everything else in reach
                                        // pays, the body that stopped the round does not
           continue;
@@ -1075,8 +1240,8 @@
         b.dead = true; // consumed exactly once — the game sweep removes it
         E.hitsDealt++;
         spawnImpactFx(ix, iy, b.vx / bm, b.vy / bm, "enemy");
-        if (window.Sfx) Sfx.cue("hit", hit); // the landing, not the kill — reapDead
-                                             // owns the one canonical kill sound
+        emit("hit", hit); // the landing, not the kill — reapDead
+                          // owns the one canonical kill sound
         blastAt(ix, iy, hit, b.dmg); // the splash lands where the bullet stopped
       }
     }
@@ -1124,7 +1289,7 @@
   // is a row here and not a nested conditional. The same set names the heavy
   // SPAWN cue, for the same reason — the lone body arriving on the edge is
   // either something big or it is not.
-  const HEAVY = { charger: true, anvil: true, husk: true };
+  const HEAVY = { charger: true, radarCharger: true, anvil: true, husk: true };
 
   // A husk's death burst: three shards on a seeded fan, ONE rand() draw for the
   // base angle and 120° between them, each pushed clear of the corpse and given
@@ -1152,14 +1317,14 @@
       E.kills++;
       // the ONE canonical kill site — bullet, blast and contact deaths all
       // arrive here, so no path can sound a body twice. BEFORE the orb loop,
-      // which consumes rand(): the cue reads nothing and reorders nothing,
+      // which consumes rand(): the emit reads nothing and reorders nothing,
       // and keeping it above the draws makes that obvious at a glance.
-      if (window.Sfx) Sfx.cue(HEAVY[e.type] ? "killheavy" : "kill", e);
+      emit(HEAVY[e.type] ? "killheavy" : "kill", e);
       for (let k = 0; k < e.orbDrop; k++) { // 1 a dart or a shard, 2 a charger or a
                                             // harrier, 3 an anvil, 1 the husk itself —
                                             // whose three shards make the burst pay 4
         const a = rand() * Math.PI * 2; // each drop dealt its own drift
-        E.orbs.push({ x: e.x, y: e.y, vx: Math.cos(a) * ECFG.orb.drift, vy: Math.sin(a) * ECFG.orb.drift });
+        E.orbs.push({ id: nextId(), x: e.x, y: e.y, vx: Math.cos(a) * ECFG.orb.drift, vy: Math.sin(a) * ECFG.orb.drift });
       }
       // after the orbs, and on the reverse-iterating loop that makes appending
       // safe: the shards land at the end of the list, below the index this loop
@@ -1204,7 +1369,7 @@
         addXp(1);
         // beside the splice, never inside addXp() — the suites call that
         // synthetically, and a granted XP is not a banked orb
-        if (window.Sfx) Sfx.cue("pickup");
+        emit("pickup");
       }
     }
   }
@@ -1225,7 +1390,7 @@
                              // however the flight controls left it
     shopHoverFromMouse();    // ...and it opens hovering whatever already sits under
                              // the pointer, since a still mouse fires no mousemove
-    if (window.Sfx) Sfx.cue("shop"); // a smaller door than a cleared wave, same family
+    emit("shop"); // a smaller door than a cleared wave, same family
   }
 
   // one purchase; the state STAYS "shop" so the player buys again. Returns
@@ -1275,7 +1440,7 @@
     // many draws the previous wave consumed (orb drift angles and anchor
     // retries vary with play), so every wave is reproducible on its own
     rand = mulberry32(n === 1 ? ECFG.seed : (ECFG.seed ^ Math.imul(n, 0x9E3779B9)) >>> 0);
-    E.groups = waveGroups(n).map((g) => ({ count: g.count, type: g.type, warnAt: g.warnAt, spawnAt: g.spawnAt, points: null, spawned: false }));
+    E.groups = waveGroups(n).map((g) => ({ count: g.count, type: g.type, radar: g.radar, warnAt: g.warnAt, spawnAt: g.spawnAt, points: null, spawned: false }));
     E.stats = statsFor(n); // resolved ONCE — bodies stamp this at spawn
   }
 
@@ -1290,6 +1455,10 @@
     E.missiles = []; // ordnance never survives a restart — a wave-9 seeker
                      // arriving on the new wave 1 would be unaccountable
     E.orbs = [];
+    EVENTS.length = 0;   // no queued cue survives a restart — a stale event
+                         // would sound over the new run's opening tick
+    nextEntityId = 1;    // the id deal restarts with the run — a seeded run
+                         // reproduces its ids exactly, see nextId
     E.hullMax = ECFG.player.hull;  // MAX HULL purchases die with the run
     E.hull = E.hullMax;
     E.xp = 0;                      // the wallet resets on death — owner decision, the roguelite reset
@@ -1343,14 +1512,32 @@
       return;
     }
     E.waveTick++;
+    // A cleared field does not wait out the clock. Once the wave is under way,
+    // if every body is dead and no ordnance is in the air, the REST of the
+    // schedule slides forward so the next group warns on this tick and lands
+    // its 90 ticks later. Only the dead time is cut: the warning still runs in
+    // full, and the remaining groups keep their pitch relative to each other,
+    // so a wave the player clears fast reads as pressure instead of a timer.
+    // The wave's OPENING beat is deliberately exempt — the gate needs a group
+    // already down, so continuing from the shop still lands its first pack on
+    // the committed 126-tick offset. "Settled" is the clear gate's own test,
+    // missiles included: a dead harrier's last seeker is still the wave.
+    if (E.state === "active" && E.enemies.length === 0 && E.missiles.length === 0) {
+      const next = E.groups.find((g) => !g.spawned);
+      if (next && E.waveTick < next.warnAt) {
+        const slide = next.warnAt - E.waveTick;
+        for (const g of E.groups) if (!g.spawned) { g.warnAt -= slide; g.spawnAt -= slide; }
+      }
+    }
     for (const g of E.groups) {
-      // the warn cue lands strictly AFTER the seeded anchor draws, so the
-      // audio path can never sit between rand() calls; the spawn cue is one
-      // per GROUP, never per body — spawnEnemy is also a test hook and three
-      // darts landing is one event — and it carries the anchor the incoming
-      // marker points at, so the ear and the chevron agree on the direction
-      if (!g.points && E.waveTick >= g.warnAt) { g.points = rollGroupPoints(g.count); if (window.Sfx) Sfx.cue("warn"); }
-      if (!g.spawned && E.waveTick >= g.spawnAt) { spawnGroup(g); g.spawned = true; if (window.Sfx) Sfx.cue(HEAVY[g.type] ? "spawnheavy" : "spawn", g.points.anchor); }
+      // the warn event lands strictly AFTER the seeded anchor draws — emit
+      // touches no randomness, and the queue keeps it that way by design;
+      // the spawn event is one per GROUP, never per body — spawnEnemy is
+      // also a test hook and three darts landing is one event — and it
+      // carries the anchor the incoming marker points at, so the ear and
+      // the chevron agree on the direction
+      if (!g.points && E.waveTick >= g.warnAt) { g.points = rollGroupPoints(g.count); emit("warn"); }
+      if (!g.spawned && E.waveTick >= g.spawnAt) { spawnGroup(g); g.spawned = true; emit(HEAVY[g.type] ? "spawnheavy" : "spawn", g.points.anchor); }
     }
     if (E.state === "warning" && E.enemies.length) E.state = "active";
     // BEFORE the enemy loop, so a missile launched this tick first flies on the
@@ -1378,7 +1565,7 @@
         E.groups.every((g) => g.spawned)) {
       E.state = "cleared";
       E.clearTick = E.waveTick;
-      if (window.Sfx) Sfx.cue("clear"); // the run's one victory phrase
+      emit("clear"); // the run's one victory phrase
     }
     E.shipPrev = { x: G.ship.x, y: G.ship.y };
   }
@@ -1616,8 +1803,52 @@
     ctx.restore();
   }
 
+  // The radar identity, painted OVER the parent silhouette: a cyan core dot, a
+  // slow sweep ring (the "sensor" read), and — for predT ticks after a latch —
+  // an expanding ping at the predicted point, the "this is where it thinks you
+  // will be" mark. The sweep rotates off E.waveTick: drawing only, determinism
+  // intact, and it freezes with the sim like every other pulse in this file.
+  function drawRadarAccent(e) {
+    ctx.save();
+    ctx.translate(e.x, e.y);
+    ctx.fillStyle = C.radar; // the cyan core over the parent's clay dot
+    ctx.beginPath();
+    ctx.arc(0, 0, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = C.radar;
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = 1.2;
+    const sa = E.waveTick * 0.09; // the sweep — a short arc walking the rim
+    ctx.beginPath();
+    ctx.arc(0, 0, e.r + 4, sa, sa + 1.2);
+    ctx.stroke();
+    ctx.restore();
+    if (e.predT > 0) {
+      const p = 1 - e.predT / 20; // expands and fades over the 20-tick ping
+      ctx.strokeStyle = C.radar;
+      ctx.globalAlpha = 0.85 * (1 - p);
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(e.predX, e.predY, 3 + 10 * p, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(e.predX, e.predY, 1.2, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // the radar variants route through the PARENT draw — modes, lockA and
+  // telegraph all render unchanged, so the leading line comes for free — and
+  // the accent overlays the shared cyan identity on top
+  const drawRadarDart = (e) => { drawDart(e); drawRadarAccent(e); };
+  const drawRadarCharger = (e) => { drawCharger(e); drawRadarAccent(e); };
+  const drawRadarHarrier = (e) => { drawHarrier(e); drawRadarAccent(e); };
+
   const DRAW_BODY = { dart: drawDart, charger: drawCharger, harrier: drawHarrier,
-                      anvil: drawAnvil, husk: drawHusk, shard: drawShard };
+                      anvil: drawAnvil, husk: drawHusk, shard: drawShard,
+                      radarDart: drawRadarDart, radarCharger: drawRadarCharger,
+                      radarHarrier: drawRadarHarrier };
 
   // the missile, and the trail that is the actual UI for it: a bare dot moving
   // 6 px/tick reads as a teleport, while a tapering 14-sample tail shows the
@@ -1625,11 +1856,14 @@
   // and the live position closes the tail so there is never a gap at the tip.
   function drawMissiles() {
     for (const m of E.missiles) {
+      // a radar round wears the sensor cyan nose to tail, so which turn budget
+      // is chasing you is readable from the trail alone
+      const col = m.radar ? C.radar : C.clay;
       for (let i = 1; i <= m.trail.length; i++) {
         const a0 = m.trail[i - 1];
         const a1 = i < m.trail.length ? m.trail[i] : m;
         const p = i / m.trail.length;
-        ctx.strokeStyle = C.clay;
+        ctx.strokeStyle = col;
         ctx.globalAlpha = 0.05 + 0.35 * p;
         ctx.lineWidth = 0.6 + 2 * p;
         ctx.beginPath();
@@ -1641,7 +1875,7 @@
       ctx.save();
       ctx.translate(m.x, m.y);
       ctx.rotate(Math.atan2(m.vy, m.vx));
-      ctx.fillStyle = C.clay;
+      ctx.fillStyle = col;
       ctx.beginPath();
       ctx.moveTo(5.5, 0);
       ctx.lineTo(-3, 2.6);
@@ -1780,8 +2014,12 @@
     };
     for (const e of E.enemies) {
       if (e.hp <= 0) continue;
-      track(e, e.type, (e.type === "harrier" && e.mode === "lockon") ||
-                       (e.type === "charger" && e.mode === "windup"));
+      // a radar variant resolves through its base archetype, so its telegraph
+      // buys the same hot flag, scale and danger accent as the parent's —
+      // never a silently quiet-steel chevron
+      const kin = e.stats.base || e.type;
+      track(e, kin, (kin === "harrier" && e.mode === "lockon") ||
+                    (kin === "charger" && e.mode === "windup"));
     }
     // missiles earn arrows too: a 512×342 window on a 3072×3762 world makes an
     // unheralded off-screen seeker unfair, and a harrier that fires from
@@ -2230,9 +2468,230 @@
     }
   });
 
+  // ---- enemy tuning surface — one row per slider --------------------------
+  // get/set are closures over ECFG fields (set writes the BASELINE — statsFor's
+  // wave scaling still applies on top). After any set, the panel calls
+  // refresh() so the live wave's bodies retune this tick. Consumes no rand():
+  // the seeded schedule is identical at every slider position.
+  // EXCLUDED on purpose: `seed` (identity of the deal), the `orb` block,
+  // spawnGap/minPlayerDist/clearHold/enemy.jitter (placement and pacing, not
+  // combat feel), every `r` field (hitbox identity) and every `dmg` field
+  // except contact.dmgToPlayer (damage integers are design decisions, not dials).
+  // Secondary knobs (per-kind steer/band/sepR beyond dart+shard, husk.push,
+  // missile hp/trail, orbDrop) stay out too — the rows below are the feel set.
+  // statsFor's hard floors (dart cooldown 72, harrier cooldown 90, charger
+  // rest 54) stay in statsFor — sliders move the baselines under them.
+  const TUNING = {
+    groups: [ // display order; one titled section per group in the enemies tab
+      { key: "dart", label: "DART + LANCE", rows: [
+        { id: "dart-hp", label: "hp", min: 1, max: 12, step: 1,
+          get: () => ECFG.enemy.hp, set: (v) => { ECFG.enemy.hp = v; },
+          fmt: (v) => v + " base · " + (E.stats ? E.stats.dart.hp + " live @ w" + E.wave : "no wave") + " · +1 per 3 waves (cap +4)" },
+        { id: "dart-max-speed", label: "max speed", min: 1.2, max: 6, step: 0.05,
+          get: () => ECFG.enemy.maxSpeed, set: (v) => { ECFG.enemy.maxSpeed = v; },
+          fmt: (v) => v.toFixed(2) + " px/tick base · " + (E.stats ? E.stats.dart.maxSpeed.toFixed(2) + " live @ w" + E.wave : "no wave") },
+        { id: "dart-steer", label: "steer", min: 0.02, max: 0.2, step: 0.001,
+          get: () => ECFG.enemy.steer, set: (v) => { ECFG.enemy.steer = v; },
+          fmt: (v) => v.toFixed(3) + " of (target − velocity) per tick" },
+        { id: "dart-prefer", label: "prefer ring", min: 40, max: 240, step: 1,
+          get: () => ECFG.enemy.prefer, set: (v) => { ECFG.enemy.prefer = v; },
+          fmt: (v) => v + " px ring around the player" },
+        { id: "dart-band", label: "band", min: 4, max: 48, step: 1,
+          get: () => ECFG.enemy.band, set: (v) => { ECFG.enemy.band = v; },
+          fmt: (v) => v + " px hold tolerance" },
+        { id: "dart-back-speed", label: "back speed", min: 0.4, max: 3, step: 0.05,
+          get: () => ECFG.enemy.backSpeed, set: (v) => { ECFG.enemy.backSpeed = v; },
+          fmt: (v) => v.toFixed(2) + " px/tick retreat" },
+        { id: "dart-sep-r", label: "separation", min: 12, max: 90, step: 1,
+          get: () => ECFG.enemy.sepR, set: (v) => { ECFG.enemy.sepR = v; },
+          fmt: (v) => v + " px between pack members" },
+        { id: "dart-lance-engage", label: "lance engage", min: 55, max: 300, step: 1,
+          get: () => ECFG.lance.engage, set: (v) => { ECFG.lance.engage = v; },
+          fmt: (v) => v + " px — telegraph starts inside this" },
+        { id: "dart-lance-len", label: "lance length", min: 60, max: 300, step: 1,
+          get: () => ECFG.lance.len, set: (v) => { ECFG.lance.len = v; },
+          fmt: (v) => v + " px beam" },
+        { id: "dart-lance-half-width", label: "lance half-width", min: 1, max: 8, step: 0.05,
+          get: () => ECFG.lance.halfWidth, set: (v) => { ECFG.lance.halfWidth = v; },
+          fmt: (v) => v.toFixed(2) + " px half-width" },
+        { id: "dart-lance-telegraph", label: "telegraph", min: 15, max: 120, step: 1,
+          get: () => ECFG.lance.telegraph, set: (v) => { ECFG.lance.telegraph = v; },
+          fmt: (v) => v + " ticks · " + (v / 60).toFixed(2) + " s of warning" },
+        { id: "dart-lance-pulse", label: "pulse", min: 4, max: 40, step: 1,
+          get: () => ECFG.lance.pulse, set: (v) => { ECFG.lance.pulse = v; },
+          fmt: (v) => v + " ticks beam live" },
+        { id: "dart-lance-cooldown", label: "lance cooldown", min: 60, max: 360, step: 1,
+          get: () => ECFG.lance.cooldown, set: (v) => { ECFG.lance.cooldown = v; },
+          fmt: (v) => v + " ticks base · " + (E.stats ? E.stats.dart.cooldown + " live @ w" + E.wave : "no wave") + " · floor 72" },
+      ]},
+      { key: "charger", label: "CHARGER", rows: [
+        { id: "charger-hp", label: "hp", min: 1, max: 20, step: 1,
+          get: () => ECFG.charger.hp, set: (v) => { ECFG.charger.hp = v; },
+          fmt: (v) => v + " base · " + (E.stats ? E.stats.charger.hp + " live @ w" + E.wave : "no wave") },
+        { id: "charger-max-speed", label: "max speed", min: 0.8, max: 4, step: 0.05,
+          get: () => ECFG.charger.maxSpeed, set: (v) => { ECFG.charger.maxSpeed = v; },
+          fmt: (v) => v.toFixed(2) + " px/tick base · " + (E.stats ? E.stats.charger.maxSpeed.toFixed(2) + " live @ w" + E.wave : "no wave") },
+        { id: "charger-prefer", label: "prefer ring", min: 75, max: 400, step: 1,
+          get: () => ECFG.charger.prefer, set: (v) => { ECFG.charger.prefer = v; },
+          fmt: (v) => v + " px ring around the player" },
+        { id: "charger-engage", label: "engage", min: 130, max: 600, step: 1,
+          get: () => ECFG.charger.engage, set: (v) => { ECFG.charger.engage = v; },
+          fmt: (v) => v + " px — a rested charger plants inside this" },
+        { id: "charger-windup", label: "windup", min: 15, max: 150, step: 1,
+          get: () => ECFG.charger.windup, set: (v) => { ECFG.charger.windup = v; },
+          fmt: (v) => v + " ticks planted · " + (v / 60).toFixed(2) + " s · dash line locks at start" },
+        { id: "charger-dash-speed", label: "dash speed", min: 3, max: 16, step: 0.05,
+          get: () => ECFG.charger.dashSpeed, set: (v) => { ECFG.charger.dashSpeed = v; },
+          fmt: (v) => v.toFixed(2) + " px/tick along the locked line — never wave-scaled" },
+        { id: "charger-dash-ticks", label: "dash ticks", min: 10, max: 80, step: 1,
+          get: () => ECFG.charger.dashTicks, set: (v) => { ECFG.charger.dashTicks = v; },
+          fmt: (v) => v + " ticks · " + Math.round(v * ECFG.charger.dashSpeed) + " px of travel" },
+        { id: "charger-rest", label: "rest", min: 45, max: 300, step: 1,
+          get: () => ECFG.charger.rest, set: (v) => { ECFG.charger.rest = v; },
+          fmt: (v) => v + " ticks base · " + (E.stats ? E.stats.charger.rest + " live @ w" + E.wave : "no wave") + " · floor 54" },
+        { id: "charger-cooldown", label: "cooldown", min: 10, max: 120, step: 1,
+          get: () => ECFG.charger.cooldown, set: (v) => { ECFG.charger.cooldown = v; },
+          fmt: (v) => v + " seek ticks before the next lunge" },
+      ]},
+      { key: "harrier", label: "HARRIER", rows: [
+        { id: "harrier-hp", label: "hp", min: 1, max: 16, step: 1,
+          get: () => ECFG.harrier.hp, set: (v) => { ECFG.harrier.hp = v; },
+          fmt: (v) => v + " base · " + (E.stats ? E.stats.harrier.hp + " live @ w" + E.wave : "no wave") },
+        { id: "harrier-max-speed", label: "max speed", min: 0.6, max: 3, step: 0.05,
+          get: () => ECFG.harrier.maxSpeed, set: (v) => { ECFG.harrier.maxSpeed = v; },
+          fmt: (v) => v.toFixed(2) + " px/tick approach — never wave-scaled" },
+        { id: "harrier-back-speed", label: "back speed", min: 0.8, max: 4, step: 0.05,
+          get: () => ECFG.harrier.backSpeed, set: (v) => { ECFG.harrier.backSpeed = v; },
+          fmt: (v) => v.toFixed(2) + " px/tick retreat — the kite needs this above approach" },
+        { id: "harrier-prefer", label: "prefer ring", min: 120, max: 480, step: 1,
+          get: () => ECFG.harrier.prefer, set: (v) => { ECFG.harrier.prefer = v; },
+          fmt: (v) => v + " px standoff ring" },
+        { id: "harrier-band", label: "band", min: 10, max: 90, step: 1,
+          get: () => ECFG.harrier.band, set: (v) => { ECFG.harrier.band = v; },
+          fmt: (v) => v + " px hold tolerance" },
+        { id: "harrier-engage", label: "engage", min: 135, max: 540, step: 1,
+          get: () => ECFG.harrier.engage, set: (v) => { ECFG.harrier.engage = v; },
+          fmt: (v) => v + " px — lock-on opens inside this" },
+        { id: "harrier-lockon", label: "lock-on", min: 25, max: 150, step: 1,
+          get: () => ECFG.harrier.lockon, set: (v) => { ECFG.harrier.lockon = v; },
+          fmt: (v) => v + " ticks planted · " + (v / 60).toFixed(2) + " s" },
+        { id: "harrier-cooldown", label: "cooldown", min: 75, max: 480, step: 1,
+          get: () => ECFG.harrier.cooldown, set: (v) => { ECFG.harrier.cooldown = v; },
+          fmt: (v) => v + " ticks base · " + (E.stats ? E.stats.harrier.cooldown + " live @ w" + E.wave : "no wave") + " · floor 90" },
+      ]},
+      { key: "missile", label: "SEEKER MISSILE", rows: [
+        { id: "missile-speed", label: "speed", min: 3, max: 12, step: 0.05,
+          get: () => ECFG.missile.speed, set: (v) => { ECFG.missile.speed = v; },
+          fmt: (v) => v.toFixed(2) + " px/tick · " + Math.round(v * 60) + " px/s" },
+        { id: "missile-life", label: "life", min: 45, max: 240, step: 1,
+          get: () => ECFG.missile.life, set: (v) => { ECFG.missile.life = v; },
+          fmt: (v) => v + " ticks · " + (v / 60).toFixed(2) + " s · " + Math.round(v * ECFG.missile.speed) + " px of reach" },
+        { id: "missile-turn", label: "turn", min: 0.008, max: 0.06, step: 0.001,
+          get: () => ECFG.missile.turn, set: (v) => { ECFG.missile.turn = v; },
+          fmt: (v) => v.toFixed(3) + " rad/tick · " + Math.round((ECFG.missile.life - ECFG.missile.arm - ECFG.missile.decay / 2) * v * 180 / Math.PI) + "° of heading authority" },
+        { id: "missile-arm", label: "arm", min: 0, max: 45, step: 1,
+          get: () => ECFG.missile.arm, set: (v) => { ECFG.missile.arm = v; },
+          fmt: (v) => v + " ticks ballistic at launch" },
+        { id: "missile-decay", label: "decay", min: 0, max: 90, step: 1,
+          get: () => ECFG.missile.decay, set: (v) => { ECFG.missile.decay = v; },
+          fmt: (v) => v + " final ticks of fading steering" },
+        { id: "missile-max", label: "max in flight", min: 1, max: 24, step: 1,
+          get: () => ECFG.missile.max, set: (v) => { ECFG.missile.max = v; },
+          fmt: (v) => v + " live missiles — a guard, not a mechanic" },
+      ]},
+      { key: "anvil", label: "ANVIL", rows: [
+        { id: "anvil-hp", label: "hp", min: 3, max: 30, step: 1,
+          get: () => ECFG.anvil.hp, set: (v) => { ECFG.anvil.hp = v; },
+          fmt: (v) => v + " base · " + (E.stats ? E.stats.anvil.hp + " live @ w" + E.wave : "no wave") },
+        { id: "anvil-max-speed", label: "max speed", min: 0.5, max: 2.4, step: 0.05,
+          get: () => ECFG.anvil.maxSpeed, set: (v) => { ECFG.anvil.maxSpeed = v; },
+          fmt: (v) => v.toFixed(2) + " px/tick — must stay under the ship's 2.0 to keep the escape promise" },
+        { id: "anvil-turn-rate", label: "turn rate", min: 0.005, max: 0.06, step: 0.001,
+          get: () => ECFG.anvil.turnRate, set: (v) => { ECFG.anvil.turnRate = v; },
+          fmt: (v) => v.toFixed(3) + " rad/tick · out-turned inside " + Math.round(2.0 / v) + " px" },
+        { id: "anvil-flee", label: "flee", min: 80, max: 480, step: 1,
+          get: () => ECFG.anvil.flee, set: (v) => { ECFG.anvil.flee = v; },
+          fmt: (v) => v + " px — flanked inside this, it runs along its own facing" },
+        // the stored value is the radian half-angle; convert only at this
+        // boundary so the exact radians round-trip without drift
+        { id: "anvil-arc", label: "shield arc", min: 20, max: 170, step: 1,
+          get: () => ECFG.anvil.arc * 180 / Math.PI,
+          set: (v) => { ECFG.anvil.arc = v * Math.PI / 180; },
+          fmt: (v) => "±" + Math.round(v) + "° half-angle · " + Math.round(v * 2) + "° of cover" },
+      ]},
+      { key: "husk", label: "HUSK + SHARD", rows: [
+        { id: "husk-hp", label: "hp", min: 2, max: 24, step: 1,
+          get: () => ECFG.husk.hp, set: (v) => { ECFG.husk.hp = v; },
+          fmt: (v) => v + " base · " + (E.stats ? E.stats.husk.hp + " live @ w" + E.wave : "no wave") },
+        { id: "husk-max-speed", label: "max speed", min: 0.4, max: 2, step: 0.05,
+          get: () => ECFG.husk.maxSpeed, set: (v) => { ECFG.husk.maxSpeed = v; },
+          fmt: (v) => v.toFixed(2) + " px/tick drift" },
+        { id: "husk-split", label: "split", min: 1, max: 8, step: 1,
+          get: () => ECFG.husk.split, set: (v) => { ECFG.husk.split = v; },
+          fmt: (v) => v + " shards on the death fan" },
+        { id: "husk-kick", label: "kick", min: 1, max: 6, step: 0.05,
+          get: () => ECFG.husk.kick, set: (v) => { ECFG.husk.kick = v; },
+          fmt: (v) => v.toFixed(2) + " px/tick outward on each shard" },
+        { id: "husk-shard-hp", label: "shard hp", min: 1, max: 8, step: 1,
+          get: () => ECFG.shard.hp, set: (v) => { ECFG.shard.hp = v; },
+          fmt: (v) => v + " base · " + (E.stats ? E.stats.shard.hp + " live @ w" + E.wave : "no wave") },
+        { id: "husk-shard-max-speed", label: "shard max speed", min: 1.4, max: 6, step: 0.05,
+          get: () => ECFG.shard.maxSpeed, set: (v) => { ECFG.shard.maxSpeed = v; },
+          fmt: (v) => v.toFixed(2) + " px/tick — above the ship's 2.0 so it must be shot" },
+        { id: "husk-shard-steer", label: "shard steer", min: 0.03, max: 0.25, step: 0.001,
+          get: () => ECFG.shard.steer, set: (v) => { ECFG.shard.steer = v; },
+          fmt: (v) => v.toFixed(3) + " of (target − velocity) per tick" },
+      ]},
+      { key: "radar", label: "RADAR VARIANTS", rows: [
+        { id: "radar-lead-scale", label: "lead scale", min: 0, max: 1.5, step: 0.05,
+          get: () => ECFG.radar.leadScale, set: (v) => { ECFG.radar.leadScale = v; },
+          fmt: (v) => v.toFixed(2) + "× of full lead · 0 = aims like the base type" },
+        { id: "radar-deadband", label: "vel deadband", min: 0, max: 1, step: 0.05,
+          get: () => ECFG.radar.deadband, set: (v) => { ECFG.radar.deadband = v; },
+          fmt: (v) => v.toFixed(2) + " px/tick · below it a ship reads as still" },
+        { id: "radar-missile-turn", label: "missile turn", min: 0, max: 0.03, step: 0.001,
+          get: () => ECFG.radar.missileTurn, set: (v) => { ECFG.radar.missileTurn = v; },
+          fmt: (v) => v.toFixed(3) + " rad/tick · 0 = ballistic predictor (base seeker: " + ECFG.missile.turn.toFixed(3) + ")" },
+      ]},
+      { key: "player", label: "PLAYER + CONTACT", rows: [
+        { id: "player-hull", label: "hull", min: 1, max: 10, step: 1,
+          get: () => ECFG.player.hull, set: (v) => { ECFG.player.hull = v; },
+          fmt: (v) => v + " hull — applies on the next restart, not the live run" },
+        { id: "player-invuln", label: "invuln", min: 20, max: 240, step: 1,
+          get: () => ECFG.player.invuln, set: (v) => { ECFG.player.invuln = v; },
+          fmt: (v) => v + " ticks · " + (v / 60).toFixed(2) + " s of post-hit grace" },
+        { id: "player-contact-dmg", label: "contact dmg", min: 0, max: 4, step: 1,
+          get: () => ECFG.contact.dmgToPlayer, set: (v) => { ECFG.contact.dmgToPlayer = v; },
+          fmt: (v) => v + " hull per body contact" },
+      ]},
+    ],
+    // Re-resolve the live wave's stats IN PLACE. Object.assign into the
+    // existing objects preserves the identity every body's e.stats references,
+    // so live bodies see new values on their next tick; hp/r are per-body
+    // copies and apply from the next spawn.
+    refresh() {
+      if (!E.stats) return; // no wave dealt yet — the next startWave resolves fresh
+      const ns = statsFor(E.wave);
+      for (const k of ROSTER) Object.assign(E.stats[k], ns[k]);
+    },
+  };
+
   // ---- publish — one namespace, one assignment ---------------------------
   restart(ECFG.seed);
   window.Encounter = { step: encStep, draw: encDraw, drawHud: encDrawHud, frozen, mods, reset: restart,
+    // The simulation event stream — see the queue at the top of the file.
+    // Drained once per step() by the presentation side; events() is the
+    // readonly view of what this tick queued.
+    events, drainEvents,
+    // emit is published for the ONE crossing that runs the other way:
+    // game.js owns the ship's own cues (fire, the wall thud, the wall tick)
+    // and queues them here, defensively, exactly as it reads everything
+    // else off this namespace.
+    emit,
+    // Entity identity — the monotonic counter every constructor stamps from.
+    // Published so game.js's bullets draw from the SAME id space as the
+    // bodies: a replication layer keys by id alone.
+    nextId,
     // read-only live positions for game.js HUD layers — the minimap contact
     // dots today. Callers draw from these arrays and never mutate them;
     // render-path only, so the one tiny wrapper object per call is free and
@@ -2250,7 +2709,10 @@
     shopOpen, shopScreen, shopHover, shopClick,
     // ...and the seed the resume needs: a pause can move the pointer far from
     // whatever was hovered when it began, and a paused shop takes no mousemove
-    shopSeedHover: shopHoverFromMouse };
+    shopSeedHover: shopHoverFromMouse,
+    // the enemy tuning surface — inert until a set() is called; the panel in
+    // game.js owns the controls, this file owns the fields and the refresh
+    tuning: TUNING };
 
   // ---- test hook extension — deterministic checks drive the slice --------
   function snapState() {
@@ -2282,18 +2744,96 @@
       mods: { cool: mods.cool, speed: mods.speed, keyThrust: mods.keyThrust, blast: mods.blast },
       shopHover: E.shopHover, // the card under the pointer, or -1 — the shop's whole input state
       shopBtn: E.shopBtn,     // ...and whether NEXT WAVE has it instead
-      stats: E.stats, // the per-wave object is replaced, never mutated — safe to hand out
+      stats: E.stats, // replaced each wave; tuning.refresh() retunes its members in
+                      // place — handed out by reference so callers see live retunes
       groups: E.groups.map((g) => ({ spawned: g.spawned, warned: !!g.points })),
     };
   }
+  // The encounter's contribution to the harness state hash. The allow-list
+  // contract matches game.js's: a field belongs here iff it describes what the
+  // simulation will do next — a missile's trail and the shop's hover state are
+  // presentation, E.stats is a pure function of the wave, and all three stay
+  // out. Declared lists, never Object.keys, so a later phase adding a field
+  // cannot silently re-key every committed fixture.
+  const ENEMY_HASH = ["x", "y", "vx", "vy", "r", "hp", "type", "orbDrop", "mode",
+    "cd", "t", "face", "lockA", "flash", "pulseHit", "dashHit", "contactCd", "contactTaken"];
+  const MISSILE_HASH = ["x", "y", "vx", "vy", "r", "hp", "age"];
+  const ORB_HASH = ["x", "y", "vx", "vy"];
+  const GROUP_HASH = ["count", "type", "warnAt", "spawnAt", "spawned"];
+  function hashEncounter(h) {
+    h.str(E.state);
+    h.num(E.wave); h.num(E.waveTick); h.num(E.clearTick);
+    h.num(E.hull); h.num(E.hullMax); h.num(E.xp);
+    h.u32(E.owned.length);
+    for (const n of E.owned) h.num(n);
+    h.num(E.invuln); h.num(E.hitFlash);
+    h.u32(E.shipPrev ? 1 : 0);
+    if (E.shipPrev) { h.num(E.shipPrev.x); h.num(E.shipPrev.y); }
+    h.num(E.kills); h.num(E.missilesShot);
+    h.num(E.hitsDealt); h.num(E.hitsTaken); h.num(E.contactsDealt);
+    h.num(mods.cool); h.num(mods.speed); h.u32(mods.keyThrust ? 1 : 0); h.num(mods.blast);
+    h.u32(E.groups.length);
+    for (const g of E.groups) {
+      for (const f of GROUP_HASH) h.val(g[f]);
+      h.u32(g.points ? 1 : 0);
+      if (g.points) {
+        h.num(g.points.anchor.x); h.num(g.points.anchor.y);
+        for (const p of g.points.pts) { h.num(p.x); h.num(p.y); }
+      }
+    }
+    // enemies walk grouped in ROSTER order, so a new archetype cannot escape
+    // the hash without being admitted here — and a type with zero live members
+    // contributes NOTHING (no name, no zero count), so roster growth alone can
+    // never move a committed hash. The live index folds with each body because
+    // array order is itself simulation state: the separation pass and the
+    // bullet arbitration both walk it.
+    for (const type of ROSTER) {
+      for (let i = 0; i < E.enemies.length; i++) {
+        const e = E.enemies[i];
+        if (e.type !== type) continue;
+        h.u32(i);
+        for (const f of ENEMY_HASH) h.val(e[f]);
+      }
+    }
+    h.u32(E.missiles.length);
+    for (const m of E.missiles) for (const f of MISSILE_HASH) h.val(m[f]);
+    h.u32(E.orbs.length);
+    for (const o of E.orbs) for (const f of ORB_HASH) h.val(o[f]);
+  }
+
+  // ---- headless drain -----------------------------------------------------
+  // The RAF loop owns the real drain (game.js's drainCues, after each
+  // step()); a headless suite drives step() through advance() and the direct
+  // hooks below instead, so the same forwarding runs here — and, while a
+  // trace asks, each drained event is recorded with the simTick it fired on,
+  // which is how the golden suite asserts cue ORDER with no audio device.
+  const evRec = { on: false, list: [] };
+  function drainStep() {
+    for (const ev of drainEvents()) {
+      if (evRec.on) evRec.list.push({ tick: simTick, kind: ev.kind, gain: ev.gain === undefined ? null : ev.gain });
+      if (window.Sfx) Sfx.cue(ev.kind, ev.at, ev.gain);
+    }
+  }
+  // the recorder sees only what THIS drain forwards — events the RAF loop
+  // drains (game.js's drainCues) pass it by, which is why the frame-loop
+  // trace asserts through the Sfx log instead
+  const recordEvents = () => { evRec.list = []; evRec.on = true; };
+  const stopEvents = () => { evRec.on = false; return evRec.list; };
+
   Object.assign(window.__test, {
     enc: {
       cfg: ECFG,
       E,
+      hashInto: hashEncounter, // folds encounter state into a game.js fnv hasher
+      rngState: () => rand.state(), // reads the stream's position without advancing it
+      roster: ROSTER, // the live array — the golden suite's phantom-type check mutates and restores it
       mods,
       reset: (seed) => restart(seed),
       restart,
-      advance: (n) => { for (let i = 0; i < n; i++) step(); }, // the full game tick, encounter included
+      advance: (n) => { for (let i = 0; i < n; i++) { step(); drainStep(); } }, // the full game tick, encounter
+                    // included — drained per step, exactly as the frame loop drains
+      recordEvents, // start recording the (tick, kind, gain) stream the drain forwards
+      stopEvents,   // ...and stop, returning the recorded list
       state: snapState,
       spawnEnemy,
       spawnMissile, // the real constructor, cap included — checks drive production
@@ -2301,9 +2841,12 @@
       waveGroups,
       countsFor,
       statsFor,
-      damagePlayer: (n) => hitPlayer(n === undefined ? 1 : n),
+      // the direct hooks that can emit outside a step: each drains after the
+      // call, so a suite's log assertions see the cue on the same call — and
+      // each keeps its exact return value
+      damagePlayer: (n) => { const hit = hitPlayer(n === undefined ? 1 : n); drainStep(); return hit; },
       addXp,
-      openShop,
+      openShop: () => { openShop(); drainStep(); },
       buy,
       continueFromShop,
       // the resolved catalog view the overlay itself draws from — name,
@@ -2320,13 +2863,17 @@
       })),
       segCircleHit,
       segCircleEntryT,
+      predictAim, // the radar latch's aim solver, on live G.ship/G.vel — checks
+                  // recompute the closed form and compare against production
+
       frozen,
-      fireOnce: () => fire(), // the real firing gate, without the autofire path
+      fireOnce: () => { fire(); drainStep(); }, // the real firing gate, without the autofire path
       setBounce: (v) => { BOUNCE = !!v; },
       edgeArrows: computeEdgeArrows, // the resolved arrow list, straight off live state
       arrowCfg: ARROWS,              // inset/cap/buckets — checks read these, never copy them
       tunables: () => ({ BCOOL, BLIFE, AUTOFIRE, BSPEED, BMAX, VMAX, TICK, BDMG, CONTACTCD, BLASTR, BLASTGAIN }),
       blastRadius, // the live effective radius, exactly as blastAt() reads it
+      tuning: TUNING, // the same object window.Encounter.tuning publishes
     },
   });
 })();

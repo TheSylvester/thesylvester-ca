@@ -1,0 +1,1531 @@
+{
+  "meta": {
+    "sha": "18d98f006eb67cdcb88121c4f246c767039da6df",
+    "capturedAt": "2026-08-16T02:30:58.606Z",
+    "tunables": {
+      "BCOOL": 400,
+      "BLIFE": 0.5,
+      "AUTOFIRE": true,
+      "BSPEED": 15,
+      "BMAX": 15,
+      "VMAX": 2,
+      "TICK": 16.666666666666668,
+      "BDMG": 1,
+      "CONTACTCD": 62,
+      "BLASTR": 18,
+      "BLASTGAIN": 8
+    },
+    "flight": {
+      "VMAX": 2,
+      "ACCEL": 0.015,
+      "TURN": 0.015,
+      "FLICK": 0.01,
+      "DAMP": 1,
+      "KEYTHRUST": 16,
+      "WALLLOSS": 0.5
+    }
+  },
+  "traces": {
+    "rest-to-top-speed": {
+      "checkpoints": [
+        {
+          "tag": "mid-ramp",
+          "tick": 10,
+          "hash": "805394e6",
+          "parts": {
+            "ship": "070a77f4",
+            "bullets": "4b95f515",
+            "cam": "22bcaa61",
+            "encounter": "f1936715",
+            "rng": "f1f0ab9a"
+          },
+          "ship": {
+            "x": 1543.128,
+            "y": 1881,
+            "vx": 1.2959999999999996,
+            "vy": 0
+          },
+          "rng": 5351911,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "at-the-clamp",
+          "tick": 240,
+          "hash": "39675fd5",
+          "parts": {
+            "ship": "a8ebbb80",
+            "bullets": "4b95f515",
+            "cam": "5f8ba29d",
+            "encounter": "a390bfcb",
+            "rng": "f1f0ab9a"
+          },
+          "ship": {
+            "x": 2001.552,
+            "y": 1881,
+            "vx": 2,
+            "vy": 0
+          },
+          "rng": 5351911,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "coasting",
+          "tick": 360,
+          "hash": "68644613",
+          "parts": {
+            "ship": "c0faff51",
+            "bullets": "4b95f515",
+            "cam": "2c63e03c",
+            "encounter": "2ea3803f",
+            "rng": "f1f0ab9a"
+          },
+          "ship": {
+            "x": 2241.5519999999997,
+            "y": 1881,
+            "vx": 2,
+            "vy": 0
+          },
+          "rng": 5351911,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        }
+      ]
+    },
+    "flick-turn": {
+      "checkpoints": [
+        {
+          "tag": "at-speed",
+          "tick": 120,
+          "hash": "10315f4a",
+          "parts": {
+            "ship": "b9538d9c",
+            "bullets": "4b95f515",
+            "cam": "ea4a08c5",
+            "encounter": "c477ebdf",
+            "rng": "f1f0ab9a"
+          },
+          "ship": {
+            "x": 1761.552,
+            "y": 1881,
+            "vx": 2,
+            "vy": 0
+          },
+          "rng": 5351911,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "after-flick",
+          "tick": 160,
+          "hash": "a92e8c13",
+          "parts": {
+            "ship": "136f68e6",
+            "bullets": "4b95f515",
+            "cam": "2ee86476",
+            "encounter": "c38fc1f5",
+            "rng": "f1f0ab9a"
+          },
+          "ship": {
+            "x": 1765.7705067304723,
+            "y": 1959.7083079171603,
+            "vx": 1.2555722246476568e-9,
+            "vy": 1.9999999999999998
+          },
+          "rng": 5351911,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "settled",
+          "tick": 220,
+          "hash": "e1f2478b",
+          "parts": {
+            "ship": "f4be3eef",
+            "bullets": "4b95f515",
+            "cam": "34d2ca19",
+            "encounter": "c1a769d5",
+            "rng": "f1f0ab9a"
+          },
+          "ship": {
+            "x": 1765.7705068058058,
+            "y": 2079.7083079171603,
+            "vx": 1.2555722246476568e-9,
+            "vy": 1.9999999999999998
+          },
+          "rng": 5351911,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "diagonal",
+          "tick": 260,
+          "hash": "15ea2b90",
+          "parts": {
+            "ship": "b9073a9d",
+            "bullets": "4b95f515",
+            "cam": "af51424b",
+            "encounter": "85ffe404",
+            "rng": "f1f0ab9a"
+          },
+          "ship": {
+            "x": 1818.2412947946405,
+            "y": 2136.2363568721903,
+            "vx": 1.7036818300487824,
+            "vy": 1.0476011750478482
+          },
+          "rng": 5351911,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        }
+      ]
+    },
+    "wall-bounce": {
+      "checkpoints": [
+        {
+          "tag": "left",
+          "tick": 30,
+          "hash": "021e3491",
+          "parts": {
+            "ship": "4edbf6d3",
+            "bullets": "4b95f515",
+            "cam": "895bef06",
+            "encounter": "21d6b32b",
+            "rng": "f1f0ab9a"
+          },
+          "ship": {
+            "x": 31,
+            "y": 1881,
+            "vx": 1,
+            "vy": 0
+          },
+          "rng": 5351911,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "right",
+          "tick": 60,
+          "hash": "abdd7714",
+          "parts": {
+            "ship": "ea2c0a0d",
+            "bullets": "4b95f515",
+            "cam": "73139245",
+            "encounter": "41ae81dd",
+            "rng": "f1f0ab9a"
+          },
+          "ship": {
+            "x": 3041,
+            "y": 1881,
+            "vx": -1,
+            "vy": 0
+          },
+          "rng": 5351911,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "top",
+          "tick": 90,
+          "hash": "0ca79fcc",
+          "parts": {
+            "ship": "2f1d2e88",
+            "bullets": "4b95f515",
+            "cam": "dcee6514",
+            "encounter": "70384740",
+            "rng": "f1f0ab9a"
+          },
+          "ship": {
+            "x": 1536,
+            "y": 31,
+            "vx": 0,
+            "vy": 1
+          },
+          "rng": 5351911,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "bottom",
+          "tick": 120,
+          "hash": "811d363a",
+          "parts": {
+            "ship": "688a1318",
+            "bullets": "4b95f515",
+            "cam": "ae0b42aa",
+            "encounter": "3dbf8b74",
+            "rng": "f1f0ab9a"
+          },
+          "ship": {
+            "x": 1536,
+            "y": 3731,
+            "vx": 0,
+            "vy": -1
+          },
+          "rng": 5351911,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "corner",
+          "tick": 150,
+          "hash": "87918dae",
+          "parts": {
+            "ship": "116a6d06",
+            "bullets": "4b95f515",
+            "cam": "ba20a9c8",
+            "encounter": "43fcecb5",
+            "rng": "f1f0ab9a"
+          },
+          "ship": {
+            "x": 22.2842712474619,
+            "y": 22.2842712474619,
+            "vx": 0.7071067811865475,
+            "vy": 0.7071067811865475
+          },
+          "rng": 5351911,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        }
+      ]
+    },
+    "wave-1-full": {
+      "checkpoints": [
+        {
+          "tag": "tick-300",
+          "tick": 300,
+          "hash": "79271ebe",
+          "parts": {
+            "ship": "1ae06d9d",
+            "bullets": "27665998",
+            "cam": "96c98f66",
+            "encounter": "301f4167",
+            "rng": "e80357bb"
+          },
+          "ship": {
+            "x": 1536,
+            "y": 1881,
+            "vx": 0,
+            "vy": 0
+          },
+          "rng": 1772976527,
+          "st": {
+            "state": "active",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 98,
+            "enemies": 3,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "tick-900",
+          "tick": 900,
+          "hash": "3d97f39d",
+          "parts": {
+            "ship": "1ae06d9d",
+            "bullets": "38c8e4d7",
+            "cam": "04aaf723",
+            "encounter": "6bd8e84b",
+            "rng": "bdf780ee"
+          },
+          "ship": {
+            "x": 1536,
+            "y": 1881,
+            "vx": 0,
+            "vy": 0
+          },
+          "rng": 1077199660,
+          "st": {
+            "state": "active",
+            "wave": 1,
+            "kills": 3,
+            "xp": 1,
+            "hull": 95,
+            "enemies": 2,
+            "orbs": 2
+          }
+        },
+        {
+          "tag": "tick-1800",
+          "tick": 1800,
+          "hash": "e0d4233b",
+          "parts": {
+            "ship": "1ae06d9d",
+            "bullets": "4b95f515",
+            "cam": "04aaf723",
+            "encounter": "6de88ed3",
+            "rng": "65723fab"
+          },
+          "ship": {
+            "x": 1536,
+            "y": 1881,
+            "vx": 0,
+            "vy": 0
+          },
+          "rng": 445363990,
+          "st": {
+            "state": "shop",
+            "wave": 1,
+            "kills": 5,
+            "xp": 5,
+            "hull": 93,
+            "enemies": 0,
+            "orbs": 0
+          }
+        }
+      ]
+    },
+    "husk-split": {
+      "checkpoints": [
+        {
+          "tag": "spawned",
+          "tick": 1,
+          "hash": "b12136e9",
+          "parts": {
+            "ship": "1ae06d9d",
+            "bullets": "4b95f515",
+            "cam": "15ec28bf",
+            "encounter": "50b69995",
+            "rng": "f1f0ab9a"
+          },
+          "ship": {
+            "x": 1536,
+            "y": 1881,
+            "vx": 0,
+            "vy": 0
+          },
+          "rng": 5351911,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 99,
+            "enemies": 1,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "after-split",
+          "tick": 73,
+          "hash": "0e616df9",
+          "parts": {
+            "ship": "1ae06d9d",
+            "bullets": "4b95f515",
+            "cam": "0c1877ef",
+            "encounter": "2dec98e1",
+            "rng": "c2a7a6b5"
+          },
+          "ship": {
+            "x": 1536,
+            "y": 1881,
+            "vx": 0,
+            "vy": 0
+          },
+          "rng": 3668483537,
+          "st": {
+            "state": "active",
+            "wave": 1,
+            "kills": 1,
+            "xp": 0,
+            "hull": 99,
+            "enemies": 3,
+            "orbs": 1
+          }
+        },
+        {
+          "tag": "aftermath",
+          "tick": 193,
+          "hash": "32fc011c",
+          "parts": {
+            "ship": "1ae06d9d",
+            "bullets": "4b95f515",
+            "cam": "d0743dc5",
+            "encounter": "f84c42d4",
+            "rng": "63d4bdec"
+          },
+          "ship": {
+            "x": 1536,
+            "y": 1881,
+            "vx": 0,
+            "vy": 0
+          },
+          "rng": 3036647867,
+          "st": {
+            "state": "active",
+            "wave": 1,
+            "kills": 3,
+            "xp": 2,
+            "hull": 97,
+            "enemies": 1,
+            "orbs": 1
+          }
+        }
+      ]
+    },
+    "audio-order": {
+      "events": [
+        {
+          "tick": 36,
+          "kind": "warn",
+          "gain": null
+        },
+        {
+          "tick": 52,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 74,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 84,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 94,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 113,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 126,
+          "kind": "spawn",
+          "gain": null
+        },
+        {
+          "tick": 139,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 154,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 177,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 181,
+          "kind": "charge",
+          "gain": null
+        },
+        {
+          "tick": 185,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 196,
+          "kind": "hit",
+          "gain": null
+        },
+        {
+          "tick": 196,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 204,
+          "kind": "charge",
+          "gain": null
+        },
+        {
+          "tick": 205,
+          "kind": "charge",
+          "gain": null
+        },
+        {
+          "tick": 215,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 226,
+          "kind": "zap",
+          "gain": null
+        },
+        {
+          "tick": 227,
+          "kind": "hurt",
+          "gain": null
+        },
+        {
+          "tick": 240,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 249,
+          "kind": "zap",
+          "gain": null
+        },
+        {
+          "tick": 250,
+          "kind": "zap",
+          "gain": null
+        },
+        {
+          "tick": 256,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 279,
+          "kind": "hit",
+          "gain": null
+        },
+        {
+          "tick": 280,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 286,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 298,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 318,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 341,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 357,
+          "kind": "charge",
+          "gain": null
+        },
+        {
+          "tick": 358,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 380,
+          "kind": "charge",
+          "gain": null
+        },
+        {
+          "tick": 381,
+          "kind": "charge",
+          "gain": null
+        },
+        {
+          "tick": 383,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 387,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 399,
+          "kind": "hit",
+          "gain": null
+        },
+        {
+          "tick": 399,
+          "kind": "kill",
+          "gain": null
+        },
+        {
+          "tick": 400,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 402,
+          "kind": "zap",
+          "gain": null
+        },
+        {
+          "tick": 403,
+          "kind": "hurt",
+          "gain": null
+        },
+        {
+          "tick": 421,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 426,
+          "kind": "zap",
+          "gain": null
+        },
+        {
+          "tick": 443,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 460,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 486,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 488,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 502,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 523,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 533,
+          "kind": "charge",
+          "gain": null
+        },
+        {
+          "tick": 544,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 557,
+          "kind": "charge",
+          "gain": null
+        },
+        {
+          "tick": 563,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 567,
+          "kind": "hit",
+          "gain": null
+        },
+        {
+          "tick": 567,
+          "kind": "kill",
+          "gain": null
+        },
+        {
+          "tick": 589,
+          "kind": "pickup",
+          "gain": null
+        },
+        {
+          "tick": 589,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 602,
+          "kind": "zap",
+          "gain": null
+        },
+        {
+          "tick": 603,
+          "kind": "hurt",
+          "gain": null
+        },
+        {
+          "tick": 604,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 626,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 635,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 646,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 665,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 688,
+          "kind": "hit",
+          "gain": null
+        },
+        {
+          "tick": 690,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 706,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 729,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 733,
+          "kind": "charge",
+          "gain": null
+        },
+        {
+          "tick": 736,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 748,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 768,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 778,
+          "kind": "zap",
+          "gain": null
+        },
+        {
+          "tick": 779,
+          "kind": "hurt",
+          "gain": null
+        },
+        {
+          "tick": 789,
+          "kind": "hit",
+          "gain": null
+        },
+        {
+          "tick": 789,
+          "kind": "kill",
+          "gain": null
+        },
+        {
+          "tick": 790,
+          "kind": "warn",
+          "gain": null
+        },
+        {
+          "tick": 791,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 808,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 833,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 837,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 850,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 871,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 880,
+          "kind": "spawn",
+          "gain": null
+        },
+        {
+          "tick": 893,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 910,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 936,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 938,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 952,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 972,
+          "kind": "charge",
+          "gain": null
+        },
+        {
+          "tick": 973,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 985,
+          "kind": "charge",
+          "gain": null
+        },
+        {
+          "tick": 995,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1013,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1017,
+          "kind": "zap",
+          "gain": null
+        },
+        {
+          "tick": 1018,
+          "kind": "hurt",
+          "gain": null
+        },
+        {
+          "tick": 1030,
+          "kind": "zap",
+          "gain": null
+        },
+        {
+          "tick": 1039,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1048,
+          "kind": "hit",
+          "gain": null
+        },
+        {
+          "tick": 1054,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1065,
+          "kind": "hit",
+          "gain": null
+        },
+        {
+          "tick": 1076,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1085,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1140,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1148,
+          "kind": "charge",
+          "gain": null
+        },
+        {
+          "tick": 1149,
+          "kind": "hit",
+          "gain": null
+        },
+        {
+          "tick": 1149,
+          "kind": "kill",
+          "gain": null
+        },
+        {
+          "tick": 1156,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1167,
+          "kind": "hit",
+          "gain": null
+        },
+        {
+          "tick": 1167,
+          "kind": "kill",
+          "gain": null
+        },
+        {
+          "tick": 1167,
+          "kind": "clear",
+          "gain": null
+        },
+        {
+          "tick": 1175,
+          "kind": "pickup",
+          "gain": null
+        },
+        {
+          "tick": 1175,
+          "kind": "pickup",
+          "gain": null
+        },
+        {
+          "tick": 1176,
+          "kind": "pickup",
+          "gain": null
+        },
+        {
+          "tick": 1177,
+          "kind": "pickup",
+          "gain": null
+        },
+        {
+          "tick": 1179,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1186,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1378,
+          "kind": "shop",
+          "gain": null
+        }
+      ]
+    },
+    "corner-bounce": {
+      "events": [
+        {
+          "tick": 17,
+          "kind": "thud",
+          "gain": 0.35355339059327373
+        }
+      ]
+    }
+  },
+  "tickMode": {
+    "meta": {
+      "sha": "e3f7942ae22fcc432f4e0a8aa262151ba19b176e",
+      "capturedAt": "2026-08-16T01:16:13.127Z",
+      "tunables": {
+        "BCOOL": 400,
+        "BLIFE": 0.5,
+        "AUTOFIRE": true,
+        "BSPEED": 15,
+        "BMAX": 15,
+        "VMAX": 2,
+        "TICK": 16.666666666666668,
+        "BDMG": 1,
+        "CONTACTCD": 62,
+        "BLASTR": 18,
+        "BLASTGAIN": 8
+      },
+      "flight": {
+        "VMAX": 2,
+        "ACCEL": 0.015,
+        "TURN": 0.015,
+        "FLICK": 0.01,
+        "DAMP": 1,
+        "KEYTHRUST": 16,
+        "WALLLOSS": 0.5
+      },
+      "note": "captured PRE-RETUNE at the shipped constants — recapture with --capture-tick after the human retunes the tick path"
+    },
+    "traces": {
+      "tick-rest-to-top-speed": {
+        "checkpoints": [
+          {
+            "tag": "mid-ramp",
+            "tick": 10,
+            "hash": "a23aad79",
+            "parts": {
+              "ship": "76b20150",
+              "bullets": "4b95f515",
+              "cam": "65530ed2",
+              "encounter": "f1936715",
+              "rng": "f1f0ab9a"
+            },
+            "ship": {
+              "x": 1543.128,
+              "y": 1881,
+              "vx": 1.2959999999999996,
+              "vy": 0
+            },
+            "rng": 5351911,
+            "st": {
+              "state": "warning",
+              "wave": 1,
+              "kills": 0,
+              "xp": 0,
+              "hull": 3,
+              "enemies": 0,
+              "orbs": 0
+            }
+          },
+          {
+            "tag": "at-the-clamp",
+            "tick": 240,
+            "hash": "b20afcd3",
+            "parts": {
+              "ship": "1d86bd24",
+              "bullets": "4b95f515",
+              "cam": "5697a10a",
+              "encounter": "a390bfcb",
+              "rng": "f1f0ab9a"
+            },
+            "ship": {
+              "x": 2001.552,
+              "y": 1881,
+              "vx": 2,
+              "vy": 0
+            },
+            "rng": 5351911,
+            "st": {
+              "state": "warning",
+              "wave": 1,
+              "kills": 0,
+              "xp": 0,
+              "hull": 3,
+              "enemies": 0,
+              "orbs": 0
+            }
+          },
+          {
+            "tag": "coasting",
+            "tick": 360,
+            "hash": "e802b77b",
+            "parts": {
+              "ship": "9cd38a25",
+              "bullets": "4b95f515",
+              "cam": "08b3b753",
+              "encounter": "2ea3803f",
+              "rng": "f1f0ab9a"
+            },
+            "ship": {
+              "x": 2241.5519999999997,
+              "y": 1881,
+              "vx": 2,
+              "vy": 0
+            },
+            "rng": 5351911,
+            "st": {
+              "state": "warning",
+              "wave": 1,
+              "kills": 0,
+              "xp": 0,
+              "hull": 3,
+              "enemies": 0,
+              "orbs": 0
+            }
+          }
+        ]
+      },
+      "tick-flick-turn": {
+        "checkpoints": [
+          {
+            "tag": "at-speed",
+            "tick": 120,
+            "hash": "6226bc37",
+            "parts": {
+              "ship": "76101eb0",
+              "bullets": "4b95f515",
+              "cam": "d0f5dc3b",
+              "encounter": "c477ebdf",
+              "rng": "f1f0ab9a"
+            },
+            "ship": {
+              "x": 1761.552,
+              "y": 1881,
+              "vx": 2,
+              "vy": 0
+            },
+            "rng": 5351911,
+            "st": {
+              "state": "warning",
+              "wave": 1,
+              "kills": 0,
+              "xp": 0,
+              "hull": 3,
+              "enemies": 0,
+              "orbs": 0
+            }
+          },
+          {
+            "tag": "after-flick",
+            "tick": 160,
+            "hash": "0ce6b866",
+            "parts": {
+              "ship": "25a9cdf2",
+              "bullets": "4b95f515",
+              "cam": "24b9dc74",
+              "encounter": "c38fc1f5",
+              "rng": "f1f0ab9a"
+            },
+            "ship": {
+              "x": 1765.7705067304723,
+              "y": 1959.7083079171603,
+              "vx": 1.2555722246476568e-9,
+              "vy": 1.9999999999999998
+            },
+            "rng": 5351911,
+            "st": {
+              "state": "warning",
+              "wave": 1,
+              "kills": 0,
+              "xp": 0,
+              "hull": 3,
+              "enemies": 0,
+              "orbs": 0
+            }
+          },
+          {
+            "tag": "settled",
+            "tick": 220,
+            "hash": "7b702c19",
+            "parts": {
+              "ship": "ee1f4a8f",
+              "bullets": "4b95f515",
+              "cam": "dd709f41",
+              "encounter": "c1a769d5",
+              "rng": "f1f0ab9a"
+            },
+            "ship": {
+              "x": 1765.7705068058058,
+              "y": 2079.7083079171603,
+              "vx": 1.2555722246476568e-9,
+              "vy": 1.9999999999999998
+            },
+            "rng": 5351911,
+            "st": {
+              "state": "warning",
+              "wave": 1,
+              "kills": 0,
+              "xp": 0,
+              "hull": 3,
+              "enemies": 0,
+              "orbs": 0
+            }
+          },
+          {
+            "tag": "diagonal",
+            "tick": 260,
+            "hash": "9eb9bf16",
+            "parts": {
+              "ship": "10f38df1",
+              "bullets": "4b95f515",
+              "cam": "a01aafb9",
+              "encounter": "85ffe404",
+              "rng": "f1f0ab9a"
+            },
+            "ship": {
+              "x": 1818.2412947946405,
+              "y": 2136.2363568721903,
+              "vx": 1.7036818300487824,
+              "vy": 1.0476011750478482
+            },
+            "rng": 5351911,
+            "st": {
+              "state": "warning",
+              "wave": 1,
+              "kills": 0,
+              "xp": 0,
+              "hull": 3,
+              "enemies": 0,
+              "orbs": 0
+            }
+          }
+        ]
+      },
+      "tick-wall-bounce": {
+        "checkpoints": [
+          {
+            "tag": "left",
+            "tick": 30,
+            "hash": "55e70d05",
+            "parts": {
+              "ship": "d26510a7",
+              "bullets": "4b95f515",
+              "cam": "6e346843",
+              "encounter": "21d6b32b",
+              "rng": "f1f0ab9a"
+            },
+            "ship": {
+              "x": 31,
+              "y": 1881,
+              "vx": 1,
+              "vy": 0
+            },
+            "rng": 5351911,
+            "st": {
+              "state": "warning",
+              "wave": 1,
+              "kills": 0,
+              "xp": 0,
+              "hull": 3,
+              "enemies": 0,
+              "orbs": 0
+            }
+          },
+          {
+            "tag": "right",
+            "tick": 60,
+            "hash": "6b7f6650",
+            "parts": {
+              "ship": "387c304d",
+              "bullets": "4b95f515",
+              "cam": "ec9f0da0",
+              "encounter": "41ae81dd",
+              "rng": "f1f0ab9a"
+            },
+            "ship": {
+              "x": 3041,
+              "y": 1881,
+              "vx": -1,
+              "vy": 0
+            },
+            "rng": 5351911,
+            "st": {
+              "state": "warning",
+              "wave": 1,
+              "kills": 0,
+              "xp": 0,
+              "hull": 3,
+              "enemies": 0,
+              "orbs": 0
+            }
+          },
+          {
+            "tag": "top",
+            "tick": 90,
+            "hash": "ed2b3108",
+            "parts": {
+              "ship": "3ef2fa94",
+              "bullets": "4b95f515",
+              "cam": "f2216200",
+              "encounter": "70384740",
+              "rng": "f1f0ab9a"
+            },
+            "ship": {
+              "x": 1536,
+              "y": 31,
+              "vx": 0,
+              "vy": 1
+            },
+            "rng": 5351911,
+            "st": {
+              "state": "warning",
+              "wave": 1,
+              "kills": 0,
+              "xp": 0,
+              "hull": 3,
+              "enemies": 0,
+              "orbs": 0
+            }
+          },
+          {
+            "tag": "bottom",
+            "tick": 120,
+            "hash": "6c6bb86b",
+            "parts": {
+              "ship": "532392c4",
+              "bullets": "4b95f515",
+              "cam": "439f8356",
+              "encounter": "3dbf8b74",
+              "rng": "f1f0ab9a"
+            },
+            "ship": {
+              "x": 1536,
+              "y": 3731,
+              "vx": 0,
+              "vy": -1
+            },
+            "rng": 5351911,
+            "st": {
+              "state": "warning",
+              "wave": 1,
+              "kills": 0,
+              "xp": 0,
+              "hull": 3,
+              "enemies": 0,
+              "orbs": 0
+            }
+          },
+          {
+            "tag": "corner",
+            "tick": 150,
+            "hash": "2c6ddae5",
+            "parts": {
+              "ship": "b3b5520e",
+              "bullets": "4b95f515",
+              "cam": "8c516302",
+              "encounter": "43fcecb5",
+              "rng": "f1f0ab9a"
+            },
+            "ship": {
+              "x": 22.2842712474619,
+              "y": 22.2842712474619,
+              "vx": 0.7071067811865475,
+              "vy": 0.7071067811865475
+            },
+            "rng": 5351911,
+            "st": {
+              "state": "warning",
+              "wave": 1,
+              "kills": 0,
+              "xp": 0,
+              "hull": 3,
+              "enemies": 0,
+              "orbs": 0
+            }
+          }
+        ]
+      }
+    }
+  }
+}
