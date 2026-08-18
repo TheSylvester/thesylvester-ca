@@ -68,7 +68,7 @@
 </style>
 </head>
 <body>
-<canvas id="field" aria-label="Ship playground — move the visible pointer to aim, hold right to fly with the mouse and aim with QWE/ASDZXC, left fires, Escape pauses"></canvas>
+<canvas id="field" aria-label="Ship playground — the cursor aims; W A S D flies and Q E Z C add diagonals; left fires; hold right for energy-powered comet mode: fast, invulnerable, and able to ram enemies; Escape pauses"></canvas>
 <div id="pausemenu">
   <!-- the first-run wording: syncMenuWords() swaps both to paused / resume
        the moment G.started flips, and the ids never move -->
@@ -87,6 +87,8 @@
       <button class="tab" type="button" data-tab="camera" aria-pressed="false">camera</button>
       <button class="tab" type="button" data-tab="world" aria-pressed="false">world</button>
       <button class="tab" type="button" data-tab="combat" aria-pressed="false">combat</button>
+      <button class="tab" type="button" data-tab="comet" aria-pressed="false">comet</button>
+      <button class="tab" type="button" data-tab="energy" aria-pressed="false">energy</button>
       <button class="tab" type="button" data-tab="audio" aria-pressed="false">audio</button>
       <button class="tab" type="button" data-tab="enemies" aria-pressed="false">enemies</button>
     </div>
@@ -141,15 +143,9 @@
           <label for="aimmode">aim control</label>
           <select id="aimmode">
             <option value="mouse">mouse mode</option>
-            <option value="push">push mode (legacy)</option>
             <option value="locked">locked (one lock)</option>
           </select>
           <output id="aimmode-out" for="aimmode"></output>
-        </div>
-        <div class="row">
-          <label for="aimsens">push sens</label>
-          <input id="aimsens" type="range" min="0.02" max="0.6" step="0.01">
-          <output id="aimsens-out" for="aimsens"></output>
         </div>
         <div class="row">
           <label for="aimdist">cursor dist</label>
@@ -318,6 +314,118 @@
           <input id="contactcd" type="range" min="0" max="180" step="1">
           <output id="contactcd-out" for="contactcd"></output>
         </div>
+        <div class="row">
+          <label for="pvp-rewind">pvp rewind</label>
+          <input id="pvp-rewind" type="range" min="0" max="200" step="1">
+          <output id="pvp-rewind-out" for="pvp-rewind"></output>
+        </div>
+      </div>
+    </section>
+    <section class="tabsec" data-tab="comet" hidden>
+      <div class="col">
+        <div class="row">
+          <label for="comet-acc">accel mult</label>
+          <input id="comet-acc" type="range" min="1" max="10" step="0.5">
+          <output id="comet-acc-out" for="comet-acc"></output>
+        </div>
+        <div class="row">
+          <label for="comet-turn">turn mult</label>
+          <input id="comet-turn" type="range" min="1" max="10" step="0.5">
+          <output id="comet-turn-out" for="comet-turn"></output>
+        </div>
+        <div class="row">
+          <label for="comet-vmax">top speed ×</label>
+          <input id="comet-vmax" type="range" min="1" max="6" step="0.25">
+          <output id="comet-vmax-out" for="comet-vmax"></output>
+        </div>
+        <div class="row">
+          <label for="comet-dmg">touch dmg</label>
+          <input id="comet-dmg" type="range" min="0" max="10" step="0.5">
+          <output id="comet-dmg-out" for="comet-dmg"></output>
+        </div>
+      </div>
+      <div class="col">
+        <div class="row">
+          <label for="comet-drain">drain/tick</label>
+          <input id="comet-drain" type="range" min="0" max="10" step="0.25">
+          <output id="comet-drain-out" for="comet-drain"></output>
+        </div>
+        <div class="row">
+          <label for="comet-hit">hit cost</label>
+          <input id="comet-hit" type="range" min="0" max="60" step="1">
+          <output id="comet-hit-out" for="comet-hit"></output>
+        </div>
+        <div class="row">
+          <label for="comet-thr">thrust cost</label>
+          <input id="comet-thr" type="range" min="0" max="20" step="0.5">
+          <output id="comet-thr-out" for="comet-thr"></output>
+        </div>
+        <div class="row">
+          <label for="comet-aoe">halo px</label>
+          <input id="comet-aoe" type="range" min="0" max="40" step="1">
+          <output id="comet-aoe-out" for="comet-aoe"></output>
+        </div>
+        <div class="row">
+          <label for="comet-aoedmg">reach px</label>
+          <input id="comet-aoedmg" type="range" min="0" max="40" step="1">
+          <output id="comet-aoedmg-out" for="comet-aoedmg"></output>
+        </div>
+        <div class="row">
+          <label for="comet-fury">overload/rank</label>
+          <input id="comet-fury" type="range" min="0" max="2" step="0.05">
+          <output id="comet-fury-out" for="comet-fury"></output>
+        </div>
+        <div class="row">
+          <label for="comet-cd">comet cd</label>
+          <input id="comet-cd" type="range" min="0" max="180" step="1">
+          <output id="comet-cd-out" for="comet-cd"></output>
+        </div>
+        <div class="row">
+          <label for="pvp-orbs">pvp orbs</label>
+          <input id="pvp-orbs" type="range" min="0" max="10" step="1">
+          <output id="pvp-orbs-out" for="pvp-orbs"></output>
+        </div>
+      </div>
+    </section>
+    <section class="tabsec" data-tab="energy" hidden>
+      <div class="col">
+        <div class="row">
+          <label for="energy-max">pool max</label>
+          <input id="energy-max" type="range" min="30" max="600" step="10">
+          <output id="energy-max-out" for="energy-max"></output>
+        </div>
+        <div class="row">
+          <label for="energy-regen">regen/tick</label>
+          <input id="energy-regen" type="range" min="0" max="5" step="0.1">
+          <output id="energy-regen-out" for="energy-regen"></output>
+        </div>
+        <div class="row">
+          <label for="energy-delay">regen delay</label>
+          <input id="energy-delay" type="range" min="0" max="180" step="1">
+          <output id="energy-delay-out" for="energy-delay"></output>
+        </div>
+        <div class="row">
+          <label for="energy-arm">re-arm floor</label>
+          <input id="energy-arm" type="range" min="0" max="1" step="0.05">
+          <output id="energy-arm-out" for="energy-arm"></output>
+        </div>
+      </div>
+      <div class="col">
+        <div class="row">
+          <label for="energy-orb">orb refill</label>
+          <input id="energy-orb" type="range" min="0" max="60" step="1">
+          <output id="energy-orb-out" for="energy-orb"></output>
+        </div>
+        <div class="row">
+          <label for="energy-cell">cell/rank</label>
+          <input id="energy-cell" type="range" min="0" max="1" step="0.05">
+          <output id="energy-cell-out" for="energy-cell"></output>
+        </div>
+        <div class="row">
+          <label for="energy-rech">recharger/rank</label>
+          <input id="energy-rech" type="range" min="0" max="1" step="0.05">
+          <output id="energy-rech-out" for="energy-rech"></output>
+        </div>
       </div>
     </section>
     <section class="tabsec" data-tab="audio" hidden>
@@ -367,5 +475,6 @@
 <script src="js/game.js"></script>
 <script src="js/encounter.js"></script>
 <script src="js/audio.js"></script>
+<script src="js/net.js"></script>
 </body>
 </html>

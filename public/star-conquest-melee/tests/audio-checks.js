@@ -296,11 +296,20 @@ window.runAudioChecks = function () {
   enc.E.invuln = 0;
   enc.damagePlayer(99);
   ok("the killing blow plays death alone, never hurt-then-death",
-    named("death") === 1 && named("hurt") === 1 && enc.state().state === "dead",
+    named("death") === 1 && named("hurt") === 1 && enc.state().hull === 0,
     "death=" + named("death") + " hurt=" + named("hurt"));
+  // the true dead FREEZE needs the quarter rule — open play respawns, so
+  // the silent-corpse leg stages the last life the way the wave suite does
+  enc.reset();
+  enc.advance(1);
+  enc.E.lobbyWaiters = 1;
+  enc.E.seats[0].stock = 1;
+  enc.damagePlayer(99);
+  enc.E.lobbyWaiters = 0;
   A.clearLog();
   enc.advance(30);
-  ok("a dead sim emits no cue at all", A.log().length === 0, "len=" + A.log().length);
+  ok("a dead sim emits no cue at all",
+    A.log().length === 0 && enc.state().state === "dead", "len=" + A.log().length);
 
   // ---- E. kills, orbs, the blast ----
   // reapDead is the ONE kill site — bullet, blast and contact deaths all
@@ -356,11 +365,8 @@ window.runAudioChecks = function () {
     enc.E.hull = 99;
     enc.advance(1);
     if (ranks) {
-      enc.E.state = "cleared";
-      enc.openShop();
-      enc.addXp(1000);
+      enc.addXp(1000); // the panel sells mid-wave — no staged visit
       enc.buy(enc.shopInfo().findIndex((r) => r.name === "BLAST CHARGE"));
-      enc.E.state = "active";
     }
     const sy = ship().y;
     enc.spawnEnemy(ship().x + 150, sy);
@@ -383,7 +389,7 @@ window.runAudioChecks = function () {
     "blast=" + named("blast") + " nearHp=" + b1.near.hp);
   undoBlastR();
 
-  // ---- F. the wave arc: warn, spawn, clear, the sweep, the shop ----
+  // ---- F. the wave arc: warn, spawn, clear, the sweep, the hand-off ----
   // warn lands strictly after the seeded anchor draws; spawn is one cue per
   // GROUP however many bodies the group lands, pitched by the group's type.
   // The first pack is staged as a charger group — the schedule itself never
@@ -404,14 +410,9 @@ window.runAudioChecks = function () {
     named("warn") === 1 && named("spawn") === 1 && named("spawnheavy") === 0 &&
     enc.state().enemies === 5,
     "warn=" + named("warn") + " spawn=" + named("spawn"));
-  enc.reset();
-  enc.advance(1);
-  A.clearLog();
-  enc.openShop(); // outside the cleared beat — refused, and silently
-  ok("a refused openShop makes no sound",
-    enc.state().state === "warning" && A.log().length === 0, "len=" + A.log().length);
   // the full clear flow, cued end to end: the last reap, the one victory
-  // phrase, the sweep's per-orb pickups, and the shop door
+  // phrase, and the sweep's per-orb pickups — the wave then hands itself
+  // over with no shop door and no freeze
   enc.reset();
   enc.E.hull = 99;
   enc.advance(130);
@@ -425,38 +426,45 @@ window.runAudioChecks = function () {
     "kill=" + named("kill") + " clear=" + named("clear") + " state=" + enc.state().state);
   const orbsAtClear = enc.state().orbs;
   enc.advance(ECFG.clearHold + 1);
-  ok("the sweep banks a pickup per orb and the shop opens on one cue",
-    orbsAtClear >= 2 && named("pickup") === orbsAtClear && named("shop") === 1 &&
-    enc.state().state === "shop" && enc.frozen(),
-    "orbs=" + orbsAtClear + " pickup=" + named("pickup") + " shop=" + named("shop"));
+  ok("the sweep banks a pickup per orb and wave 2 deals itself with no shop cue",
+    orbsAtClear >= 2 && named("pickup") === orbsAtClear && named("shop") === 0 &&
+    enc.state().state === "warning" && enc.state().wave === 2 && !enc.frozen(),
+    "orbs=" + orbsAtClear + " pickup=" + named("pickup") + " shop=" + named("shop") +
+    " state=" + enc.state().state);
+  // the ONE remaining freeze is the terminal dead screen — staged, it still
+  // silences the sim and holds fire()'s cue behind the frozen gate
+  const deadStateWas = enc.state().state;
+  enc.E.state = "dead";
   A.clearLog();
   enc.advance(40);
-  ok("a frozen shop advances no sim and emits no combat cue",
-    A.log().length === 0 && enc.state().state === "shop", "len=" + A.log().length);
+  ok("the dead freeze advances no sim and emits no cue",
+    A.log().length === 0 && enc.state().state === "dead", "len=" + A.log().length);
   t.setAimMode("push"); // fire()'s frozen gate sits above its cue — prove it
   t.G.aimed = true;
   t.G.cool = 0;
   enc.fireOnce();
-  ok("fire over the frozen shop is refused before it can sound",
+  ok("fire over the dead freeze is refused before it can sound",
     named("fire") === 0 && t.G.bullets.length === 0, "fire=" + named("fire"));
-  // the shop's OWN cues still fire while frozen: the three player-reachable
-  // refusals each sound denied, a sale sounds buy, and the two refusals no
-  // keyboard can reach stay silent — programming errors ask for no feedback
+  enc.E.state = deadStateWas;
+  // the shop's OWN cues, mid-wave now: the three player-reachable refusals
+  // each sound denied, a sale sounds buy, and the refusal no pointer can
+  // reach stays silent — programming errors ask for no feedback
+  A.clearLog();
   enc.E.xp = 0;
   enc.buy(0);                     // an empty wallet — the cost refusal
   enc.E.hull = enc.E.hullMax;
   enc.buy(2);                     // HULL PATCH off the shelf — the can() refusal
-  enc.addXp(50);
-  const sale = enc.buy(4);        // THRUST RING, one-time — the sale
-  enc.buy(4);                     // ...and its second ask — the maxed refusal
-  ok("all three reachable refusals sound denied, and the sale sounds buy",
-    sale === true && named("denied") === 3 && named("buy") === 1,
+  enc.addXp(200);
+  const sale = enc.buy(4);        // BLAST CHARGE rank 1 (row 4 now) — a sale
+  enc.buy(4);                     // rank 2 — a sale
+  enc.buy(4);                     // rank 3 — the cap, still a sale
+  enc.buy(4);                     // rank four's ask — the maxed refusal
+  ok("all three reachable refusals sound denied, and every sale sounds buy",
+    sale === true && named("denied") === 3 && named("buy") === 3,
     "denied=" + named("denied") + " buy=" + named("buy"));
-  enc.buy(99);                    // no such row
-  enc.continueFromShop();         // no cue by design — the next warn says it better
-  enc.buy(0);                     // outside the shop entirely
-  ok("the unreachable refusals and the continue stay silent",
-    A.log().length === 4 && enc.state().state === "warning" && enc.state().wave === 2,
+  enc.buy(99);                    // no such row — silent by design
+  ok("the unreachable refusal stays silent and the wave is untouched",
+    A.log().length === 6 && enc.state().state === "warning" && enc.state().wave === 2,
     "len=" + A.log().length + " state=" + enc.state().state);
 
   // ---- G. determinism — the observer never writes and never draws ----

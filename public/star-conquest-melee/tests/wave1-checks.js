@@ -94,8 +94,8 @@ window.runWave1Checks = function () {
   const runA = snapshotRun();
   const runB = snapshotRun();
   ok("a fresh run reproduces the same wave exactly", runA === runB && runA.length > 10);
-  // the pointer moves the camera (lookahead aim lead), which moves the
-  // anchor — but the SCHEDULE and the dealt pattern must never change
+  // spawn dealing anchors on the SHIP now, not the camera — the pointer must
+  // change neither the schedule nor the dealt pattern
   const schedRun = (mx, my) => {
     t.setMouseClient(mx, my);
     enc.reset();
@@ -191,8 +191,49 @@ window.runWave1Checks = function () {
   enc.E.invuln = 0;
   enc.damagePlayer(1);
   s = enc.state();
-  ok("zero hull is the dead state", s.hull === 0 && s.state === "dead");
-  ok("the dead state freezes the sim", enc.frozen());
+  ok("zero hull downs the seat and arms the respawn timer",
+    s.hull === 0 && s.seats[0].respawnT === ECFG.player.respawn && s.state !== "dead",
+    "hull=" + s.hull + " respawnT=" + s.seats[0].respawnT + " state=" + s.state);
+  ok("one downed seat never freezes the world", !enc.frozen());
+
+  // ---- D1b. the respawn flow: countdown, deal point, grace, the wallet ----
+  enc.reset();
+  enc.advance(1);
+  enc.addXp(7); // a wallet to forfeit, and a score that must survive it
+  const scoreAtDeath = enc.state().seats[0].score;
+  enc.damagePlayer(99);
+  s = enc.state();
+  ok("a killing blow forfeits the unspent wallet and keeps the score",
+    s.hull === 0 && s.xp === 0 && s.seats[0].score === scoreAtDeath &&
+    s.seats[0].respawnT === ECFG.player.respawn,
+    "xp=" + s.xp + " score=" + s.seats[0].score + " respawnT=" + s.seats[0].respawnT);
+  const deadAtX = ship().x;
+  const deadAtY = ship().y;
+  enc.advance(ECFG.player.respawn - 1);
+  s = enc.state();
+  ok("the seat stays down through the whole countdown",
+    s.hull === 0 && s.seats[0].respawnT === 1 && ship().x === deadAtX,
+    "respawnT=" + s.seats[0].respawnT);
+  enc.advance(1);
+  s = enc.state();
+  ok("the timer expiring deals the seat back in at full hull with the grace",
+    s.hull === s.hullMax && s.invuln === ECFG.player.invuln && s.seats[0].respawnT === 0,
+    "hull=" + s.hull + " invuln=" + s.invuln);
+  ok("the respawn is a fresh deal point inside the world walls",
+    (ship().x !== deadAtX || ship().y !== deadAtY) &&
+    ship().x > 0 && ship().x < t.WW && ship().y > 0 && ship().y < t.WH,
+    "at=" + ship().x.toFixed(1) + "," + ship().y.toFixed(1));
+  // the quarter rule's counter: with waiters standing a death consumes one
+  // life and still respawns while the stock holds
+  enc.reset();
+  enc.advance(1);
+  enc.E.lobbyWaiters = 1;
+  enc.damagePlayer(99);
+  s = enc.state();
+  ok("a death under the quarter rule consumes one life and still respawns",
+    s.seats[0].stock === ECFG.player.stock - 1 && s.seats[0].respawnT === ECFG.player.respawn,
+    "stock=" + s.seats[0].stock);
+  enc.E.lobbyWaiters = 0; // the hook back to open play
 
   // ---- D2. the grace period counts down naturally, and the lance sweeps
   // the ship's own travel ----
@@ -221,10 +262,16 @@ window.runWave1Checks = function () {
   enc.advance(1);
   ok("a fast ship cannot step across a live lance", enc.state().hitsTaken === 1, "hitsTaken=" + enc.state().hitsTaken);
 
-  // ---- E. death cannot resume; restart cleans up and keeps the tuner ----
-  enc.E.invuln = 0; // D2 reset the run — reach the dead state again
+  // ---- E. the quarter rule ends a match; restart cleans up and keeps the tuner ----
+  // The terminal dead state is reachable only when the last life goes with
+  // lobby waiters standing — open play respawns forever. Stage exactly that.
+  enc.E.invuln = 0; // D2 reset the run — reach the dead state deliberately
+  enc.E.lobbyWaiters = 1;
+  enc.E.seats[0].stock = 1; // the last quarter
   enc.damagePlayer(99);
-  ok("lethal damage freezes the run for the cleanup test", enc.state().state === "dead");
+  ok("the last life under the quarter rule ends the match, frozen",
+    enc.state().state === "dead" && enc.frozen() && enc.state().seats[0].respawnT === 0,
+    "state=" + enc.state().state);
   const deadTick = enc.state().waveTick;
   const deadX = ship().x;
   enc.advance(30);
@@ -238,55 +285,62 @@ window.runWave1Checks = function () {
     s.state === "idle" && s.wave === 1 && s.enemies === 0 && s.orbs === 0 && t.G.bullets.length === 0 &&
     s.hull === ECFG.player.hull && s.hullMax === ECFG.player.hull && s.xp === 0 && s.waveTick === 0 &&
     s.kills === 0 && s.mods.cool === 1 && s.mods.speed === 0);
+  ok("restart refills the quarter-rule stock and clears the pending respawn",
+    s.seats[0].stock === ECFG.player.stock && s.seats[0].respawnT === 0,
+    "stock=" + s.seats[0].stock);
+  enc.E.lobbyWaiters = 0; // the lobby hook is not run state — put it back by hand
   ok("restart recenters the ship", ship().x === t.WW / 2 && ship().y === t.WH / 2);
   ok("restart preserves tuner settings", t.camState().EDGEMARGIN === 77);
   t.setEdgeMargin(priorEdge);
 
-  // ---- F. the post-wave shop: sweep, open, buy, refuse, continue ----
-  // The U-key level flow is gone. XP is an uncapped wallet; every clear
-  // holds the banner while the field's orbs sweep to the ship, then opens a
-  // FROZEN shop. It is a MOUSE surface end to end: a click on a card buys it,
-  // a click on NEXT WAVE deals the wave, and no key does either.
-  // The shop's clicks land only while the game is LIVE — paused, the pointer
-  // belongs to the pause menu (section R pins that) — and a frozen shop keeps
-  // G.running true in play, so dispatches here raise the flag R-style:
-  // the flag only, the loop itself stays stopped.
-  // The shop reads a CLIENT-space pointer here: mouse mode converts clientX and
-  // clientY to field coordinates. The shipped default is locked mode now, which
-  // reads the drawn cursor instead, so this section pins the mode it asserts.
+  // ---- F. the panel shop: banner-only clear, the sweep, buy-in-flight ----
+  // The modal shop is gone. Every clear holds the banner while the field's
+  // orbs sweep to the ship, then encStep deals the next wave itself; the
+  // shop is a persistent MOUSE-ONLY column in the left gutter, hit-tested in
+  // its own LOGICAL PANEL space, and a purchase lands at any live moment —
+  // mid-flight included. The click legs dispatch REAL mousedowns at panel
+  // points converted through game.js's own panelToClient, so the whole path
+  // — listener, gutter routing, panel transform, shopLayout hit test, buy —
+  // is the production path end to end.
   t.setAimMode("mouse");
+  t.G.started = true; // the panels (and their routing) belong to a started session
   const liveKey = (code) => {
     const was = t.G.running;
     t.G.running = true;
     document.dispatchEvent(new KeyboardEvent("keydown", { code }));
     t.G.running = was;
   };
-  // a REAL mousedown at a field point, through game.js's own handler and its
-  // client→field conversion — nothing here reaches buy() by a side door
-  const liveClick = (fx, fy) => {
+  // a REAL mousedown at a PANEL point, through game.js's own gutter routing
+  const panelClick = (px, py) => {
+    const c = t.panelToClient("shop", px, py);
+    if (!c) return false;
     const was = t.G.running;
     t.G.running = true;
-    const c = t.fieldToClient(fx, fy);
     canvasEl.dispatchEvent(new MouseEvent("mousedown", { button: 0, clientX: c.x, clientY: c.y, bubbles: true }));
     t.G.running = was;
+    return true;
   };
-  const liveMove = (fx, fy) => { // ...and the hover that precedes it
+  const panelMove = (px, py) => { // ...and the hover that precedes it
+    const c = t.panelToClient("shop", px, py);
+    if (!c) return false;
     const was = t.G.running;
     t.G.running = true;
-    const c = t.fieldToClient(fx, fy);
     document.dispatchEvent(new MouseEvent("mousemove", { clientX: c.x, clientY: c.y, bubbles: true }));
     t.G.running = was;
+    return true;
   };
   const cardMid = (i) => { const c = enc.shopLayout().cards[i]; return [c.x + c.w / 2, c.y + c.h / 2]; };
-  const clickCard = (i) => liveClick(...cardMid(i));
-  // ...and a reader for the predicates that only answer on a LIVE shop, so a
-  // check can ask them without the suite's paused page answering for them
+  const clickCard = (i) => panelClick(...cardMid(i));
+  // a reader for the predicates that only answer on a LIVE page, so a check
+  // can ask them without the suite's paused page answering for them
   const liveVal = (fn) => {
     const was = t.G.running;
     t.G.running = true;
     try { return fn(); } finally { t.G.running = was; }
   };
-  const clickNext = () => { const b = enc.shopLayout().btn; liveClick(b.x + b.w / 2, b.y + b.h / 2); };
+  ok("the suite's viewport gives the panels room, so the click path is real",
+    t.panelsOn() === true && !!t.panelToClient("shop", 0, 0),
+    "on=" + t.panelsOn() + " place=" + JSON.stringify(t.panelPlaceFor("shop")));
   enc.reset();
   enc.E.hull = 99;
   enc.advance(130); // group 1 on the field
@@ -294,22 +348,26 @@ window.runWave1Checks = function () {
   enc.advance(W1[1].spawnAt - 130 + 1); // group 2 lands
   for (const e of enc.E.enemies) e.hp = 0;
   enc.advance(1); // the reap clears the wave
-  ok("a wave clear opens the banner, not the shop", enc.state().state === "cleared" && !enc.frozen());
+  ok("a wave clear opens the banner over a LIVE world", enc.state().state === "cleared" && !enc.frozen());
   enc.E.orbs.push({ x: 5, y: 5, vx: 0, vy: 0 }); // parked in the far world corner — the sweep must still bank it
   enc.advance(ECFG.clearHold + 1);
   s = enc.state();
-  ok("the banner hold expiring opens the shop, frozen", s.state === "shop" && enc.frozen(), "state=" + s.state);
-  ok("the cleared sweep banks every orb before the shop opens",
+  ok("the banner hold expiring deals the next wave itself — no screen, no freeze",
+    s.state === "warning" && s.wave === 2 && s.waveTick === 0 && !enc.frozen(),
+    "state=" + s.state + " wave=" + s.wave + " tick=" + s.waveTick);
+  ok("the cleared sweep banked every orb before the hand-off",
     s.orbs === 0 && s.xp === 6, "orbs=" + s.orbs + " xp=" + s.xp);
-  const shopTick = s.waveTick;
-  enc.advance(40);
-  ok("the shop freezes the sim", enc.state().waveTick === shopTick && enc.state().state === "shop");
+  const tickBeforeBuy = s.waveTick;
   const RL1 = 1 / 1.15; // rank 1 of the additive curve: +15% of the BASE rate
   clickCard(0);
   s = enc.state();
-  ok("a click on the first card buys RAPID LOADER and the shop stays open",
-    s.mods.cool === RL1 && s.xp === 2 && s.owned[0] === 1 && s.state === "shop",
+  ok("a panel click buys RAPID LOADER while the wave runs on",
+    s.mods.cool === RL1 && s.xp === 2 && s.owned[0] === 1 && s.state === "warning" &&
+    s.waveTick === tickBeforeBuy, // a click is not a tick — nothing froze, nothing advanced
     "cool=" + s.mods.cool + " xp=" + s.xp + " state=" + s.state);
+  enc.advance(30);
+  ok("the world keeps ticking around the open shop",
+    enc.state().waveTick === tickBeforeBuy + 30, "tick=" + enc.state().waveTick);
   clickCard(0);
   s = enc.state();
   ok("an unaffordable rank is refused and the wallet is untouched",
@@ -326,116 +384,68 @@ window.runWave1Checks = function () {
   s = enc.state();
   ok("HULL PATCH repairs at a flat 6 per point", s.hull === 3 && s.xp === 10,
     "hull=" + s.hull + " xp=" + s.xp);
-  // a click that lands on no target at all is EATEN, never passed through: the
-  // shop owns the whole field, so the gap between two cards must not fire, and
-  // must not re-arm a pointer lock over a menu that needs the cursor
+  // the score is a one-way counter: crediting raises it beside the wallet,
+  // spending draws the wallet alone
+  const scoreSpend = enc.state().seats[0].score;
+  clickCard(0); // rank two at 8 — affordable now
+  s = enc.state();
+  ok("spending draws the wallet and never the score",
+    s.owned[0] === 2 && s.xp === 2 && s.seats[0].score === scoreSpend,
+    "xp=" + s.xp + " score=" + s.seats[0].score);
+  // a click on the panel's dead space is nobody's: no buy, no fire
   const gapCard = enc.shopLayout().cards[0];
-  liveClick(gapCard.x + gapCard.w + 5, gapCard.y + gapCard.h / 2);
+  const ownedGap = enc.state().owned.join(",");
+  const bulletsGap = t.G.bullets.length;
+  panelClick(gapCard.x + gapCard.w / 2, gapCard.y + gapCard.h + 2); // the gap under card 0
   s = enc.state();
-  ok("a click on the grid's gutter buys nothing and continues nothing",
-    s.state === "shop" && s.xp === 10 && s.hull === 3 && s.shopHover === -1 && s.shopBtn === false,
-    "state=" + s.state + " xp=" + s.xp + " hover=" + s.shopHover);
-  clickNext();
-  s = enc.state();
-  ok("a click on NEXT WAVE continues into wave 2's warning",
-    s.state === "warning" && s.wave === 2 && s.waveTick === 0,
-    "state=" + s.state + " wave=" + s.wave);
-  enc.continueFromShop();
-  clickNext();
-  s = enc.state();
-  ok("a doubled continue deals exactly one wave — never two",
-    s.wave === 2 && s.state === "warning" && s.waveTick === 0,
-    "wave=" + s.wave + " state=" + s.state);
-  // The shop RELEASES the pointer lock to get its cursor back, and both
-  // lock-loss handlers read a release as a reason to pause. Left unguarded,
-  // clearing a wave in push mode (or in mouse-flight with the button still
-  // held) drops the lock, the handler pauses the shop behind the menu, and
-  // the resume grabs the lock straight back — a menu with no cursor to click
-  // it with. Both handlers must sit out the whole visit, and requestLock with
-  // them. Every leg dispatches the REAL event at the real listener.
-  const lockAimWas = t.aimState().AIMMODE;
-  const lockRightWas = t.G.rightHeld;
-  const lockSurvives = (mode, rightHeld, evt) => {
-    t.setAimMode(mode);
-    enc.E.state = "cleared";
-    enc.openShop();
+  ok("a click between cards buys nothing and fires nothing",
+    s.owned.join(",") === ownedGap && t.G.bullets.length === bulletsGap && s.shopHover === -1,
+    "hover=" + s.shopHover + " owned=" + s.owned.join(","));
+  // the hover path: a panel move lights the card, a field move clears it
+  panelMove(...cardMid(1));
+  ok("a panel hover lights the card under the pointer", enc.state().shopHover === 1,
+    "hover=" + enc.state().shopHover);
+  {
+    const fp = t.fieldToClient(t.FW / 2, t.FH / 2);
     const was = t.G.running;
-    t.G.running = true;      // the flag a frozen shop genuinely carries in play
-    t.G.rightHeld = rightHeld;
-    const claimed = t.shopOwnsPointer();
-    document.dispatchEvent(new Event(evt));
-    const alive = t.G.running === true && enc.state().state === "shop" && claimed;
+    t.G.running = true;
+    document.dispatchEvent(new MouseEvent("mousemove", { clientX: fp.x, clientY: fp.y, bubbles: true }));
     t.G.running = was;
-    return alive;
-  };
-  ok("push mode's lock-loss handler sits out the shop instead of pausing it",
-    lockSurvives("push", false, "pointerlockchange"));
-  ok("mouse-flight's lock-loss handler sits out the shop too",
-    lockSurvives("mouse", true, "pointerlockchange"));
-  ok("a refused lock request over the shop is not a failure to pause over",
-    lockSurvives("push", false, "pointerlockerror"));
-  // ...and the claim covers the PAUSED shop too. shopOwnsPointer reads the
-  // SCREEN, not the loop's flag: the mouseup handler below has no running
-  // gate, so with INVERT off a right release over the pause menu is a genuine
-  // user gesture that would win a lock, and resume() would carry it into a
-  // mouse-only menu with no cursor and a hover frozen at one field pixel.
-  enc.E.state = "cleared";
-  enc.openShop();
-  const pausedClaim = t.G.running === false && t.shopOwnsPointer() === true;
-  const invWas = t.aimState().AIMMODE === "mouse" && document.getElementById("invert").checked;
-  t.setAimMode("mouse");
-  t.setInvert(false);          // the one configuration whose paused right-release re-arms
-  t.G.rightHeld = false;       // released: aiming() is false, the branch that asks for a lock
-  document.dispatchEvent(new MouseEvent("mouseup", { button: 2, bubbles: true }));
-  ok("a paused shop still owns the pointer, so an invert-off right release wins no lock",
-    pausedClaim && t.shopOwnsPointer() === true && enc.state().state === "shop" &&
-    t.G.running === false,
-    "claimed=" + pausedClaim + " state=" + enc.state().state);
-  // the resume takes the release branch, never the arm branch, and re-seeds
-  // the hover — a paused shop takes no mousemove, so the pointer may have
-  // travelled far from whatever card was lit when the pause began
-  const farCard = enc.shopLayout().cards[4];
-  enc.shopHover(farCard.x + farCard.w / 2, farCard.y + farCard.h / 2); // no-op paused...
-  enc.E.shopHover = 4;                                                 // ...so plant it
-  t.setMouseClient(0, 0); // the pointer now sits off every card
-  t.ui.resume(); // the REAL resume — which also starts the rAF loop, so it has
-  const seeded = enc.state().shopHover; // to be stopped by the real pause, not
-  // by dropping the flag: a running loop would step and repaint underneath
-  // every later section, and every pixel probe in the suite reads that canvas
-  document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape" }));
-  t.setInvert(invWas);
-  t.G.rightHeld = lockRightWas;
-  t.setAimMode(lockAimWas);
-  ok("resuming a paused shop re-seeds the hover instead of restoring a stale one",
-    seeded === -1, "hover=" + seeded);
-  enc.continueFromShop(); // the claim is the SCREEN's, so it has to end with it
-  ok("...and off the shop screen the pointer is the flight controls' again",
-    t.shopOwnsPointer() === false && enc.state().state !== "shop",
-    "state=" + enc.state().state);
-  // the keys the shop used to bind are GONE — a run of them over a live shop
-  // must change nothing at all, wallet, ranks and state alike
-  enc.E.state = "cleared";
-  enc.openShop();
-  enc.addXp(64);
+  }
+  ok("the hover clears when the pointer returns to the field", enc.state().shopHover === -1,
+    "hover=" + enc.state().shopHover);
+  // browse dead, spend alive — the documented choice, driven end to end
+  enc.damagePlayer(99); // the seat goes down mid-wave; its wallet is forfeit
+  enc.addXp(40);        // fund a buy the corpse must not make
+  const ownedDead = enc.state().owned[0];
+  ok("a downed seat may browse but not buy",
+    enc.buy(0) === false && enc.state().owned[0] === ownedDead && enc.state().xp === 40,
+    "owned=" + enc.state().owned[0] + " xp=" + enc.state().xp);
+  enc.respawnSeat(0); // the direct deal — the timer's own path is D1b's business
+  ok("the revived seat spends again",
+    enc.buy(0) === true && enc.state().owned[0] === ownedDead + 1,
+    "owned=" + enc.state().owned[0]);
+  // the keys the old shop retired stay retired — pointer-only, forever
   const keyBefore = JSON.stringify(enc.state().owned) + "|" + enc.state().xp;
-  const keyWave = enc.state().wave; // whatever wave the staging above landed on
+  const keyWave = enc.state().wave;
   for (const code of ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6",
                       "Numpad1", "Enter", "NumpadEnter", "Space"]) liveKey(code);
   s = enc.state();
-  ok("the retired digit and enter bindings buy nothing and deal no wave",
-    s.state === "shop" && s.wave === keyWave && JSON.stringify(s.owned) + "|" + s.xp === keyBefore,
-    "state=" + s.state + " wave=" + s.wave + " want=" + keyWave + " " + JSON.stringify(s.owned) + " xp=" + s.xp);
-  enc.continueFromShop();
+  ok("no key buys anything or deals a wave — the shop is pointer-only",
+    s.wave === keyWave && JSON.stringify(s.owned) + "|" + s.xp === keyBefore,
+    "wave=" + s.wave + " want=" + keyWave + " " + JSON.stringify(s.owned) + " xp=" + s.xp);
   // the bought terms reach the sim — expectations come from the live tuner
-  // values, so an already-tuned page cannot fake a failure
+  // values and the LIVE rank, so an already-tuned page cannot fake a failure
   const tun = enc.tunables();
+  const rlRank = enc.state().owned[0];
   t.setAimMode("push");
   t.G.aimed = true;
   t.G.aimAngle = 0;
   t.G.cool = 0;
   enc.fireOnce();
   ok("the bought cooldown shortens the firing gate",
-    t.G.cool === Math.max(1, Math.round(tun.BCOOL * RL1 / tun.TICK)), "cool=" + t.G.cool);
+    t.G.cool === Math.max(1, Math.round(tun.BCOOL / (1 + 0.15 * rlRank) / tun.TICK)),
+    "cool=" + t.G.cool + " rank=" + rlRank);
   // the retired lifetime upgrade left no multiplier behind: a bullet fired
   // on a purchased page still carries exactly the BLIFE slider's ttl
   t.G.cool = 0;
@@ -461,14 +471,14 @@ window.runWave1Checks = function () {
   ok("empty queue plus empty field clears Wave 1", s.state === "cleared" && s.queued === 0 && s.kills === 5);
   const W2 = enc.waveGroups(2);
   const w2total = W2.reduce((n, g) => n + g.count, 0);
-  enc.advance(ECFG.clearHold + 1);
+  enc.advance(ECFG.clearHold - 1);
   s = enc.state();
-  ok("the clear hold expiring opens the shop instead of dealing a wave",
-    s.state === "shop" && s.wave === 1 && enc.frozen(),
+  ok("the banner holds the whole clearHold before anything is dealt",
+    s.state === "cleared" && s.wave === 1,
     "state=" + s.state + " wave=" + s.wave);
-  enc.continueFromShop();
+  enc.advance(2);
   s = enc.state();
-  ok("continuing from the shop deals wave 2 in the warning state",
+  ok("the hold expiring deals wave 2 in the warning state — no shop beat between",
     s.state === "warning" && s.wave === 2 && s.waveTick === 0 && s.queued === w2total,
     "state=" + s.state + " wave=" + s.wave + " queued=" + s.queued);
   enc.advance(W2[0].spawnAt);
@@ -488,9 +498,7 @@ window.runWave1Checks = function () {
     "last=" + JSON.stringify(w2Last) + " radarDarts=" + s.byType.radarDart);
   // per-wave reseed: an identical wave-1 kill-through deals an identical
   // wave 2, no matter that both runs consumed rand() along the way. The
-  // advance is SPLIT around continueFromShop(): a fused clearHold+1+130
-  // would park both runs in the frozen shop with "[]" on both sides, and
-  // only the length guard below would catch the vacuous pass.
+  // length guard below is what catches a vacuous "[]"-vs-"[]" pass.
   const waveTwoRun = () => {
     enc.reset();
     enc.E.hull = 99;
@@ -499,8 +507,7 @@ window.runWave1Checks = function () {
     enc.advance(W1[1].spawnAt - 130 + 1);
     for (const e of enc.E.enemies) e.hp = 0;
     enc.advance(1);
-    enc.advance(ECFG.clearHold + 1); // lands in the frozen shop
-    enc.continueFromShop();
+    enc.advance(ECFG.clearHold + 1); // the hold expires and wave 2 deals itself
     enc.advance(130);
     return JSON.stringify(enc.E.enemies.map((e) => [+e.x.toFixed(3), +e.y.toFixed(3)]));
   };
@@ -618,10 +625,14 @@ window.runWave1Checks = function () {
   ok("a dead charger drops two orbs", s.orbs === 2 && s.kills === 1, "orbs=" + s.orbs);
 
   // ---- H. a click cannot resume through the dead overlay ----
+  // the terminal screen is the quarter rule's now — stage the last life
   t.setAimMode("mouse"); // escape-pauses directly in mouse mode
   enc.reset();
+  enc.E.lobbyWaiters = 1;
+  enc.E.seats[0].stock = 1;
   enc.damagePlayer(99);
-  ok("direct lethal damage reaches the dead state", enc.state().state === "dead" && enc.frozen());
+  enc.E.lobbyWaiters = 0;
+  ok("the staged last life reaches the dead state", enc.state().state === "dead" && enc.frozen());
   if (t.G.running) document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape" }));
   t.ui.closeDev(); // the dev screen eats a field click — this section needs the pause menu, not the panel
   ok("precondition: the loop sits stopped before the dead-click test", t.G.running === false);
@@ -1423,11 +1434,9 @@ window.runWave1Checks = function () {
   // The row acts on exactly the clamp section O pins, and it must act there
   // ADDITIVELY without writing the VMAX tuner value — a purchase that wrote
   // the slider would outlive the run and silently retune the game. Every leg
-  // buys through the real shop (openShop → buy) — the visit is staged the
-  // way the combat sections stage bodies, since the flow itself is section
-  // F's — and measures the cap the way section O does, so a page tuned to
-  // any VMAX reports the same verdict. capNow() must run OUTSIDE the shop:
-  // a frozen advance would be swallowed and the probe velocity banked.
+  // buys through the real buy() mid-wave — the panel shop's own flow, no
+  // staged visit — and measures the cap the way section O does, so a page
+  // tuned to any VMAX reports the same verdict.
   enc.reset();
   enc.E.hull = 99;
   enc.advance(130); // a live wave, so capNow() has an unfrozen sim to tick
@@ -1446,14 +1455,9 @@ window.runWave1Checks = function () {
     enc.state().mods.speed === 0 && Math.abs(capBase - vmaxP) < 1e-9,
     "cap=" + capBase + " VMAX=" + vmaxP);
   enc.addXp(12); // exactly ranks 1 + 2 of the doubling curve
-  const pBuy = () => { // one staged shop visit, one AFTERBURNER rank
-    enc.E.state = "cleared";
-    enc.openShop();
-    const got = enc.buy(1);
-    enc.E.state = "active"; // back to the live field without dealing a wave
-    return got;
-  };
-  ok("the staged visit buys rank one", pBuy() === true);
+  const pBuy = () => enc.buy(1); // one AFTERBURNER rank, bought mid-wave —
+                                 // the panel shop needs no staged visit
+  ok("the mid-wave purchase buys rank one", pBuy() === true);
   const cap1 = capNow();
   ok("one AFTERBURNER rank lifts the effective cap by exactly 1.0 px/tick",
     enc.state().mods.speed === 1 && Math.abs(cap1 - (vmaxP + 1)) < 1e-9,
@@ -1461,7 +1465,7 @@ window.runWave1Checks = function () {
   ok("the purchase leaves the VMAX tuner value untouched",
     enc.tunables().VMAX === vmaxP && Number(document.getElementById("vmax").value) === vmaxP,
     "tuner=" + enc.tunables().VMAX + " slider=" + document.getElementById("vmax").value);
-  ok("the staged visit buys rank two at its doubled price", pBuy() === true && enc.state().xp === 0);
+  ok("the second purchase buys rank two at its doubled price", pBuy() === true && enc.state().xp === 0);
   const cap2 = capNow();
   ok("a second rank stacks additively rather than replacing the first",
     enc.state().mods.speed === 2 && Math.abs(cap2 - (vmaxP + 2)) < 1e-9,
@@ -1479,12 +1483,9 @@ window.runWave1Checks = function () {
   // visit is staged directly — the natural flow is section F's business.
   enc.reset();
   enc.advance(1);
-  enc.openShop();
-  ok("openShop refuses outside the cleared beat", enc.state().state === "warning");
-  enc.E.state = "cleared";
-  enc.openShop();
-  ok("openShop opens from the cleared beat, frozen", enc.state().state === "shop" && enc.frozen());
   enc.addXp(1000);
+  ok("a purchase needs no shop beat at all — the panel sells mid-wave",
+    enc.state().state === "warning" && !enc.frozen());
   ok("the wallet accrues without any level threshold", enc.state().xp === 1000);
   const rlCosts = [];
   const rlCurve = []; // mods.cool after each rank — the fire-rate curve itself
@@ -1548,90 +1549,1157 @@ window.runWave1Checks = function () {
   t.render();
   ok("the hull pip row tracks the live max hull", pipRaised !== arrPx(51.5, 24.5));
 
-  // ---- R. a broke shop still opens, still renders, and eats no ring keys ----
+  // ---- R. the gutter panels: real ink, the isolating lever, a paused refusal ----
+  // The panels draw OUTSIDE the field, in the letterbox bars, and the pixel
+  // legs probe those bars directly — fieldToCanvas extends past the field,
+  // so a negative field x lands in the left bar. The LEVER matters more
+  // than the probe (the repo's own lesson from the scrim era): each leg
+  // toggles something only the suppressed layer answers to — setPanels —
+  // and asserts BOTH sides, so a deleted panel pass cannot slip through as
+  // "no ink either way".
   enc.reset();
   enc.E.hull = 99;
   enc.advance(130);
-  for (const e of enc.E.enemies) e.hp = 0;
-  enc.advance(W1[1].spawnAt - 130 + 1);
-  for (const e of enc.E.enemies) e.hp = 0;
-  enc.advance(1);
-  enc.E.orbs.length = 0; // a broke run — this wave pays nothing
-  enc.advance(ECFG.clearHold + 1);
-  s = enc.state();
-  ok("the shop opens even with 0 XP", s.state === "shop" && s.xp === 0,
-    "state=" + s.state + " xp=" + s.xp);
   ok("a broke buy is refused and changes nothing",
     enc.buy(0) === false && enc.state().xp === 0 && enc.state().mods.cool === 1 && enc.state().owned[0] === 0);
-  // neither suite ever executed encDrawHud with an overlay up — close that
-  // gap: the whole frame must render with the shop open, and must actually
-  // paint the overlay rather than throwing or drawing nothing. The overlay
-  // draws only while the game is LIVE (paused, the pause copy owns the
-  // center band — the two collided otherwise), so these renders raise the
-  // running flag R-style: the flag only, the loop itself stays stopped.
-  const liveRender = () => {
-    const was = t.G.running;
-    t.G.running = true;
-    try { t.render(); } finally { t.G.running = was; }
-  };
-  let shopDrew = true;
-  let shopErr = "";
-  try { liveRender(); } catch (err) { shopDrew = false; shopErr = String(err); }
-  ok("the frame renders with the shop open", shopDrew, shopErr);
-  // A coarse GRID over the whole card area, not a single row: the graphical
-  // shop's ink is borders, icons and centred labels with wide flat panels
-  // between them, and any one row can land entirely on panel — which reads
-  // the same dark as the paused field behind it and proves nothing.
-  const shopStrip = () => {
-    const strip = [];
-    const gl = enc.shopLayout().grid;
-    for (let fy = gl.y + 3; fy < gl.y + gl.h; fy += 13) {
-      for (let fx = gl.x; fx < gl.x + gl.w; fx += 9) strip.push(arrPx(fx, fy));
-    }
-    return strip.join("|");
-  };
-  const stripLive = shopStrip();
-  // PAUSED over the open shop — reachable in play via Escape, alt-tab or a
-  // lock loss, since a frozen shop keeps G.running true — the overlay must
-  // stand down (its cards and button sit exactly in the pause copy's band)
-  // and the POINTER must go with it: a click belongs to the pause menu's
-  // buttons there, and one that reached a card would buy behind the menu.
-  // G.running is genuinely false here — the suite's page IS a paused screen.
+  const shopPlace = t.panelPlaceFor("shop");
+  const boardPlace = t.panelPlaceFor("board");
+  ok("both panels have room under the suite's viewport",
+    t.panelsOn() === true && !!shopPlace && !!boardPlace,
+    JSON.stringify({ shop: shopPlace, board: boardPlace }));
+  // a panel-space point as FIELD coordinates, through the two transforms the
+  // page itself exposes — so arrPx (fieldToCanvas) can probe the bars
+  const panelField = (place, px, py) => ({
+    x: (place.x0 + px * place.k - t.fieldToCanvas(0, 0).x) / (t.fieldToCanvas(1, 0).x - t.fieldToCanvas(0, 0).x),
+    y: (place.y0 + py * place.k - t.fieldToCanvas(0, 0).y) / (t.fieldToCanvas(0, 1).y - t.fieldToCanvas(0, 0).y),
+  });
+  const layR = enc.shopLayout();
+  const shopProbe = panelField(shopPlace, layR.cards[0].x + 10, layR.cards[0].y + 10); // card 0's face
+  const boardProbe = panelField(boardPlace, 20, 16); // inside the panel's ground band
+  let panelDrew = true;
+  let panelErr = "";
+  try { t.render(); } catch (err) { panelDrew = false; panelErr = String(err); }
+  ok("the frame renders with the panels up", panelDrew, panelErr);
+  const shopInkOn = arrPx(shopProbe.x, shopProbe.y);
+  const boardInkOn = arrPx(boardProbe.x, boardProbe.y);
+  t.setPanels(false);
   t.render();
-  ok("a paused shop keeps its overlay off the canvas for the pause copy",
-    shopStrip() !== stripLive);
+  const shopInkOff = arrPx(shopProbe.x, shopProbe.y);
+  const boardInkOff = arrPx(boardProbe.x, boardProbe.y);
+  t.setPanels(true);
+  t.render();
+  ok("the shop panel paints real ink, and the lever alone removes it",
+    shopInkOn !== shopInkOff && arrPx(shopProbe.x, shopProbe.y) === shopInkOn,
+    "moved=" + (shopInkOn !== shopInkOff));
+  ok("the leaderboard paints real ink, and the lever alone removes it",
+    boardInkOn !== boardInkOff && arrPx(boardProbe.x, boardProbe.y) === boardInkOn,
+    "moved=" + (boardInkOn !== boardInkOff));
+  // the leaderboard renders the per-seat score it is fed: the ink under the
+  // score line moves when the score does, and only then. The reworked board
+  // stacks a big name line over a bigger score line per seat, so with one
+  // seat the score digits land in the panel's lower two-thirds — the probe
+  // is a GRID across that band, wide enough to catch both a one-glyph "0"
+  // and a five-glyph number at their (different) fitted sizes.
+  const scoreStrip = () => {
+    const pts = [];
+    for (let px = 30; px <= 140; px += 5) {
+      for (let py = 150; py <= 230; py += 8) {
+        const q = panelField(boardPlace, px, py);
+        pts.push(arrPx(q.x, q.y));
+      }
+    }
+    return pts.join("|");
+  };
+  t.render();
+  const scoreInkA = scoreStrip();
+  const scoreWasR = enc.E.seats[0].score;
+  enc.E.seats[0].score = scoreWasR + 88888;
+  t.render();
+  const scoreInkB = scoreStrip();
+  enc.E.seats[0].score = scoreWasR;
+  t.render();
+  ok("the leaderboard renders the live per-seat score",
+    scoreInkA !== scoreInkB && scoreStrip() === scoreInkA,
+    "moved=" + (scoreInkA !== scoreInkB));
+  // ---- the CROWN (phase 14) --------------------------------------------
+  // The board's one marker. It is drawn for ranked[0] and only above a score
+  // of 0, so a fresh board crowns nobody. The probe is a GRID across the top
+  // row's air band — where the chevron sits, above the name line — and every
+  // leg asserts BOTH directions, so a board that stopped drawing the crown
+  // entirely could not pass as "nothing moved".
+  const crownStrip = () => {
+    const pts = [];
+    for (let px = 55; px <= 115; px += 3) {
+      for (let py = 8; py <= 34; py += 2) {
+        const q = panelField(boardPlace, px, py);
+        pts.push(arrPx(q.x, q.y));
+      }
+    }
+    return pts.join("|");
+  };
+  const crownScoreWas = enc.E.seats[0].score;
+  enc.E.seats[0].score = 0;
+  t.render();
+  const crownAtZero = crownStrip();
+  enc.E.seats[0].score = 120;
+  t.render();
+  const crownAtLead = crownStrip();
+  ok("a 0-0 board crowns nobody, and the first point on the board raises the crown",
+    crownAtZero !== crownAtLead,
+    "moved=" + (crownAtZero !== crownAtLead));
+  // ...and the crown is behind the panels lever. The OBVIOUS form of this
+  // leg is vacuous and was caught being vacuous: comparing the crown band
+  // with panels up against the same band with panels DOWN moves because the
+  // BOARD moved, and it passes with the crown deleted outright. The band
+  // must be isolated by a lever only the CROWN answers to — the score — and
+  // the panels claim then has to be made the other way round: with the panel
+  // suppressed, the crown's own lever must change NOTHING, because there is
+  // no surface for it to paint on.
+  t.setPanels(false);
+  enc.E.seats[0].score = 0;
+  t.render();
+  const crownOffZero = crownStrip();
+  enc.E.seats[0].score = 120;
+  t.render();
+  const crownOffLead = crownStrip();
+  t.setPanels(true);
+  t.render();
+  const crownOnLead = crownStrip();
+  // BOTH halves, or the leg is still half-vacuous: with the panel down the
+  // crown's lever must move NOTHING, and with the panel up the same lever
+  // must move the band. Only the second half can fail when the crown is
+  // deleted, and without it this leg passes on a board that draws no crown
+  // at all — which is exactly how the first draft of it failed review.
+  ok("the crown's own lever moves the band with the panel up and nothing at all with it down",
+    crownOffZero === crownOffLead && crownAtZero !== crownAtLead &&
+    crownOnLead === crownAtLead,
+    JSON.stringify({ suppressedLeverMoved: crownOffZero !== crownOffLead,
+                     liveLeverMoved: crownAtZero !== crownAtLead,
+                     panelRestored: crownOnLead === crownAtLead }));
+  enc.E.seats[0].score = crownScoreWas;
+  t.render();
+
+  // the crown FOLLOWS the lead, and the local-seat highlight follows the
+  // GRANTED seat — both staged on two seats, both proven in both directions
+  {
+    const cwSeatsWas = t.players.length;
+    t.setPlayerCount(2);
+    enc.restart();
+    const cwRow = (i) => { // a strip across row i's name line — the highlight's own band
+      const pts = [];
+      const cellH = (320 - 20) / 2; // BOARDUI.h and the uncompact pad, as drawBoard splits them
+      const top = 10 + i * cellH;
+      for (let px = 20; px <= 150; px += 3) {
+        for (let py = Math.round(top + cellH * 0.06); py <= Math.round(top + cellH * 0.32); py += 2) {
+          const q = panelField(boardPlace, px, py);
+          pts.push(arrPx(q.x, q.y));
+        }
+      }
+      return pts.join("|");
+    };
+    // The crown is structurally pinned to ROW 0 — `r.s === king` is exactly
+    // `i === 0`, because king IS ranked[0].s — so "the crown moves with the
+    // lead" can only ever mean "the comparator carries the leader into the
+    // crowned row". A leg probing the NAME band alone cannot see the crown at
+    // all (it sits above that band) and passes with the crown deleted; this
+    // one reads the crown band AND the name band, and asserts both halves:
+    // the crowned row is inked, and the seat occupying it is the leader.
+    // row 0's crown band ONLY. The bounds are derived from drawBoard's own
+    // arithmetic rather than guessed: at two seats cellH is 150, nameH is
+    // 0.34 of that, the crown's baseline sits nameH * 0.18 below the row top
+    // and its height is capped at 0.9 of that offset — so the marker lives
+    // between y 10.9 and y 19.2. The band stops at 19: one pixel lower and it
+    // catches the top of the NAME glyphs, which differ per seat ("Player1"
+    // against "Player2") and would make the row-pinned assertion below fail
+    // for a reason that has nothing to do with the crown. Caught exactly that
+    // way while writing this.
+    const cwCrown = () => {
+      const pts = [];
+      for (let px = 55; px <= 115; px += 3) {
+        for (let py = 11; py <= 19; py += 1) {
+          const q = panelField(boardPlace, px, py);
+          pts.push(arrPx(q.x, q.y));
+        }
+      }
+      return pts.join("|");
+    };
+    enc.E.seats[0].score = 0;
+    enc.E.seats[1].score = 0;
+    t.render();
+    const cwCrownNone = cwCrown();
+    enc.E.seats[0].score = 50;
+    enc.E.seats[1].score = 10;
+    t.render();
+    const cwLead0 = [cwRow(0), cwRow(1)];
+    const cwCrown0 = cwCrown();
+    enc.E.seats[0].score = 10;
+    enc.E.seats[1].score = 50; // the lead FLIPS — seat 1 sorts to the top row
+    t.render();
+    const cwLead1 = [cwRow(0), cwRow(1)];
+    const cwCrown1 = cwCrown();
+    ok("the crowned row is inked whoever leads, and stays bare while nobody does",
+      cwCrown0 !== cwCrownNone && cwCrown1 !== cwCrownNone && cwCrown0 === cwCrown1,
+      JSON.stringify({ inkedForSeat0: cwCrown0 !== cwCrownNone,
+                       inkedForSeat1: cwCrown1 !== cwCrownNone,
+                       crownIsRowPinned: cwCrown0 === cwCrown1 }));
+    // both name bands repaint, because the comparator moved a different seat
+    // into each row. They do NOT simply swap: the local seat's row is drawn
+    // bright and the other dim, so the same name renders in a different
+    // colour depending on which row it lands in — asserting a swap here would
+    // be asserting something false.
+    ok("a staged score flip carries the LEADER into the crowned row — the comparator decides who wears it",
+      cwLead0[0] !== cwLead1[0] && cwLead0[1] !== cwLead1[1],
+      JSON.stringify({ row0Moved: cwLead0[0] !== cwLead1[0],
+                       row1Moved: cwLead0[1] !== cwLead1[1] }));
+    // the localSeat highlight: with both seats on the SAME score the rows
+    // differ only by their name colour, so a granted seat 1 must repaint.
+    // Driven through the real Net accessor the HUD reads, never a poke.
+    enc.E.seats[0].score = 50;
+    enc.E.seats[1].score = 50;
+    t.render();
+    const cwLocal0 = [cwRow(0), cwRow(1)];
+    const netWas = window.Net;
+    window.Net = { active: () => true, seat: () => 1 };
+    const cwGranted = t.localSeat();
+    t.render();
+    const cwLocal1 = [cwRow(0), cwRow(1)];
+    window.Net = netWas;
+    t.render();
+    const cwRestored = [cwRow(0), cwRow(1)];
+    ok("the bright name follows the GRANTED seat, not seat 0 — and returns when the grant goes",
+      cwGranted === 1 && (cwLocal0[0] !== cwLocal1[0] || cwLocal0[1] !== cwLocal1[1]) &&
+      cwRestored[0] === cwLocal0[0] && cwRestored[1] === cwLocal0[1],
+      JSON.stringify({ granted: cwGranted,
+                       row0: cwLocal0[0] !== cwLocal1[0], row1: cwLocal0[1] !== cwLocal1[1],
+                       restored: cwRestored[0] === cwLocal0[0] && cwRestored[1] === cwLocal0[1] }));
+    t.setPlayerCount(cwSeatsWas);
+    enc.restart();
+    enc.E.hull = 99;
+    enc.advance(130);
+    t.render();
+  }
+  // paused, the panel refuses the pointer: the page IS paused here, so the
+  // refusals below are the genuine article, not a staged flag
   enc.addXp(10); // fund a buy no paused input may make
   const pausedCard = enc.shopLayout().cards[0];
   const pcx = pausedCard.x + pausedCard.w / 2;
   const pcy = pausedCard.y + pausedCard.h / 2;
-  const hoverRefused = enc.shopHover(pcx, pcy); // both report NOT CONSUMED, which is
-  const clickRefused = enc.shopClick(pcx, pcy); // what hands the click to the menu
-  document.dispatchEvent(new KeyboardEvent("keydown", { code: "Enter" }));
-  document.dispatchEvent(new KeyboardEvent("keydown", { code: "Digit1" }));
+  const hoverRefused = enc.shopHover(pcx, pcy);
+  const clickRefused = enc.shopClick(pcx, pcy);
   s = enc.state();
-  ok("a paused shop refuses the pointer and the retired keys — state holds",
-    enc.shopOpen() === false && hoverRefused === false && clickRefused === false &&
-    t.G.running === false && s.state === "shop" && s.wave === 1 && s.xp === 10 &&
-    s.owned[0] === 0 && s.shopHover === -1,
-    "open=" + enc.shopOpen() + " hover=" + hoverRefused + " click=" + clickRefused +
-    " state=" + s.state + " wave=" + s.wave + " xp=" + s.xp);
-  enc.continueFromShop();
-  liveRender();
-  ok("the shop overlay paints real ink", stripLive !== shopStrip());
-  // H3, both ends — a hand resting on the ring across a shop visit must not
-  // leave the ship lurching on continue. openShop() clears the keys already
-  // held, and game.js's own keydown refuses new ones while the sim is frozen.
+  ok("a paused panel refuses hover and click — nothing buys, nothing lights",
+    hoverRefused === false && clickRefused === false && t.G.running === false &&
+    s.xp === 10 && s.owned[0] === 0 && s.shopHover === -1,
+    "hover=" + hoverRefused + " click=" + clickRefused + " xp=" + s.xp);
+  // The panel's TYPE. game.js hands the draw ONE number — the fit's CSS px
+  // per logical panel unit — and the whole of it is spent inside
+  // shopTextPlan(), so that is the thing to pin. The ink legs above cannot
+  // reach it: the suite's own 780x493 viewport fits at ratio 0.3549, which
+  // lands the row name at 7.01 CSS px, under the 9 px PROSE CUT — so this
+  // viewport paints neither the row name nor the detail band, and a font that
+  // shrank to 5 CSS px on a laptop would sail through every pixel probe in
+  // this section. The floors (11/11/11/9 CSS px), the design sizes (11/8/9/8)
+  // and the 9 px cut are spelled out here on purpose: they are the contract,
+  // not a copy of it, and a change to any of them should have to come through
+  // these legs.
+  const layT = enc.shopLayout();
+  const padT = layT.cards[0].x;      // the panel's own gutter, the same both sides
+  const innerT = layT.w - 2 * padT;  // the header row's box, and the detail band's
+  const cardWT = layT.cards[0].w;
+  const cardHT = layT.cards[0].h;
+  const EMWT = 0.65;                 // the conservative monospace advance, in em
+  const ICONMAXT = 76;               // SHOPUI.icon — the drawn ceiling
+  const ICONMINT = 24;               // ...and the floor that keeps it from vanishing
+  const INKASCT = 0.75, INKDESCT = 0.25; // the ink a line owns above and below
+                                     // its baseline, in em — the same contract
+                                     // the draw derives its baselines from
+  const EPST = 1e-9;                 // these are float budgets: 154 lands as
+                                     // 153.99999999999997, so every cap leg
+                                     // carries a tolerance instead of trusting
+                                     // the rounding to fall the right way
+  const NAMEMINT = 9;                // the PROSE CUT, in CSS px — the size below
+                                     // which a row name would be noise and the
+                                     // panel keeps only picture and price
+  const runW = (px, chars) => px * EMWT * chars; // what a string that long runs to
+  const bandT = (p) =>               // what the card owes its text: the price
+    (p.prose ? p.namePx : 0) + p.pricePx + 5 + 4; // line, the pips, air — and the
+                                     // NAME line, reserved exactly when painted
+  // The fit ratios below were MEASURED on the real page (headless Chrome,
+  // panelPlace's k / dpr at the named window size) — not guessed from the
+  // panel height, which is why the first cut of this leg went stale the
+  // moment shopLayout().h moved from 1040 to 982. Re-measure them if the
+  // panel's logical height, its gutter share or the 8 px margin ever change:
+  // deleting the detail band took the height from 982 to 928.74 and moved
+  // both HEIGHT-bound fits below (1366x768 from 0.7658, 1366x640 from 0.6354).
+  // The width-bound ones — this suite's own, the user's, and 2560x1400@2 —
+  // did not move at all, which is why the panel is no roomier at the window
+  // this ticket was filed from.
+  const R1366 = 0.8097; // 1366x768 — the window this item was filed against
+  const R640 = 0.6719;  // 1366x640 — the shortest fit the ticket covers
+  const R4K = 1.2709;   // 2560x1400@2 — the fit that never needed a floor at all
+  const RSUITE = 0.3549; // 780x493 — THIS suite's own viewport, and wordless
+  const RUSER = 0.4822; // 1306x1030 at dpr 1.25 — the window the PROSE CUT was
+                        // written from. ox lands at 97.98 CSS px, which is under
+                        // the old PANEL_COMPACT of 110, so this window used to
+                        // draw a panel of icons and prices with no words on it
+                        // at all ("I can only read the XP"). It is over the new
+                        // cut's equivalent 93.49, so it draws them now.
+  const xpWasT = enc.E.xp;
+  enc.E.xp = 999; // the header's width cap counts the LIVE wallet, so pin one
+  const planLow = enc.shopTextPlan(R1366);
+  ok("the floor holds at the 1366x768 fit — every tier clears its CSS px",
+    planLow.namePx * R1366 >= 10.9 && planLow.pricePx * R1366 >= 10.9 &&
+    planLow.headerPx * R1366 >= 10.9 && planLow.walletPx * R1366 >= 10.9 &&
+    planLow.detailPx * R1366 >= 8.9,
+    JSON.stringify({ name: planLow.namePx * R1366, price: planLow.pricePx * R1366,
+      header: planLow.headerPx * R1366, wallet: planLow.walletPx * R1366,
+      detail: planLow.detailPx * R1366 }));
+  const planHigh = enc.shopTextPlan(R4K);
+  ok("the floor only ever GROWS type — a roomy fit keeps the design sizes",
+    planHigh.headerPx >= 11 && planHigh.namePx >= 8 &&
+    planHigh.pricePx >= 9 && planHigh.detailPx >= 8,
+    JSON.stringify(planHigh));
+  // the caps: a floor may never push a string out of the box that holds it.
+  // The character counts come off the LIVE catalog and the live wallet, the
+  // same reads shopTextPlan makes, so a longer row name tightens both sides.
+  const nameCharsT = enc.shopInfo().reduce((a, r) => Math.max(a, r.name.length), 0);
+  const priceCharsT = enc.shopInfo().reduce((a, r) => Math.max(a, String(r.cost).length + 3), 5);
+  const planTiny = enc.shopTextPlan(0.35); // punishing — near the suite's own fit
+  ok("the caps hold at a punishing fit — no tier's longest live string leaves its box",
+    runW(planTiny.namePx, nameCharsT) <= cardWT + EPST &&
+    runW(planTiny.pricePx, priceCharsT) <= cardWT + EPST &&
+    planTiny.detailCols >= 1,
+    JSON.stringify({ name: runW(planTiny.namePx, nameCharsT),
+      price: runW(planTiny.pricePx, priceCharsT), cardW: cardWT, inner: innerT }));
+  // WHERE THE FLOOR STOPS BEING A FLOOR, pinned so the degradation stays
+  // deliberate. The name's box is one 154 px card and its longest live string
+  // is 12 characters, so the name can never exceed 154 / (0.65 * 12) = 19.74
+  // logical px — which only reaches 11 CSS px at a ratio of 0.557. Below that
+  // the width cap wins and the name shrinks along it. That is the honest
+  // trade (you cannot have both an 11 CSS px floor and a twelve-character
+  // name inside a 154 px card at every size), and it is still far better than
+  // what preceded it: at the suite's own 0.3549 fit the name lands at 7.0 CSS
+  // px where the old fixed 8 px drew 2.84. The degradation does not run away
+  // either — the PROSE CUT below stops it at 9 CSS px, so the name is drawn
+  // between 9 and 11 CSS px or not at all, and 7.0 is a size no player is
+  // shown, only a size the plan computes on its way to saying "no".
+  const nameCapT = cardWT / (EMWT * nameCharsT);
+  ok("the name holds 11 CSS px down to the ratio its own width cap takes over",
+    Math.abs(nameCapT - 19.7436) < 1e-3 &&
+    enc.shopTextPlan(0.558).namePx * 0.558 >= 10.9 &&
+    Math.abs(enc.shopTextPlan(0.4).namePx - nameCapT) < EPST &&
+    enc.shopTextPlan(RSUITE).namePx * RSUITE > 8 * RSUITE,
+    JSON.stringify({ cap: nameCapT, at0558: enc.shopTextPlan(0.558).namePx * 0.558,
+      at0400: enc.shopTextPlan(0.4).namePx * 0.4,
+      atSuite: enc.shopTextPlan(RSUITE).namePx * RSUITE }));
+  // the header row holds TWO strings, sized independently: "SHOP" is four
+  // characters and holds the floor whatever the wallet does (sizing them
+  // together made the header shrink as XP was banked — this ticket's own
+  // failure mode on the panel's most-read number), and the wallet takes the
+  // floor too unless the width left beside "SHOP" is genuinely too small.
+  // Sweep one digit to seven across four fits: SHOP never moves with the
+  // wallet, and the two never collide. (Below a ratio of ~0.19 "SHOP" alone
+  // fills the 154 px row and its own width cap takes over; nothing that
+  // narrow is a window this panel is drawn into.)
+  let shopHeld = true, headFit = true, headWorst = "";
+  for (const r of [0.2, RSUITE, R640, R1366]) {
+    let prev = null;
+    for (let d = 1; d <= 7; d++) {
+      enc.E.xp = Number("1".repeat(d));
+      const p = enc.shopTextPlan(r);
+      if (prev !== null && Math.abs(p.headerPx - prev) > EPST) shopHeld = false;
+      prev = p.headerPx;
+      if (r >= 0.2 && p.headerPx * r < 10.9 - EPST) shopHeld = false;
+      const w = runW(p.headerPx, 4) + runW(p.walletPx, 3 + d);
+      if (w > innerT + EPST) { headFit = false; headWorst = "r=" + r + " d=" + d + " w=" + w; }
+    }
+  }
+  enc.E.xp = 999;
+  ok("SHOP holds its floor whatever the wallet does, and the pair never overlaps",
+    shopHeld && headFit, headWorst || "held=" + shopHeld + " fit=" + headFit);
+  // the header's BASELINE is derived from the size that will sit on it, not
+  // from the literal 22 — headerH is 26 logical px and a floor-grown header
+  // outgrows it. At the design size nothing moves; past it the ink slides up
+  // rather than hanging descenders into card 0.
+  let headInk = true, headWorstY = "";
+  for (const r of [0.2, RSUITE, 0.4, 0.5, R640, R1366, 1, R4K, 2]) {
+    const p = enc.shopTextPlan(r);
+    const tall = Math.max(p.headerPx, p.walletPx);
+    const b = p.headerBase;
+    const bad = [];
+    // the baseline NEVER crosses into card 0 — for a row of caps and digits
+    // the baseline is the ink's bottom edge, so this holds at any size
+    if (b > layT.cards[0].y + EPST) bad.push("baseline past card 0");
+    // ...and while the size still fits the 26 px band, the full ink box does
+    // too: the descent clears card 0 and the ascent stays on the panel
+    if (tall <= layT.cards[0].y + EPST) {
+      if (b + INKDESCT * tall > layT.cards[0].y + EPST) bad.push("descent past card 0");
+      if (b - INKASCT * tall < -EPST) bad.push("ascent off the panel");
+    }
+    if (bad.length) { headInk = false; headWorstY = "r=" + r + " base=" + b + " tall=" + tall + " " + bad.join(","); }
+  }
+  ok("the header baseline follows the planned size and keeps its ink off card 0",
+    headInk && Math.abs(enc.shopTextPlan(R4K).headerBase - layT.headerY) < EPST,
+    headWorstY || "designBase=" + enc.shopTextPlan(R4K).headerBase +
+      " literal=" + layT.headerY);
+  // the icon is what the type LEAVES. The formula is pinned exactly, not
+  // bounded: max(24, min(76, cardH - band - 3)). Bounding it was vacuous —
+  // `icon >= 24` is a tautology on a Math.max, and `band + icon + 3 <= cardH`
+  // is an identity except where a clamp binds.
+  const ratiosT = [0.2, 0.25, RSUITE, RUSER, 0.5, R640, R1366, 1, R4K, 2];
+  let iconExact = true, iconMid = 0, iconClamped = 0, iconWorst = "";
+  for (const r of ratiosT) {
+    const p = enc.shopTextPlan(r);
+    const free = cardHT - bandT(p) - 3;
+    const want = Math.max(ICONMINT, Math.min(ICONMAXT, free));
+    if (Math.abs(p.icon - want) > EPST) {
+      iconExact = false;
+      iconWorst = "r=" + r + " icon=" + p.icon + " want=" + want;
+    }
+    if (Math.abs(p.icon - free) < EPST) { // the middle branch: the card closes EXACTLY
+      iconMid++;
+      if (Math.abs(bandT(p) + p.icon + 3 - cardHT) > EPST) iconExact = false;
+    } else iconClamped++;
+  }
+  // NEITHER CLAMP BINDS at any fit the live catalog can produce, and saying so
+  // is the point of the count. The band is widest just above the prose cut,
+  // where the name and the price are both pinned at their shared 154 / (0.65 *
+  // 12) = 19.74 width cap: 48.49 of band leaves the icon 52.51. It is
+  // narrowest at a roomy fit, where the design sizes give 8 + 9 + 9 = 26 of
+  // band and leave the icon 75. So the whole live range is 52.51..75, with
+  // 28.51 px of daylight over the 24 floor and 1 px under the 76 ceiling. The
+  // ceiling used to be reached — by a COMPACT card at a roomy ratio, a
+  // combination this function could still be asked for when compact was an
+  // argument. It is not one any more: the wordless card and the roomy fit are
+  // now the same question, and they cannot both be true. The clamps stay as
+  // guards for a catalog rewrite (see the floor leg below).
+  ok("the icon is exactly what the card has left, at every fit",
+    iconExact && iconMid === ratiosT.length && iconClamped === 0,
+    iconWorst || JSON.stringify({ exact: iconExact, middleBranch: iconMid,
+      clamped: iconClamped, of: ratiosT.length }));
+  // The 24 px FLOOR is unreachable with the live catalog, and the margin is
+  // worth stating rather than asserting blind. The band tops out at
+  // namePx + pricePx + 9; both tiers cap at 154 / (0.65 * 12) = 19.74 (the
+  // twelve-character "RAPID LOADER" in a 154 px card), so the widest band is
+  // 48.49 and the icon bottoms out at 52.51 — 28.51 px clear of the floor.
+  // The floor binds only if the catalog's longest name drops to SIX
+  // characters: the caps rise to 154 / (0.65 * 6) = 39.49 each, the band to
+  // 87.97, and the card would overflow by 10.97 px with the icon pinned at
+  // 24. Eleven-character names still clear it (band 52.08, icon 48.92). So
+  // the floor is the guard for a catalog rewrite, not dead code, and this leg
+  // records how much room there is before it starts to matter.
+  let iconMinSeen = Infinity;
+  for (const r of ratiosT) iconMinSeen = Math.min(iconMinSeen, enc.shopTextPlan(r).icon);
+  ok("the icon never comes within 20 px of its floor at any fit the catalog allows",
+    iconMinSeen >= ICONMINT + 20, "min=" + iconMinSeen + " floor=" + ICONMINT);
+  // ---- THE PROSE CUT ------------------------------------------------------
+  // The panel decides for itself whether to paint words, and it decides from
+  // the words: prose = namePx * ratio >= 9 CSS px. It used to decide from
+  // game.js's `compact` — ox/dpr < PANEL_COMPACT, a hand-picked 110 — and
+  // that threshold was chosen when the panel had no legibility floor and a
+  // squeezed name really did render at 5 px. It outlived its reason: a real
+  // 1306x1030 window at dpr 1.25 lands ox at 97.98 CSS px, took the compact
+  // cut, and showed a column of icons and prices with no words on it at all,
+  // while its names would have rendered at 9.52 px. This block is the whole
+  // rule, from four directions: where it flips, that it flips ONCE, that the
+  // user's window is on the drawing side of it, and that this suite's own
+  // viewport is not.
+  //
+  // WHERE IT FLIPS, derived rather than declared. While the width cap binds,
+  // namePx is 154 / (0.65 * 12) = 19.7436 whatever the ratio, so the product
+  // crosses 9 at ratio 9 / 19.7436 = 0.45584 — which through panelPlace's
+  // width term (ox/dpr = ratio * 170 + 16) is a gutter of 93.49 CSS px. That
+  // number is the derived equivalent of the 110 the shop no longer reads.
+  const PMARGINT = 8;  // game.js's PANEL_MARGIN, in CSS px — the air panelPlace
+                       // holds out of the bar on EACH side. Wherever the fit's
+                       // width term binds (every gutter narrow enough for this
+                       // cut to matter), ox/dpr = ratio * panelW + 2 * that. It
+                       // is 8 like SHOPUI.pad above and has nothing to do with
+                       // it: one is air outside the panel, one inside.
+  const gutterOfT = (r) => r * layT.w + 2 * PMARGINT;
+  const RFLIP = NAMEMINT / nameCapT;
+  ok("the cut flips exactly where the name crosses 9 CSS px, and nowhere else",
+    Math.abs(RFLIP - 0.4558442) < 1e-6 &&
+    Math.abs(gutterOfT(RFLIP) - 93.4935) < 1e-3 && // the equivalent gutter
+    enc.shopTextPlan(RFLIP * (1 - 1e-9)).prose === false &&
+    enc.shopTextPlan(RFLIP * (1 + 1e-9)).prose === true,
+    JSON.stringify({ flipRatio: RFLIP, equivalentGutterCss: gutterOfT(RFLIP),
+      just_under: enc.shopTextPlan(RFLIP * (1 - 1e-9)).prose,
+      just_over: enc.shopTextPlan(RFLIP * (1 + 1e-9)).prose }));
+  // ...swept, so "no gap and no overlap" is a measurement and not a claim. The
+  // sweep steps an INTEGER counter — `r += 0.001` accumulates and would drift
+  // straight past the boundary this leg exists to find (the band legs below
+  // learned that the hard way at r = 0.57).
+  let cutAgrees = true, flips = 0, cutWorst = "", prevProse = null;
+  for (let i = 100; i <= 2000; i++) {
+    const r = i / 1000;
+    const p = enc.shopTextPlan(r);
+    if (p.prose !== (r >= RFLIP)) {
+      cutAgrees = false;
+      cutWorst = "r=" + r.toFixed(3) + " prose=" + p.prose + " name=" + (p.namePx * r);
+    }
+    if (prevProse !== null && p.prose !== prevProse) flips++;
+    prevProse = p.prose;
+  }
+  ok("swept from 0.100 to 2.000 the cut is false below the flip and true at or above it",
+    cutAgrees && flips === 1,
+    cutWorst || "flips=" + flips + " at r=" + RFLIP.toFixed(6));
+  // the window this rule was written from: 1306x1030 at dpr 1.25, measured on
+  // the real page (ox 122.47 device = 97.98 CSS, k/dpr = 0.4822). It was under
+  // PANEL_COMPACT's 110 and drew nothing readable but the wallet.
+  const planUser = enc.shopTextPlan(RUSER);
+  ok("the user's 1306x1030 dpr-1.25 window draws its row names, over 9 CSS px",
+    planUser.prose === true && planUser.namePx * RUSER >= NAMEMINT &&
+    gutterOfT(RUSER) < 110, // ...and it is still COMPACT by the old rule
+    JSON.stringify({ prose: planUser.prose, nameCss: planUser.namePx * RUSER,
+      iconCss: planUser.icon * RUSER, gutterCss: gutterOfT(RUSER) }));
+  // ...and this suite's own 780x493 viewport is on the other side of it, so
+  // every expectation the rest of this file already carries is untouched: the
+  // ink probes above render a panel with no row names and no detail band on
+  // it, exactly as they did when `compact` decided that.
+  const planSuite = enc.shopTextPlan(RSUITE);
+  ok("the suite's own 780x493 fit still paints no prose — nothing here moves",
+    planSuite.prose === false && planSuite.namePx * RSUITE < NAMEMINT,
+    JSON.stringify({ prose: planSuite.prose, nameCss: planSuite.namePx * RSUITE }));
+  // A WORDLESS card spends the name's row on its icon, and a lettered one does
+  // not — one flag drives the reservation and the paint, so they cannot
+  // disagree. (Reserving the row unconditionally cost the wordless card 43% of
+  // its icon — 41.26 logical against 72.26 — for a line it never drew, and
+  // 780x493 is the viewport EVERY suite renders, so no pixel leg could see
+  // it.) Swept on the same integer counter, both branches asserted exactly.
+  let reclaim = true, reclaimWorst = "", sawWordless = 0, sawLettered = 0;
+  for (let i = 100; i <= 2000; i++) {
+    const r = i / 1000;
+    const p = enc.shopTextPlan(r);
+    const clamp = (v) => Math.max(ICONMINT, Math.min(ICONMAXT, v));
+    const withName = clamp(cardHT - 3 - (p.namePx + p.pricePx + 5 + 4));
+    const noName = clamp(cardHT - 3 - (p.pricePx + 5 + 4));
+    if (p.prose) sawLettered++; else sawWordless++;
+    if (Math.abs(p.icon - (p.prose ? withName : noName)) > EPST) {
+      reclaim = false;
+      reclaimWorst = "r=" + r.toFixed(3) + " prose=" + p.prose + " icon=" + p.icon +
+        " withName=" + withName + " noName=" + noName;
+    }
+    // and the reclaim is REAL, not a rounding artefact: dropping the name is
+    // always strictly more icon than keeping it
+    if (!(noName > withName + EPST)) {
+      reclaim = false;
+      reclaimWorst = "r=" + r.toFixed(3) + " reclaim is not strict: " + withName + " -> " + noName;
+    }
+  }
+  ok("the icon reclaims the name's row exactly when the name is not painted",
+    reclaim && sawWordless > 0 && sawLettered > 0,
+    reclaimWorst || "wordless=" + sawWordless + " lettered=" + sawLettered);
+  // the price never reads larger than the name it prices, beyond the single
+  // design px the roomy card has always had (9 against 8)
+  let priceOk = true;
+  for (const r of ratiosT) {
+    const p = enc.shopTextPlan(r);
+    if (p.pricePx > Math.max(p.namePx, 9) + EPST) priceOk = false;
+  }
+  ok("the price never outgrows the name — the card's hierarchy cannot invert",
+    priceOk, JSON.stringify(ratiosT.map((r) => {
+      const p = enc.shopTextPlan(r);
+      return [+p.namePx.toFixed(2), +p.pricePx.toFixed(2)];
+    })));
+  // ---- the wrap, on the surface that still uses it ------------------------
+  // The gutter's detail band is gone and the wrap went with the prose it
+  // served: it now measures the FIELD panel's ~49 columns instead of the
+  // rail's 12. Both legs count against a live budget rather than a literal,
+  // and the budgets swept below deliberately run far narrower than anything
+  // the field produces, because the wrap is the one piece shared by both
+  // surfaces and a change to it must not be judged only where it is roomy.
+  const longDesc = enc.shopInfo().find((r) => r.name === "OVERLOAD").desc; // the widest
+  const proseT = enc.shopInfo().map((r) => r.desc).concat([
+    "ship down — browse only", "fully upgraded", "not needed right now",
+    "need 128 more XP", "click to buy"]);
+  let wrapClean = true, wrapWorst = "", wrapMulti = 0;
+  for (let cols = 6; cols <= 60; cols++) { // an INTEGER counter, never an accumulated float
+    for (const line of proseT) {
+      const ls = enc.shopWrap(line, cols);
+      if (ls.join(" ") !== line.split(" ").filter(Boolean).join(" ")) {
+        wrapClean = false; wrapWorst = "cols=" + cols + " lost words: " + JSON.stringify(ls);
+      }
+      if (ls.length > 1) wrapMulti++;
+      for (const ln of ls) {
+        if (ln.length > cols && ln.indexOf(" ") >= 0) {
+          wrapClean = false; wrapWorst = "cols=" + cols + " overlong line: " + JSON.stringify(ln);
+        }
+      }
+    }
+  }
+  ok("the wrap keeps every word, breaks only on spaces and never runs past its budget",
+    wrapClean && wrapMulti > 0, wrapWorst || "multi-line cases=" + wrapMulti);
+  ok("the longest desc really does need the wrap at the rail's old measure",
+    enc.shopWrap(longDesc, 12).length === 4 &&
+    enc.shopWrap(longDesc, 49).length === 1,
+    "at12=" + JSON.stringify(enc.shopWrap(longDesc, 12)) +
+    " at49=" + JSON.stringify(enc.shopWrap(longDesc, 49)));
+
+  // ---- the FIELD hover panel ----------------------------------------------
+  // Where the prose went. The rail is 170 logical px and its band gave the
+  // hovered row 12 characters and 3 lines at the user's own window, which
+  // painted "comet bites / need 7 more / XP" — a truncated fragment with a
+  // widowed unit under it, reading as one broken sentence. The field is
+  // 512 x 342 LOGICAL px and is drawn at the field's own scale (2.17 CSS px
+  // per logical unit at that window against the panel's 0.48), so the panel
+  // below sets ordinary 9 and 10 px HUD type and gets ~49 columns.
+  //
+  // Everything the deleted band pinned is pinned here instead: the reason line
+  // is present whenever there is one, it takes the LAST lines and the desc
+  // gives up whole ones, no line runs past its budget, and the box never
+  // leaves the space it was given. The band's `room` arithmetic moved with
+  // them — see the squeeze below.
+  const overT = enc.shopInfo().findIndex((r) => r.name === "OVERLOAD");
+  const patchT = enc.shopInfo().findIndex((r) => r.name === "HULL PATCH");
+  const hovWasT = enc.E.shopHover;
+  const hullWasT = enc.E.seats[0].hull;
+  const ownedWasT = enc.state().owned;
+  const HPADT = 6, HHEADT = 10, HBODYT = 9; // HOVERUI's pad and its two type
+                                            // sizes — the contract, spelled out
+                                            // here rather than read back, so a
+                                            // change to any of them has to come
+                                            // through these legs
+  const liveBandT = liveVal(() => enc.shopHoverBand());
+  // the five states a row can be in, and the sentence each one owes the player
+  const statesT = [
+    // one hull point of damage, so HULL PATCH is genuinely offered too: at a
+    // full hull that row's own can() is false and it owes the player a reason
+    { why: null, stage: () => { enc.E.seats[0].hull = enc.E.seats[0].hullMax - 1; enc.E.xp = 9999; } },
+    { why: "need 7 more XP", row: overT,
+      stage: () => { enc.E.seats[0].hull = enc.E.seats[0].hullMax; enc.E.xp = 1; } },
+    { why: "fully upgraded", row: overT,
+      stage: () => { enc.E.seats[0].hull = enc.E.seats[0].hullMax; enc.E.xp = 9999;
+        enc.E.owned[overT] = 3; } },
+    { why: "not needed right now", row: patchT,
+      stage: () => { enc.E.seats[0].hull = enc.E.seats[0].hullMax; enc.E.xp = 9999; } },
+    { why: "ship down — browse only",
+      stage: () => { enc.E.seats[0].hull = 0; enc.E.xp = 9999; } },
+  ];
+  const resetStateT = () => {
+    enc.E.owned = ownedWasT.slice();
+    enc.E.seats[0].hull = enc.E.seats[0].hullMax;
+    enc.E.xp = 9999;
+  };
+  // The bands the plan is driven through. The live one is roomy — seven body
+  // lines against a catalog whose longest hover needs three — so the squeeze
+  // below hands in short and narrow channels on purpose: `room` is a GUARD,
+  // and a guard the live field never presses on is a guess until it is driven.
+  // The counter is an INTEGER; accumulating a float would skip the exact ties
+  // the line count turns on.
+  const bandsT = [liveBandT];
+  for (let i = 0; i <= 12; i++) {
+    bandsT.push({ x0: liveBandT.x0, x1: liveBandT.x0 + 160 + i * 11,
+      top: liveBandT.top, bottom: liveBandT.top + 30 + i * 7 });
+  }
+  let whyKept = true, whyWorst = "", tightOk = true, tightWorst = "";
+  let inBand = true, inBandWorst = "", sawRoomClamp = 0, sawFull = 0, maxLinesSeen = 0;
+  for (const st of statesT) {
+    for (let i = 0; i < 8; i++) {
+      if (st.row !== undefined && st.row !== i) continue;
+      resetStateT();
+      st.stage();
+      enc.E.shopHover = i;
+      for (const band of bandsT) {
+        const P = liveVal(() => enc.shopHoverPlan(band));
+        if (!P) { whyKept = false; whyWorst = "no plan at row " + i; continue; }
+        const desc = enc.shopWrap(enc.shopInfo()[i].desc, P.cols);
+        const why = P.why ? enc.shopWrap(P.why, P.cols) : [];
+        if ((st.why === null) !== (P.why === null) ||
+            (st.why !== null && P.why !== st.why)) {
+          whyKept = false; whyWorst = "row " + i + " why=" + P.why + " want=" + st.why;
+        }
+        // the REASON takes the last lines, and takes them FIRST: whatever the
+        // room, the tail of what is drawn is the head of the wrapped reason
+        const kept = Math.min(why.length, P.room);
+        if (P.whyLines !== kept) {
+          whyKept = false; whyWorst = "row " + i + " whyLines=" + P.whyLines + " want=" + kept;
+        }
+        if (P.lines.slice(P.lines.length - kept).join("|") !== why.slice(0, kept).join("|")) {
+          whyKept = false;
+          whyWorst = "row " + i + " tail=" + JSON.stringify(P.lines) + " why=" + JSON.stringify(why);
+        }
+        // ...and the desc gives up WHOLE lines, from the front, never half a line
+        const head = P.lines.slice(0, P.lines.length - kept);
+        if (head.join("|") !== desc.slice(0, head.length).join("|")) {
+          tightOk = false; tightWorst = "row " + i + " head=" + JSON.stringify(head);
+        }
+        if (P.lines.length > P.room) {
+          tightOk = false; tightWorst = "row " + i + " lines>" + P.room;
+        }
+        if (P.lines.some((ln) => ln.length > P.cols && ln.indexOf(" ") >= 0)) {
+          tightOk = false; tightWorst = "row " + i + " overlong: " + JSON.stringify(P.lines);
+        }
+        if (P.lines.length < desc.length + why.length) sawRoomClamp++; else sawFull++;
+        maxLinesSeen = Math.max(maxLinesSeen, P.lines.length);
+        // and the BOX stays inside the band it was given, and inside the field
+        const bot = P.y + P.h;
+        if (P.x < band.x0 - EPST || P.x + P.w > band.x1 + EPST ||
+            P.y < band.top - EPST || bot > band.bottom + EPST ||
+            P.x < 0 || P.y < 0 || P.x + P.w > t.FW || bot > t.FH) {
+          inBand = false;
+          inBandWorst = "row " + i + " box=" + JSON.stringify([P.x, P.y, P.w, P.h]) +
+            " band=" + JSON.stringify(band);
+        }
+        // ...and it is sized to the LINES, not to the room it was offered
+        const ink = P.lines.length
+          ? P.base0 + (P.lines.length - 1) * P.lh + 0.25 * HBODYT
+          : P.headBase + 0.25 * HHEADT;
+        if (Math.abs(P.h - (ink + HPADT - P.y)) > EPST) {
+          inBand = false;
+          inBandWorst = "row " + i + " h=" + P.h + " want=" + (ink + HPADT - P.y);
+        }
+      }
+    }
+  }
+  resetStateT();
+  ok("the panel names the reason a row will not sell, in every state that has one",
+    whyKept, whyWorst || "five states x eight rows x " + bandsT.length + " bands");
+  ok("the reason takes the last lines and the desc gives up whole ones",
+    tightOk && sawRoomClamp > 0 && sawFull > 0,
+    tightWorst || "clamped=" + sawRoomClamp + " full=" + sawFull);
+  ok("the box never leaves its band or the field, and is sized to its lines",
+    inBand, inBandWorst || "maxLines=" + maxLinesSeen);
+  // The live field NEVER presses on that clamp, and saying so is the point of
+  // this leg rather than letting the sweep above imply otherwise. The channel
+  // leaves seven body lines; the widest thing this catalog can say is the
+  // OVERLOAD desc plus a refusal, which is two. So the clamp is a guard for a
+  // longer blurb or a shorter field, exactly as the icon's 24 px floor above
+  // is a guard for a catalog rewrite — and the margin is five lines.
+  enc.E.xp = 1;
+  enc.E.shopHover = overT;
+  const liveP = liveVal(() => enc.shopHoverPlan());
+  ok("at the live band every row says everything it has, with five lines to spare",
+    liveP.room === 7 && liveP.lines.length === 2 && liveP.cols === 49 &&
+    liveP.lines[0] === longDesc && liveP.lines[1] === "need 7 more XP" &&
+    liveP.name === "OVERLOAD" && liveP.price === "8 XP",
+    JSON.stringify({ room: liveP.room, cols: liveP.cols, lines: liveP.lines,
+      name: liveP.name, price: liveP.price }));
+  // The panel's price must be the CARD's price, in every state the catalog can
+  // reach — a row reading MAXED on its card and "64 XP" on the panel naming
+  // that card is two prices for one thing. Both now call shopPriceLabel, so
+  // this pins the shared derivation against the three shapes it can return
+  // rather than against a copy of its expression.
+  // Comparing them on an ORDINARY row is worthless — an offered row reads
+  // "N XP" both ways, so a panel that always printed the cost would agree
+  // there and diverge only where it matters. The row must be HOVERED in each
+  // state that changes the string, and the panel asked while it is.
+  const ownedWasPT = enc.E.owned.slice();
+  const hullWasPT = enc.E.seats[0].hull;
+  const hoverPriceT = (i) => {
+    enc.E.shopHover = i;
+    const p = liveVal(() => enc.shopHoverPlan());
+    return { panel: p && p.price, card: enc.shopPriceLabel(i) };
+  };
+  const seenT = [];
+  for (let i = 0; i < enc.shopInfo().length; i++) {
+    enc.E.owned[i] = 0;
+    seenT.push(hoverPriceT(i));                    // offered: "N XP"
+    enc.E.owned[i] = 99;                           // driven past a cap: MAXED
+    if (enc.shopInfo()[i].maxed) seenT.push(hoverPriceT(i));
+    enc.E.owned[i] = ownedWasPT[i];
+  }
+  enc.E.seats[0].hull = enc.E.seats[0].hullMax;    // HULL PATCH stops being
+  seenT.push(hoverPriceT(2));                      // offered: the em dash
+  enc.E.seats[0].hull = hullWasPT;
+  enc.E.shopHover = overT;
+  const labelsT = seenT.map((r) => r.card);
+  ok("the panel's price is the card's price, in every state a row can be in",
+    seenT.every((r) => r.panel === r.card) &&
+    labelsT.some((s) => s === "MAXED") && labelsT.some((s) => s === "—") &&
+    labelsT.some((s) => /^\d+ XP$/.test(s)),
+    JSON.stringify({ disagreed: seenT.filter((r) => r.panel !== r.card),
+      shapes: [...new Set(labelsT)].slice(0, 4) }));
+  // the panel is a LIVE-PLAY layer: a paused page shows none, whatever the
+  // pointer was last resting on — which is also what hands the gutter's idle
+  // hint back on the pause screen
+  const pausedP = enc.shopHoverPlan();
+  enc.E.shopHover = -1;
+  const unhoveredP = liveVal(() => enc.shopHoverPlan());
+  enc.E.shopHover = overT;
+  ok("no hover and no live game each mean no panel",
+    pausedP === null && unhoveredP === null && liveP !== null,
+    "paused=" + pausedP + " unhovered=" + unhoveredP);
+  // ---- the channel it sits in ---------------------------------------------
+  // The panel clears the top-left status stack and game.js's corner map by
+  // PLACEMENT, which is what lets the whole HUD stay up while the player
+  // shops — the retired explainer art had to stand both of them down. The
+  // channel's left edge is derived from the same numbers encDrawHud sets the
+  // stack with, so it holds as the wave number, the hull row and the wallet
+  // all grow; its right edge is the map's own rect.
+  const mmT = t.minimapInfo();
+  let chanOk = true, chanWorst = "", chanNarrow = 0;
+  const waveWasT = enc.E.wave, hullMaxWasT = enc.E.seats[0].hullMax;
+  for (let hm = 3; hm <= 30; hm++) { // an INTEGER counter over the hull row's growth
+    enc.E.seats[0].hullMax = hm;
+    enc.E.seats[0].hull = hm;
+    enc.E.wave = hm * 3;             // ...and a wave number that grows digits with it
+    enc.E.state = hm % 2 ? "active" : "cleared"; // the CLEAR header is the longer string
+    enc.E.xp = Math.pow(10, hm % 7);
+    const b = liveVal(() => enc.shopHoverBand());
+    const sr = liveVal(() => enc.statusStackRight());
+    const wave = enc.E.state === "cleared" ? "WAVE " + enc.E.wave + " · CLEAR" : "WAVE " + enc.E.wave;
+    // the stack's own ink, counted the way encDrawHud lays it out
+    const stackInk = Math.max(8 + EMWT * 10 * wave.length, 8 + hm * 10 - 2,
+      8 + EMWT * 9 * ("XP " + enc.E.xp).length,
+      8 + EMWT * 9 * ("FOES " + (enc.state().enemies + enc.state().queued)).length);
+    if (sr + 1e-9 < stackInk) { chanOk = false; chanWorst = "hm=" + hm + " right=" + sr + " ink=" + stackInk; }
+    if (b.x0 < stackInk) { chanOk = false; chanWorst = "hm=" + hm + " x0=" + b.x0 + " ink=" + stackInk; }
+    if (b.x1 > t.FW - mmT.W - mmT.M) { chanOk = false; chanWorst = "hm=" + hm + " x1=" + b.x1; }
+    const P = liveVal(() => enc.shopHoverPlan());
+    if (P) {
+      if (P.x < b.x0 - EPST || P.x + P.w > b.x1 + EPST) {
+        chanOk = false; chanWorst = "hm=" + hm + " box escapes the channel";
+      }
+    } else chanNarrow++;
+  }
+  enc.E.seats[0].hullMax = hullMaxWasT;
+  enc.E.seats[0].hull = hullMaxWasT;
+  enc.E.wave = waveWasT;
+  enc.E.state = "active";
+  resetStateT();
+  ok("the channel clears the status stack's ink and the corner map at every hull row",
+    chanOk && chanNarrow > 0,
+    chanWorst || "closed at " + chanNarrow + " of 28 hull counts");
+  // ...and the closure is a stand-down, not an overflow: past a hull row that
+  // wide the panel refuses rather than painting a name over its own price
+  enc.E.seats[0].hullMax = 40;
+  enc.E.seats[0].hull = 40;
+  enc.E.shopHover = overT;
+  const crushed = liveVal(() => enc.shopHoverPlan());
+  enc.E.seats[0].hullMax = hullMaxWasT;
+  enc.E.seats[0].hull = hullMaxWasT;
+  ok("a channel too narrow to hold the header stands the panel down",
+    crushed === null, "plan=" + JSON.stringify(crushed));
+  // the header itself fits at the NARROWEST channel the panel will accept —
+  // the longest row name and the longest price a run can reach, a space apart
+  const longestNameT = enc.shopInfo().reduce((a, r) => Math.max(a, r.name.length), 0);
+  const longestPriceT = enc.shopInfo().reduce((a, r) =>
+    Math.max(a, String(r.cost * 64).length + 3), 5); // six more ranks of doubling
+  ok("the narrowest channel the panel accepts still holds its header line",
+    (longestNameT + longestPriceT + 2) * EMWT * HHEADT + 2 * HPADT <= 160,
+    "need=" + ((longestNameT + longestPriceT + 2) * EMWT * HHEADT + 2 * HPADT) + " minW=160");
+
+  // ---- the gutter's one remaining line: the idle hint ---------------------
+  // The band under the column is one line now, and shopLayout derives its
+  // height rather than declaring it: HINTPX + HINTAIR, where HINTPX is the
+  // WIDEST the hint's type can ever be set. That is not a picked number. The
+  // detail tier grows as the fit shrinks (9 CSS px / ratio), and the fit stops
+  // shrinking at the prose cut, so the largest live detail size is exactly the
+  // name's own width cap: 154 / (0.65 * 12) = 19.7436 logical px. The band is
+  // that plus 3 — a border and two px of air — and the panel's whole height
+  // fell from 982 to 928.74 with it.
+  const HINTPXT = nameCapT;         // ...the very cap the prose cut turns on
+  const HINTAIRT = 3;
+  ok("the hint band is one line of the widest hint, plus its air",
+    Math.abs(layT.detailH - (HINTPXT + HINTAIRT)) < EPST &&
+    Math.abs(layT.h - (layT.detailTop + HINTPXT + HINTAIRT)) < EPST &&
+    Math.abs(layT.h - 928.7436) < 1e-3,
+    JSON.stringify({ detailH: layT.detailH, h: layT.h, hintPx: HINTPXT }));
+  // the hint's TEXT fits its budget at every fit that draws it, and its ink
+  // clears the last card above and the border below — both swept on an INTEGER
+  // counter, because the tie at the prose cut is exactly where the budget is
+  // tightest (12 columns for a 12-character hint, on the nose)
+  const colBottomT = layT.cards[layT.cards.length - 1].y + layT.cards[layT.cards.length - 1].h;
+  let hintFits = true, hintWorst = "", hintInk = true, hintInkWorst = "", hintMinCols = 99;
+  for (let i = 100; i <= 2000; i++) {
+    const r = i / 1000;
+    const p = enc.shopTextPlan(r);
+    if (!p.prose) continue; // a rail too narrow for a name draws no hint at all
+    const B = enc.shopHintLine(p, layT);
+    hintMinCols = Math.min(hintMinCols, B.cols);
+    if (B.text.length > B.cols) {
+      hintFits = false;
+      hintWorst = "r=" + r.toFixed(3) + " text=" + B.text.length + " cols=" + B.cols;
+    }
+    const top = B.base - INKASCT * p.detailPx;
+    const bot = B.base + INKDESCT * p.detailPx;
+    if (top < colBottomT - EPST || bot > layT.h - 1 + EPST) {
+      hintInk = false;
+      hintInkWorst = "r=" + r.toFixed(3) + " top=" + top + " bot=" + bot;
+    }
+  }
+  ok("the hint fits its character budget at every fit that draws it",
+    hintFits && hintMinCols === 12, hintWorst || "narrowest budget=" + hintMinCols +
+    " text=" + enc.shopHintLine(enc.shopTextPlan(RUSER), layT).text.length);
+  ok("the hint's ink clears the last card above it and the border below it",
+    hintInk, hintInkWorst || "colBottom=" + colBottomT + " h=" + layT.h);
+
+  // ---- the DRAW obeys the plan, on both surfaces --------------------------
+  // Everything above pins the PLANS. A plan is not a picture: drawShopPanel
+  // has an `if (P.prose)` branch and a second condition inside it, and nothing
+  // so far would notice if either were inverted, or if the hint quietly grew a
+  // stricter cut of its own. The last round of this work learned that the hard
+  // way — two central behaviours passed 310 legs until pixel probes were added.
+  //
+  // The suite cannot reach the gutter's prose through render(): its own
+  // 780x493 fit is 0.3549, under the cut, so a rendered frame paints no name
+  // and no hint. So these legs do what game.js does — set the panel transform
+  // and call the published draw — but hand it a ratio of their own. That is a
+  // deliberately SYNTHETIC pairing: the type is planned for 0.46 and rasterised
+  // at the suite's 0.3549, so the panel painted is not one any window produces.
+  // The legs are about CONTROL FLOW — did the branch run — and for that the
+  // pairing is exactly right, because it is the only way to run the prose
+  // branches at all in a 780x493 window.
+  //
+  // 0.46 is chosen twice over: it clears the cut (the name plans at 9.08 CSS
+  // px) and it is NARROW, 12 hint columns, so a band gated on its own width
+  // threshold would go dark exactly where these legs look.
+  const RDRAWT = 0.46;
+  const RDARKT = 0.44; // ...and one under the cut, where nothing prose may paint
+  const planDrawT = enc.shopTextPlan(RDRAWT);
+  const c2dT = canvasEl.getContext("2d"); // the same context encounter.js draws on
+  // The panel's own ground is rgba(14, 17, 25, 0.85) — TRANSLUCENT — so two
+  // draws in a row composite and a third reads as neither. Every draw here
+  // therefore starts from an opaque black slate over the panel's device rect,
+  // which is what makes the strips below comparable AND repeatable: the same
+  // state redrawn must give the same bytes, and each leg asserts that too.
+  const drawShopAtT = (r) => {
+    c2dT.save();
+    c2dT.setTransform(1, 0, 0, 1, 0, 0);
+    c2dT.fillStyle = "#000";
+    c2dT.fillRect(shopPlace.x0 - 2, shopPlace.y0 - 2,
+      layT.w * shopPlace.k + 4, layT.h * shopPlace.k + 4);
+    c2dT.setTransform(shopPlace.k, 0, 0, shopPlace.k, shopPlace.x0, shopPlace.y0);
+    window.Encounter.drawShopPanel(r);
+    c2dT.restore();
+  };
+  const stripT = (x0, x1, y0, y1, step) => {
+    const pts = [];
+    for (let px = x0; px <= x1; px += step) {
+      for (let py = y0; py <= y1; py += step) {
+        const q = panelField(shopPlace, px, py);
+        pts.push(arrPx(q.x, q.y));
+      }
+    }
+    return pts.join("|");
+  };
+  const card0T = layT.cards[0];
+  const nameTopT = card0T.y + 3 + planDrawT.icon;   // the icon's bottom edge
+  const nameBaseT = nameTopT + planDrawT.namePx;    // ...and the name's baseline
+  // the NAME's own band, and nothing else's: below the icon, above the price
+  // line (which starts a whole pricePx lower), inside the card's border
+  const nameStripT = () => stripT(card0T.x + 12, card0T.x + card0T.w - 12,
+    nameTopT + 7, nameBaseT - 1, 4);
+  // ...and the hint's, which is below every card
+  const hintStripT = () => stripT(12, layT.w - 12, layT.detailTop + 2, layT.h - 3, 4);
+  const hullWas2T = enc.E.seats[0].hull;
+  enc.E.seats[0].hull = enc.E.seats[0].hullMax; // alive: a downed seat buys
+                                                // nothing, and the lever below
+                                                // is exactly buyability
+  enc.E.shopHover = -1;
+  enc.E.xp = 999;                 // every row affordable — the name paints bright
+  drawShopAtT(RDRAWT);
+  const nameRichT = nameStripT();
+  enc.E.xp = 0;                   // ...and none of them are — it paints dim
+  drawShopAtT(RDRAWT);
+  const namePoorT = nameStripT();
+  enc.E.xp = 999;
+  drawShopAtT(RDRAWT);
+  ok("the draw paints the row name when the cut says prose — the wallet moves its ink",
+    nameRichT !== namePoorT && nameStripT() === nameRichT,
+    "moved=" + (nameRichT !== namePoorT) + " restored=" + (nameStripT() === nameRichT));
+  // the hint, at the same fit and through its own lever: the LIVE HOVER. A
+  // hovered row says everything on the field, so the rail's line stands down;
+  // let go and it comes back. This is the one condition, read from one place,
+  // and the strip lives below every card so ink that moves here is the hint
+  // and can be nothing else.
+  enc.E.shopHover = -1;
+  liveVal(() => drawShopAtT(RDRAWT));
+  const hintIdleT = hintStripT();
+  enc.E.shopHover = overT;
+  liveVal(() => drawShopAtT(RDRAWT));
+  const hintHoverT = hintStripT();
+  // ...and a PAUSED page with the pointer still on the card hands it back: the
+  // field panel is a live-play layer, so the rail must not go silent with it
+  drawShopAtT(RDRAWT);
+  const hintPausedT = hintStripT();
+  enc.E.shopHover = -1;
+  liveVal(() => drawShopAtT(RDRAWT));
+  ok("the hint draws only while nothing is hovered, and comes back when the page pauses",
+    hintIdleT !== hintHoverT && hintPausedT === hintIdleT && hintStripT() === hintIdleT,
+    "idle!=hover " + (hintIdleT !== hintHoverT) + " paused==idle " +
+    (hintPausedT === hintIdleT) + " cols=" + planDrawT.detailCols);
+  // ...and it follows the PROSE flag, exactly as the row name does: a rail too
+  // narrow for a name is too narrow for a sentence about one. Same idle state,
+  // one ratio under the cut, and the band goes dark.
+  // "different from idle" is NOT the assertion to make here — a hint drawn at
+  // a different SIZE satisfies it, so dropping the prose condition passed this
+  // leg while painting 197.8 logical px of text into a 170 px rail, clipped at
+  // one border and spilling past the other. What must hold is that NO TEXT
+  // paints, and the honest way to say that is to compare the band against
+  // ITSELF hovered at the SAME ratio: a hover always silences the hint, so if
+  // the unhovered band under the cut carries ink the hovered one does not, the
+  // prose condition is gone.
+  enc.E.shopHover = -1;
+  liveVal(() => drawShopAtT(RDARKT));
+  const hintDarkT = hintStripT();
+  enc.E.shopHover = overT;
+  liveVal(() => drawShopAtT(RDARKT));
+  const hintDarkHoverT = hintStripT();
+  enc.E.shopHover = -1;
+  liveVal(() => drawShopAtT(RDRAWT));
+  ok("the hint obeys the same prose cut the row name does",
+    enc.shopTextPlan(RDARKT).prose === false && hintDarkT === hintDarkHoverT &&
+    hintDarkT !== hintIdleT && hintStripT() === hintIdleT,
+    "prose=" + enc.shopTextPlan(RDARKT).prose + " dark==darkHover " +
+    (hintDarkT === hintDarkHoverT) + " dark!=idle " + (hintDarkT !== hintIdleT));
+  enc.E.seats[0].hull = hullWas2T;
+  enc.E.shopHover = hovWasT;
+  enc.E.xp = 999;
+  t.render(); // the canvas goes back to an honest frame at the real fit
+
+  // ---- ...and the FIELD panel, measured against the layers it must clear ---
+  // The claim the whole placement rests on is that nothing stands down for
+  // this panel because nothing has to. That is a pixel claim, so it is settled
+  // in pixels, and by MEASUREMENT rather than by re-deriving the geometry the
+  // production code already derived: each of the three layers is isolated
+  // through its OWN lever and its real ink box read off the canvas.
+  //   the status stack — E.state, since an idle encounter draws no HUD at all
+  //   the corner map   — game.js's MINIMAP toggle
+  //   the panel itself — the hover
+  // The panel's box is the diff of a hovered frame against an unhovered one,
+  // so it is EXACTLY the set of pixels the hover moves. If it does not
+  // intersect the other two boxes, then the hover moved none of their ink —
+  // which is the whole claim, and is exactly the leg the retired explainer art
+  // would have failed (its 342 x 96 rect swallowed both, which is why it
+  // needed the suppression handshake instead).
+  const priorArrows2 = t.edgeArrowsOn();
+  const priorMap2 = t.minimapInfo().on;
+  const runWas2 = t.G.running;
+  t.setEdgeArrows(false); // a chevron parked on the inset column is not the subject
+  t.setMinimap(true);
   enc.reset();
   enc.advance(1);
-  t.G.keys.add("KeyW"); // held as the wave clears
-  enc.E.state = "cleared";
-  enc.openShop();
-  ok("openShop clears the held ring keys", t.G.keys.size === 0 && enc.state().state === "shop");
-  const runWas = t.G.running;
-  t.G.running = true; // flag only — the loop itself stays stopped
-  document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyW" }));
-  t.G.running = runWas;
-  ok("a ring key pressed over the frozen shop never enters the held set", t.G.keys.size === 0);
+  enc.E.groups.length = 0;   // no spawn portals, no HOSTILES INBOUND line
+  enc.E.enemies.length = 0;
+  enc.E.orbs.length = 0;
+  enc.E.state = "active";
+  enc.E.seats[0].hull = enc.E.seats[0].hullMax;
+  enc.E.xp = 1;              // OVERLOAD is refused, so the reason line is live
+  t.G.running = true;        // the panel is a live-play layer
+  const f0T = t.fieldToCanvas(0, 0), f1T = t.fieldToCanvas(1, 1);
+  const fscaleT = f1T.x - f0T.x;
+  // one readback of the whole FIELD rect, in backing-store pixels
+  const regionT = () => {
+    const a = t.fieldToCanvas(0, 0), b = t.fieldToCanvas(t.FW, t.FH);
+    const x0 = Math.max(0, Math.floor(a.x)), y0 = Math.max(0, Math.floor(a.y));
+    const x1 = Math.min(canvasEl.width, Math.ceil(b.x));
+    const y1 = Math.min(canvasEl.height, Math.ceil(b.y));
+    return { x0, y0, w: x1 - x0, h: y1 - y0,
+      data: c2dT.getImageData(x0, y0, x1 - x0, y1 - y0).data };
+  };
+  // ...and the bounding box of every pixel two readbacks disagree on, back in
+  // FIELD coordinates, which is the space the plan speaks
+  const inkBoxT = (A, B) => {
+    let minx = 1e9, miny = 1e9, maxx = -1e9, maxy = -1e9, n = 0;
+    for (let y = 0; y < A.h; y++) {
+      for (let x = 0; x < A.w; x++) {
+        const i = (y * A.w + x) * 4;
+        if (A.data[i] !== B.data[i] || A.data[i + 1] !== B.data[i + 1] ||
+            A.data[i + 2] !== B.data[i + 2] || A.data[i + 3] !== B.data[i + 3]) {
+          n++;
+          if (x < minx) minx = x;
+          if (x > maxx) maxx = x;
+          if (y < miny) miny = y;
+          if (y > maxy) maxy = y;
+        }
+      }
+    }
+    if (!n) return null;
+    return { px: n,
+      x: (A.x0 + minx - f0T.x) / fscaleT, y: (A.y0 + miny - f0T.y) / fscaleT,
+      r: (A.x0 + maxx + 1 - f0T.x) / fscaleT, b: (A.y0 + maxy + 1 - f0T.y) / fscaleT };
+  };
+  const hitsT = (p, q) => !!p && !!q && p.x < q.r && q.x < p.r && p.y < q.b && q.y < p.b;
+  enc.E.shopHover = -1;
+  t.render();
+  const snapPlainT = regionT();
+  enc.E.state = "idle";      // encDrawHud returns before it paints anything
+  t.render();
+  const snapNoHudT = regionT();
+  enc.E.state = "active";
+  // ...and the third layer in this band, which is transient rather than
+  // permanent: the HOSTILES INBOUND line a warning state hangs on the y = 30
+  // baseline. It is what HOVERUI.top = 40 exists to clear, and it is isolated
+  // the same way — through E.state, since a warning frame differs from an
+  // active one in that line and nothing else (the WAVE header reads the same
+  // in both, and the field is bare).
+  enc.E.state = "warning";
+  t.render();
+  const snapWarnT = regionT();
+  enc.E.state = "active";
+  t.setMinimap(false);
+  t.render();
+  const snapNoMapT = regionT();
+  t.setMinimap(true);
+  enc.E.shopHover = overT;
+  const panelPlanT = enc.shopHoverPlan();
+  t.render();
+  const snapHoverT = regionT();
+  const stackInkT = inkBoxT(snapPlainT, snapNoHudT);
+  const mapInkT = inkBoxT(snapPlainT, snapNoMapT);
+  const panelInkT = inkBoxT(snapPlainT, snapHoverT);
+  ok("the hovered row's panel paints on the field and moves neither the status stack nor the corner map",
+    !!stackInkT && !!mapInkT && !!panelInkT &&
+    !hitsT(panelInkT, stackInkT) && !hitsT(panelInkT, mapInkT),
+    JSON.stringify({ stack: stackInkT, map: mapInkT, panel: panelInkT }));
+  // ...and the ink the hover moved really is this panel — its box, to the
+  // pixel the letterbox rounds to — rather than some other layer reacting to
+  // E.shopHover somewhere else on the field
+  const roundT = 1 / fscaleT + 1e-6; // one backing-store pixel, in field units
+  ok("the ink the hover moves is the panel's own box and nothing else",
+    !!panelInkT && panelInkT.x >= panelPlanT.x - roundT &&
+    panelInkT.y >= panelPlanT.y - roundT &&
+    panelInkT.r <= panelPlanT.x + panelPlanT.w + roundT &&
+    panelInkT.b <= panelPlanT.y + panelPlanT.h + roundT &&
+    panelInkT.px > 0,
+    JSON.stringify({ ink: panelInkT, box: [panelPlanT.x, panelPlanT.y, panelPlanT.w, panelPlanT.h] }));
+  // the gaps, stated rather than merely asserted — this is the number that
+  // decided against reusing the suppression handshake
+  const gapLeftT = panelInkT ? panelInkT.x - stackInkT.r : -1;
+  const gapRightT = panelInkT ? mapInkT.x - panelInkT.r : -1;
+  ok("the panel's ink clears the status stack and the corner map with daylight to spare",
+    gapLeftT > 1 && gapRightT > 1 &&
+    panelInkT.x >= 0 && panelInkT.b <= t.FH && panelInkT.r <= t.FW,
+    "leftGap=" + gapLeftT.toFixed(2) + " rightGap=" + gapRightT.toFixed(2) +
+    " stackRight=" + stackInkT.r.toFixed(2) + " mapLeft=" + mapInkT.x.toFixed(2));
+  // ...and it starts BELOW the warning line, which is the whole job of
+  // HOVERUI.top: a wave landing while the player shops must still announce
+  // itself. The warning's ink is measured, not assumed.
+  const warnInkT = inkBoxT(snapPlainT, snapWarnT);
+  ok("the panel starts below the HOSTILES INBOUND line, so a landing wave still announces itself",
+    !!warnInkT && !hitsT(panelInkT, warnInkT) && panelInkT.y > warnInkT.b,
+    JSON.stringify({ warn: warnInkT, panelTop: panelInkT && panelInkT.y,
+      gap: warnInkT && panelInkT ? +(panelInkT.y - warnInkT.b).toFixed(2) : null }));
+  enc.E.shopHover = -1;
+  t.G.running = runWas2;
+  t.setEdgeArrows(priorArrows2);
+  t.setMinimap(priorMap2);
+  t.render();
+  // and the degenerate ratio: a headless caller, a collapsed gutter, or the
+  // argument simply not passed draws the design sizes and does not throw — and
+  // it KEEPS ITS PROSE. An unknown fit is not evidence that the name would be
+  // illegible, the design picture has always had words in it, and a caller who
+  // forgets the argument should get the panel it drew before any of this
+  // existed rather than a silently wordless one.
+  let planZero = null, planNeg = null, planNone = null, planThrew = "";
+  try {
+    planZero = enc.shopTextPlan(0);
+    planNeg = enc.shopTextPlan(-3);
+    planNone = enc.shopTextPlan();
+  } catch (err) { planThrew = String(err); }
+  ok("a degenerate ratio falls back to the design sizes, with its prose, instead of throwing",
+    !planThrew && !!planZero && planZero.headerPx === 11 && planZero.walletPx === 11 &&
+    planZero.namePx === 8 && planZero.pricePx === 9 && planZero.detailPx === 8 &&
+    planZero.prose === true &&
+    JSON.stringify(planNeg) === JSON.stringify(planZero) &&
+    JSON.stringify(planNone) === JSON.stringify(planZero),
+    planThrew || JSON.stringify(planZero));
+  enc.E.xp = xpWasT; // the wallet goes back where the paused leg left it
+  enc.E.owned = ownedWasT.slice(); // ...and so do the ranks the state sweep bought
+  enc.E.seats[0].hull = hullWasT;  // ...and the hull the "ship down" state emptied
+  enc.E.shopHover = hovWasT;
 
   // ---- S. restart resets the wallet, every rank counter and the hull cap ----
   // restart() resets field by field, so EVERY purchase field needs its own
@@ -1639,49 +2707,58 @@ window.runWave1Checks = function () {
   // buys one of every row, then asserts each field died with the run.
   enc.reset();
   enc.advance(1);
-  enc.E.state = "cleared";
-  enc.openShop();
-  enc.addXp(500);
+  enc.addXp(500); // the panel sells mid-wave — no staged visit
   enc.buy(0); // RAPID LOADER
   enc.buy(1); // AFTERBURNER
   enc.buy(3); // MAX HULL — raises the cap to 4 and fills it
   enc.E.hull = 1;
   enc.buy(2); // HULL PATCH
-  enc.buy(4); // THRUST RING
-  enc.buy(5); // BLAST CHARGE
+  enc.buy(4); // BLAST CHARGE — row 4 since WSAD ENGINE CONTROLS left the catalog
+  enc.buy(5); // ENERGY CELL   — the pool's three rows are APPENDED, so 5, 6 and 7
+  enc.buy(6); // RECHARGER
+  enc.buy(7); // OVERLOAD
   const preRestart = enc.state();
   ok("the staging really bought one of every row",
-    preRestart.owned.join(",") === "1,1,1,1,1,1" && preRestart.xp === 500 - 4 - 4 - 8 - 6 - 8 - 8 &&
+    preRestart.owned.join(",") === "1,1,1,1,1,1,1,1" &&
+    preRestart.xp === 500 - 4 - 4 - 8 - 6 - 8 - 5 - 5 - 8 &&
     preRestart.hullMax === ECFG.player.hull + 1 && preRestart.hull === 2 &&
-    preRestart.mods.cool === 1 / 1.15 && preRestart.mods.speed === 1 && preRestart.mods.keyThrust === true &&
-    preRestart.mods.blast === 1,
+    preRestart.mods.cool === 1 / 1.15 && preRestart.mods.speed === 1 &&
+    preRestart.mods.blast === 1 && preRestart.mods.enCell === 1 &&
+    preRestart.mods.enRech === 1 && preRestart.mods.fury === 1,
     JSON.stringify({ owned: preRestart.owned, xp: preRestart.xp, hullMax: preRestart.hullMax }));
   enc.restart();
   s = enc.state();
-  ok("restart zeroes the wallet and every purchase field",
+  ok("restart zeroes the wallet and every purchase field — and key thrust, stock now, stays armed",
     s.xp === 0 && s.owned.every((n) => n === 0) && s.hullMax === ECFG.player.hull &&
     s.hull === ECFG.player.hull && s.mods.cool === 1 && s.mods.speed === 0 &&
-    s.mods.keyThrust === false && s.mods.blast === 0 && s.shopHover === -1 && s.state === "idle",
+    s.mods.keyThrust === true && s.mods.blast === 0 && s.mods.enCell === 0 &&
+    s.mods.enRech === 0 && s.mods.fury === 0 && s.shopHover === -1 && s.state === "idle",
     JSON.stringify({ xp: s.xp, owned: s.owned, hullMax: s.hullMax, ring: s.mods.keyThrust, blast: s.mods.blast }));
+  // ...and the pool restarts with the run, at the BASE cap the cleared ENERGY
+  // CELL rank leaves behind — a seat that inherited a rank-4 cap it no longer
+  // owns would fly the next run over its own ceiling
+  ok("restart refills every seat's pool at the base cap",
+    t.players.every((P) => P.energy === P.energyMax) &&
+    Math.abs(t.players[0].energyMax - t.flightTunables().ENMAX) < 1e-9 &&
+    t.players.every((P) => P.enIdle === 0),
+    JSON.stringify({ energy: t.players[0].energy, max: t.players[0].energyMax }));
 
-  // ---- T. the THRUST RING: one gate, one sale, one hover preview ----
-  // The eight-way ring's THRUST role is an 8 XP one-time purchase; its AIM
-  // role is not gated and must never be. The gate is a single predicate on
-  // step()'s thrust sum, so these legs measure the ship's velocity rather than
-  // reading the flag back, and the aim leg drives the real keydown handler.
-  // Pointer lock is deliberately not involved anywhere: the owner ruled out
-  // any lock fallback, so every state here is reached through the hooks.
-  const ringArrowsWas = t.edgeArrowsOn();
+  // ---- T. WSAD ENGINE CONTROLS are stock: default-on thrust, no shop row ----
+  // User feedback retired the purchase: the ring's THRUST role ships unlocked
+  // (mods.keyThrust defaults true), stays unlocked across restart, and the
+  // catalog carries no row for it any more. The field itself survives —
+  // keyThrustUnlocked() still gates step()'s thrust sum — so these legs
+  // measure the ship's velocity through the real input path rather than
+  // reading the flag back, and prove the predicate still honors an explicit
+  // re-lock. The AIM role never was gated and never is.
   const ringAimWas = t.aimState().AIMMODE;
-  t.setEdgeArrows(false); // the status stack's own column must read only the HUD
   t.setAimMode("mouse");  // ...and this also releases the right button
   const ringInvWas = t.aimState().aiming; // right released, so aiming() IS the invert flag
   t.setInvert(true);      // the shipped default: the cursor aims, the ring thrusts
   enc.reset();
   enc.E.hull = 99;
   enc.advance(130); // a live, unfrozen wave — thrustImpulse refuses a frozen sim
-  const ringIdx = enc.shopInfo().findIndex((r) => r.name === "THRUST RING");
-  // one held ring key, one real tick: the speed the ring bought, in px/tick
+  // one held ring key, one real tick: the speed the ring buys, in px/tick
   const ringThrust = () => {
     t.G.keys.clear();
     t.G.vel.x = 0;
@@ -1694,19 +2771,34 @@ window.runWave1Checks = function () {
     t.G.vel.y = 0;
     return sp;
   };
-  ok("the THRUST RING row is a flat 8, unowned and unmaxed",
-    ringIdx === 4 && enc.shopInfo()[ringIdx].cost === 8 && enc.shopInfo()[ringIdx].owned === 0 &&
-    enc.shopInfo()[ringIdx].maxed === false && enc.shopInfo()[ringIdx].available === true,
-    JSON.stringify(enc.shopInfo()[ringIdx]));
-  ok("a fresh run opens with the ring locked, and game.js agrees",
-    enc.state().mods.keyThrust === false && t.keyThrustUnlocked() === false &&
+  ok("the catalog carries no WSAD row — eight cards, none named for the ring",
+    enc.shopInfo().length === 8 && enc.shopInfo().every((r) => r.name !== "WSAD ENGINE CONTROLS"),
+    JSON.stringify(enc.shopInfo().map((r) => r.name)));
+  ok("a fresh run opens with key thrust unlocked, and game.js agrees",
+    enc.state().mods.keyThrust === true && t.keyThrustUnlocked() === true &&
     t.aimState().aiming === true,
     "flag=" + enc.state().mods.keyThrust + " unlocked=" + t.keyThrustUnlocked());
-  const thrustLocked = ringThrust();
-  ok("a locked ring moves the ship not at all", thrustLocked === 0, "speed=" + thrustLocked);
+  const thrustFresh = ringThrust();
+  ok("WSAD thrust moves the ship with zero purchases on a fresh run",
+    thrustFresh > 0, "speed=" + thrustFresh);
+  // ...and the comet hold never silences it: the keys are the default engine
+  // control, so pressing right for the comet must AMPLIFY the ring's thrust
+  // (COMETACC through thrustImpulse), never zero it — the regression where
+  // aiming() alone gated keyDirection() left a keyboard pilot dead in space
+  // for the whole hold
+  t.setRightHeld(true); // comet WANTED, via the same client edge the button uses
+  enc.advance(1);       // ...and one tick for the sim's gate to answer: the button
+                        // states a want, energyStep turns it into the seat's flag,
+                        // and thrustImpulse reads the flag — so the amplified thrust
+                        // starts on the tick after the press, not on the press
+  const thrustComet = ringThrust();
+  t.setRightHeld(false);
+  ok("holding right (comet mode) keeps WSAD thrust alive — and stronger",
+    thrustComet > thrustFresh,
+    "comet=" + thrustComet + " stock=" + thrustFresh);
   // ...and the aim role is untouched. That branch runs exactly when aiming()
   // is FALSE, which is exactly when the cursor is hidden and the ring is the
-  // only aim control on the screen — gating it would remove aiming entirely.
+  // only aim control on the screen.
   t.setRightHeld(true); // mouse mode with invert on: right held hands the ring the aim
   t.G.aimed = false;
   t.G.aimAngle = 0;
@@ -1715,224 +2807,554 @@ window.runWave1Checks = function () {
   document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyW" }));
   t.G.running = ringWas;
   document.dispatchEvent(new KeyboardEvent("keyup", { code: "KeyW" }));
-  ok("a locked ring still snaps the aim while the mouse flies",
+  ok("the ring still snaps the aim while the mouse flies",
     t.aimState().aiming === false && t.G.aimed === true &&
     Math.abs(t.G.aimAngle + Math.PI / 2) < 1e-9,
     "aiming=" + t.aimState().aiming + " angle=" + t.G.aimAngle);
   t.setRightHeld(false);
-  // the pause copy, locked: exactly three lines claimed key thrust, and the
-  // fourth — "right held: mouse flies · keys aim" — stays true either way
-  const copyFor = (mode, inv) => { t.setAimMode(mode); t.setInvert(inv); return t.pauseLines(); };
-  const lockMi = copyFor("mouse", true);
-  const lockMo = copyFor("mouse", false);
-  const lockPi = copyFor("push", true);
-  const lockPo = copyFor("push", false);
-  t.setAimMode("mouse");
-  t.setInvert(true);
-  // One readback over a whole field rect, downsampled into a scratch pad. A
-  // single 2×2 probe is too easy to land between a 9 px glyph's strokes, and
-  // these legs have to be able to say "no ink here" and be believed.
-  const ringPad = document.createElement("canvas");
-  ringPad.width = 128;
-  ringPad.height = 16;
-  const ringPadCtx = ringPad.getContext("2d", { willReadFrequently: true });
-  const ringRegion = (fx, fy, fw, fh) => {
-    const p = t.fieldToCanvas(fx, fy);
-    const q = t.fieldToCanvas(fx + fw, fy + fh);
-    ringPadCtx.clearRect(0, 0, ringPad.width, ringPad.height);
-    ringPadCtx.drawImage(canvasEl, Math.round(p.x), Math.round(p.y),
-      Math.max(1, Math.round(q.x - p.x)), Math.max(1, Math.round(q.y - p.y)),
-      0, 0, ringPad.width, ringPad.height);
-    return JSON.stringify(Array.from(ringPadCtx.getImageData(0, 0, ringPad.width, ringPad.height).data));
-  };
-  const ringHud = () => ringRegion(6, 54, 120, 12); // the notice's own text row
-
-  // the sale itself, on a staged shop visit — the natural flow is section F's
-  enc.E.state = "cleared";
-  enc.openShop();
-  ok("the shop opens with nothing hovered, and so with no art up",
-    enc.state().shopHover === -1 && window.Encounter.ringCardShown() === false);
-  ok("an empty wallet cannot buy the ring", enc.buy(ringIdx) === false && enc.state().mods.keyThrust === false);
-  enc.addXp(20);
-  ok("the sale lands at 8 and the row goes MAXED",
-    enc.buy(ringIdx) === true && enc.state().xp === 12 && enc.state().owned[ringIdx] === 1 &&
-    enc.shopInfo()[ringIdx].maxed === true && enc.state().mods.keyThrust === true,
-    "xp=" + enc.state().xp + " owned=" + enc.state().owned[ringIdx]);
-  ok("the one-time row refuses a second sale and the wallet is untouched",
-    enc.buy(ringIdx) === false && enc.state().xp === 12 && enc.state().owned[ringIdx] === 1);
-  ok("game.js reads the unlock immediately", t.keyThrustUnlocked() === true);
-  // The art is a HOVER preview now, not a purchase reveal: it answers to where
-  // the pointer is and to nothing else, so a sale on its own must leave the
-  // screen exactly as it found it.
-  ok("the sale alone raises no art — the pointer is what raises it",
-    enc.state().shopHover === -1 && liveVal(() => window.Encounter.ringCardShown()) === false);
-  liveMove(...cardMid(ringIdx));
-  ok("resting the pointer on the row raises its art",
-    enc.state().shopHover === ringIdx &&
-    liveVal(() => window.Encounter.ringCardShown()) === true,
-    "hover=" + enc.state().shopHover);
-  // the rect: the asset's own ratio, inside the field, and — the whole point
-  // of choosing a band rather than a fixed slot — never over the card that
-  // raised it, so the pointer is never resting on covered ground
-  const rc = enc.shopPopupRect(ringIdx);
-  const rcCard = enc.shopLayout().cards[ringIdx];
-  ok("the art keeps the cropped asset's ratio, inside the field, clear of its own card",
-    Math.abs(rc.w / rc.h - t.ringCardState().ratio) < 0.05 && rc.x === Math.round((t.FW - rc.w) / 2) &&
-    rc.x > 0 && rc.y >= 0 && rc.y + rc.h < t.FH &&
-    (rc.y + rc.h <= rcCard.y || rc.y >= rcCard.y + rcCard.h),
-    JSON.stringify({ pop: rc, card: { y: rcCard.y, h: rcCard.h }, FH: t.FH }));
-  const ringBand = () => ringRegion(rc.x + 8, rc.y + 8, rc.w - 16, 40); // inside the art
-  liveRender();
-  const ringInk = ringBand();
-  const ringReadyWas = t.setRingReady(false);
-  liveRender();
-  const ringPending = ringBand();
-  t.setRingReady(ringReadyWas);
-  liveRender();
-  const ringBack = ringBand();
-  ok("the art paints its bitmap, and paints it again once the load flag returns",
-    ringReadyWas === true && ringInk !== ringPending && ringBack === ringInk,
-    "loaded=" + ringReadyWas + " drew=" + (ringInk !== ringPending) + " repaint=" + (ringBack === ringInk));
-  // ...and the two layers the SHOP screen would duplicate stand down for the
-  // whole visit, art or no art. The shop header already prints the wave, the
-  // hull pips and the wallet, so the top-left status stack is the same facts
-  // twice; the corner map sits under a scrim it cannot be read through, and
-  // inside the hover art's rect it would show as a sliced-off sliver. Both
-  // legs are two-sided: the ink goes when the shop opens and comes back on the
-  // cleared beat, which is the live screen one state either side of it. Three
-  // renders of ONE frame — no sim advance between them.
-  // The LEVER matters more than the probe here. Comparing the shop screen with
-  // any other screen proves nothing: the shop paints a full-field scrim, so
-  // every pixel on the field differs whether or not the suppressed layer drew
-  // — that comparison passes with the suppression deleted. Each leg instead
-  // moves something ONLY the suppressed layer answers to, and asserts the
-  // screen does not flinch: MINIMAP toggles the corner map and nothing else,
-  // and E.hull moves the status stack's pip row and nothing else in its column
-  // (the shop header's own pips are centred, far outside the probe). Both legs
-  // are two-sided against the cleared beat one state earlier, where the very
-  // same lever must move the very same pixels.
-  const ringMapWas = t.minimapInfo().on;
-  const mm = t.minimapInfo();
-  const stackCol = () => ringRegion(4, 8, 60, 56);  // WAVE · CLEAR, the pips, XP, FOES
-  const mapCol = () => ringRegion(t.FW - mm.W - mm.M, mm.M, mm.W, 12); // the map's own top band
-  const shopWas = enc.state().state;
-  const hullWas = enc.E.hull;
-  const underState = (st, fn) => { enc.E.state = st; const v = fn(); enc.E.state = shopWas; return v; };
-  const mapLever = () => { // true = the toggle moved nothing = the map is down
-    t.setMinimap(true);
-    liveRender();
-    const on = mapCol();
-    t.setMinimap(false);
-    liveRender();
-    return on === mapCol();
-  };
-  const stackLever = () => { // true = the pips moved nothing = the stack is down
-    enc.E.hull = enc.E.hullMax;
-    liveRender();
-    const full = stackCol();
-    enc.E.hull = 1;
-    liveRender();
-    return full === stackCol();
-  };
-  const mapDownShop = underState("shop", mapLever);
-  const mapDownClear = underState("cleared", mapLever);
-  const stackDownShop = underState("shop", stackLever);
-  const stackDownClear = underState("cleared", stackLever);
-  enc.E.hull = hullWas;
-  t.setMinimap(ringMapWas);
-  liveRender();
-  ok("the shop screen stands the status stack down instead of printing it twice",
-    stackDownShop === true && stackDownClear === false,
-    "shopInert=" + stackDownShop + " clearedInert=" + stackDownClear);
-  ok("the shop screen stands the corner map down instead of scrimming over it",
-    mapDownShop === true && mapDownClear === false,
-    "shopInert=" + mapDownShop + " clearedInert=" + mapDownClear);
-  ok("hudSuppressed answers for the whole visit, and for the art on its own",
-    liveVal(() => window.Encounter.hudSuppressed()) === true &&
-    window.Encounter.hudSuppressed() === false); // paused, the pause menu owns it
-  // the art is DECORATION and never a hit target: it lands over a band of the
-  // grid, and a click into that band still buys the card underneath it
-  enc.addXp(64); // fund the click-through before the row is chosen, so the
-                 // finder can insist on a row that would actually sell
-  const underIdx = enc.shopLayout().cards.findIndex((c) => {
-    const info = enc.shopInfo()[c.i];
-    return c.i !== ringIdx && !info.maxed && info.available &&
-      c.x + c.w / 2 > rc.x && c.x + c.w / 2 < rc.x + rc.w &&
-      c.y + c.h / 2 > rc.y && c.y + c.h / 2 < rc.y + rc.h;
-  });
-  ok("the art covers a band of the grid, so there is something to click through",
-    underIdx >= 0, "under=" + underIdx + " pop=" + JSON.stringify(rc));
-  if (underIdx >= 0) {
-    const ownedBefore = enc.state().owned[underIdx];
-    clickCard(underIdx);
-    ok("a click lands on the card under the art, not on the art",
-      enc.state().owned[underIdx] === ownedBefore + 1,
-      "before=" + ownedBefore + " after=" + enc.state().owned[underIdx]);
-  }
-  liveMove(4, 4); // off every card — the field's top-left corner
-  ok("the art drops the moment the pointer leaves the card",
-    enc.state().shopHover === -1 &&
-    liveVal(() => window.Encounter.ringCardShown()) === false);
-  clickNext();
-  s = enc.state();
-  ok("the art is never modal — NEXT WAVE still deals the next wave",
-    s.state === "warning" && s.wave === 2 && s.waveTick === 0,
-    "state=" + s.state + " wave=" + s.wave);
-  enc.E.state = "cleared";
-  enc.openShop();
-  ok("the next shop opens clean — no hover, no art, and the unlock kept",
-    enc.state().shopHover === -1 && enc.state().mods.keyThrust === true);
-
-  // the purchase reaches the sim, and the HUD notice deletes itself
-  enc.E.state = "active";
-  const thrustBought = ringThrust();
-  ok("the bought ring moves the ship on the very next tick", thrustBought > 0, "speed=" + thrustBought);
-  // the HUD notice, on the line the deleted U hint freed: three renders of ONE
-  // frame with the flag as the only difference, so nothing the sim did between
-  // them can stand in for the ink
-  t.setAimMode("mouse");
-  t.setInvert(true);
-  t.render();
-  const hudFree = ringHud();
-  enc.mods.keyThrust = false; // the flag alone, back where the notice lives
-  t.render();
-  const hudLocked = ringHud();
-  enc.mods.keyThrust = true;
-  t.render();
-  const hudBack = ringHud();
-  ok("THRUST LOCKED — SHOP prints exactly while the ring is locked",
-    hudLocked !== hudFree && hudBack === hudFree,
-    "ink=" + (hudLocked !== hudFree) + " clears=" + (hudBack === hudFree));
-  // the pause copy, unlocked — the same four wordings, read again
-  const freeMi = copyFor("mouse", true);
-  const freeMo = copyFor("mouse", false);
-  const freePi = copyFor("push", true);
-  const freePo = copyFor("push", false);
-  ok("every line that claims key thrust claims it only once the ring is bought",
-    /keys thrust/.test(freeMi[0]) && /keys thrust/.test(freeMo[1]) && /keys fly the ship/.test(freePi[0]) &&
-    !/keys thrust/.test(lockMi.join(" ")) && !/keys thrust/.test(lockMo.join(" ")) &&
-    !/keys fly the ship/.test(lockPi.join(" ")),
-    JSON.stringify({ lockMi, lockMo, lockPi, freeMi, freeMo, freePi }));
-  ok("the line that stays true after the gate is untouched by it",
-    lockMi[1] === "right held: mouse flies · keys aim · left fires · esc pauses" &&
-    freeMi[1] === lockMi[1] && lockMo[0] === freeMo[0] && lockPi[1] === freePi[1] &&
-    lockPo.join("|") === freePo.join("|"),
-    JSON.stringify({ mi: lockMi[1], mo: lockMo[0], po: lockPo }));
-
-  // and it all dies with the run — an 8 XP buy is never a meta-unlock
+  // The suppression handshake is GONE, not merely quiet. The old leg here
+  // asserted that ringCardShown()/hudSuppressed() answered false under a live
+  // hover, which they had done unconditionally since the WSAD row was retired
+  // — a leg pinning a constant. What replaced it is a real property: the
+  // hovered row's field panel clears both layers it used to displace, so
+  // NOTHING on this namespace can stand the HUD down any more. (The clearance
+  // itself is measured in section X, against real ink.)
+  ok("no suppression lever survives on the encounter's namespace",
+    window.Encounter.hudSuppressed === undefined &&
+    window.Encounter.ringCardShown === undefined &&
+    t.ringCardState === undefined && t.setRingReady === undefined,
+    "hud=" + typeof window.Encounter.hudSuppressed +
+    " ring=" + typeof window.Encounter.ringCardShown +
+    " state=" + typeof t.ringCardState);
+  // restart keeps the unlock — thrust is baseline equipment, not a purchase
   enc.restart();
   enc.E.hull = 99;
   enc.advance(130);
   t.setAimMode("mouse");
   t.setInvert(true);
+  const thrustAfterRestart = ringThrust();
+  ok("restart keeps key thrust unlocked, in the sim and on the flag",
+    enc.state().mods.keyThrust === true && t.keyThrustUnlocked() === true &&
+    thrustAfterRestart > 0,
+    "speed=" + thrustAfterRestart + " flag=" + enc.state().mods.keyThrust);
+  // the gate is honest state, not a constant: an explicit re-lock still stops
+  // the thrust sum through the same predicate, and the pause copy still tells
+  // the truth on both sides of it
+  enc.mods.keyThrust = false;
   const thrustRelocked = ringThrust();
-  ok("restart re-locks the ring in the sim, not just on the flag",
-    enc.state().mods.keyThrust === false && t.keyThrustUnlocked() === false &&
-    enc.state().shopHover === -1 && thrustRelocked === 0,
-    "speed=" + thrustRelocked + " flag=" + enc.state().mods.keyThrust);
+  const lockLines = t.pauseLines();
+  const relockRead = t.keyThrustUnlocked();
+  enc.mods.keyThrust = true;
+  const freeLines = t.pauseLines();
+  ok("an explicit re-lock still stops the thrust sum through the same gate",
+    thrustRelocked === 0 && relockRead === false && t.keyThrustUnlocked() === true,
+    "locked=" + thrustRelocked);
+  ok("the pause copy claims key thrust exactly while the gate is open",
+    /keys thrust/.test(freeLines[0]) && !/keys thrust/.test(lockLines.join(" ")),
+    JSON.stringify({ lockLines, freeLines }));
   t.setInvert(ringInvWas);
   t.setAimMode(ringAimWas);
-  t.setEdgeArrows(ringArrowsWas);
+
+  // ---- T2. comet mode: rh through the ring, negation, ram damage, the cap ----
+  // Right-hold is comet mode now. The flag is SIM state fed through the input
+  // ring's rh field, so every leg here drives it the server way: a pre-formed
+  // frame through pushInputFrame, drained by the raw camera-free stepSim —
+  // never by reading client state. Expectations read the live tunables
+  // (COMETDMG, BDMG, VMAX, COMETVMAX), so a tuned page cannot fake a failure.
+  const cmInputWas = t.inputState().INPUTMODE;
+  const cmLagWas = t.inputState().INPUTLAG;
+  t.setInputMode("tick");
+  t.setInputLag(0);
+  const cmTun = enc.tunables();
+  const cmFlight = t.flightTunables();
+  const CF = (o) => ({ tx: 0, ty: 0, ax: 0, ay: 0, cx: ship().x, cy: ship().y - 100,
+    fp: 0, fh: false, kx: 0, ky: 0, ...o });
+  // (1) comet negates hitPlayer — the flag arrives through the input path
+  enc.reset();
+  t.stepSim(); // one raw tick out of idle; wave 1's first group is 126 ticks away
+  t.pushInputFrame(0, CF({ rh: 1 }));
+  t.stepSim();
+  ok("a banked rh raises the seat's comet flag through the drain",
+    t.players[0].comet === true && t.cometActive(0) === true,
+    "comet=" + t.players[0].comet);
+  const cmHull = enc.state().hull;
+  ok("comet negates hitPlayer — no hull loss, no i-frames, no hitFlash",
+    enc.damagePlayer(1) === false && enc.state().hull === cmHull &&
+    enc.state().invuln === 0 && enc.E.seats[0].hitFlash === 0,
+    "hull=" + enc.state().hull + " invuln=" + enc.state().invuln);
+  t.pushInputFrame(0, CF({ rh: 0 }));
+  t.stepSim();
+  ok("rh released through the ring, the next hit lands again",
+    t.players[0].comet === false && enc.damagePlayer(1) === true &&
+    enc.state().hull === cmHull - 1,
+    "comet=" + t.players[0].comet + " hull=" + enc.state().hull);
+  // (2) contactEvent: COMETDMG while comet is on, BDMG when off — same touch
+  const ramLeg = (rh) => {
+    enc.reset();
+    t.stepSim();
+    enc.E.groups.length = 0; // no scheduled pack may join a staged touch
+    enc.E.seats[0].hull = 99;
+    t.pushInputFrame(0, CF({ rh }));
+    t.stepSim(); // the flag lands; the ring is empty again, so it persists
+    enc.spawnEnemy(ship().x + 200, ship().y, 0, "charger"); // hp 5 survives a comet touch
+    const body = enc.E.enemies[0];
+    body.x = ship().x; // parked overlapping — resolveContacts fires the touch
+    body.y = ship().y;
+    const hullWas = enc.state().hull;
+    const hpWas = body.hp;
+    t.stepSim();
+    return { dHp: hpWas - body.hp, dHull: hullWas - enc.state().hull };
+  };
+  const ramOn = ramLeg(1);
+  const ramOff = ramLeg(0);
+  ok("a comet touch pays COMETDMG into the body and the ship pays nothing",
+    ramOn.dHp === cmTun.COMETDMG && ramOn.dHull === 0, JSON.stringify(ramOn));
+  ok("an ordinary touch pays BDMG and costs the ship the contact damage",
+    ramOff.dHp === cmTun.BDMG && ramOff.dHull === ECFG.contact.dmgToPlayer,
+    JSON.stringify(ramOff));
+  // (3) the radial cap rises under comet and falls back on release
+  enc.reset();
+  t.stepSim();
+  enc.E.groups.length = 0;
+  enc.E.seats[0].hull = 99;
+  for (let k = 0; k < 40; k++) { t.pushInputFrame(0, CF({ tx: 60, rh: 1 })); t.stepSim(); }
+  const cmSpeedHeld = Math.hypot(t.G.vel.x, t.G.vel.y);
+  for (let k = 0; k < 10; k++) { t.pushInputFrame(0, CF({ tx: 60, rh: 0 })); t.stepSim(); }
+  const cmSpeedFree = Math.hypot(t.G.vel.x, t.G.vel.y);
+  ok("the vcap clamp rises to VMAX × COMETVMAX under comet and falls back on release",
+    Math.abs(cmSpeedHeld - cmFlight.VMAX * cmFlight.COMETVMAX) < 1e-6 &&
+    Math.abs(cmSpeedFree - cmFlight.VMAX) < 1e-6,
+    "held=" + cmSpeedHeld + " released=" + cmSpeedFree +
+    " want=" + cmFlight.VMAX * cmFlight.COMETVMAX + "/" + cmFlight.VMAX);
+
+  // ---- T3. the ENERGY pool: the gate, the price, the refill, the three rows ----
+  // The pool is a GENERAL per-seat resource; comet mode is only its first
+  // consumer. Every leg drives production code through the __test surface —
+  // the pool's own API (energyCap/energyFrac/energyFill) and the real sliders
+  // through bind() — and never re-implements the arithmetic, so a retune moves
+  // the expectation with the code. Staged the server way, like T2 above: a
+  // pre-formed frame through pushInputFrame, drained by the raw stepSim.
+  // The suite still runs in tick mode here (T2's setters are restored at the
+  // end of this section, not at the end of T2).
+  const enShipR = typeof SHIP_R !== "undefined" ? SHIP_R : 7; // the sweep's own half-width
+  const EN = () => t.flightTunables(); // read LIVE: every leg below moves a slider
+  // one slider drive, and its undo — the same idiom the pause-UI suite uses, so
+  // these legs go through bind() exactly as a human dragging the control does
+  const enDrive = (id, v) => {
+    const c = document.getElementById(id);
+    const was = c.value;
+    c.value = String(v);
+    c.dispatchEvent(new Event("input", { bubbles: true }));
+    return () => { c.value = was; c.dispatchEvent(new Event("input", { bubbles: true })); };
+  };
+  // a live wave with no scheduled pack and an unkillable seat: every leg here
+  // is about the pool, and a dart arriving mid-measurement would be noise. The
+  // held button is dropped explicitly — the want persists across ticks by
+  // design (held input), so without this a leg would inherit the last leg's
+  // hold and the gate would raise the comet on the prep's own tick.
+  const enPrep = () => {
+    enc.reset();
+    t.players[0].input.cometWant = false;
+    t.players[0].comet = false;
+    t.stepSim();
+    enc.E.groups.length = 0;
+    enc.E.seats[0].hull = 99;
+  };
+  const EP = () => t.players[0];
+
+  // (1) the drain, and the pool in the hash
+  enPrep();
+  const enStart = EP().energy;
+  for (let k = 0; k < 10; k++) { t.pushInputFrame(0, CF({ rh: 1 })); t.stepSim(); }
+  ok("a held comet drains the pool at COMETDRAIN per tick",
+    EP().comet === true && Math.abs(enStart - EP().energy - 10 * EN().COMETDRAIN) < 1e-9,
+    "start=" + enStart + " now=" + EP().energy + " drain=" + EN().COMETDRAIN);
+  {
+    const base = t.hashState();
+    EP().energy -= 1;
+    const moved = t.hashState();
+    EP().energy += 1;
+    EP().enIdle += 1;
+    const movedIdle = t.hashState();
+    EP().enIdle -= 1;
+    ok("the pool and its recharge delay are both hashed",
+      moved !== base && movedIdle !== base && t.hashState() === base,
+      "base=" + base + " pool=" + moved + " idle=" + movedIdle);
+  }
+
+  // (2) the cut-out: an empty pool ends the comet with the button still held
+  enPrep();
+  t.pushInputFrame(0, CF({ rh: 1 }));
+  t.stepSim();
+  EP().energy = 2 * EN().COMETDRAIN; // two ticks of fuel, staged like a hull
+  t.pushInputFrame(0, CF({ rh: 1 }));
+  t.stepSim();
+  const enCutMid = EP().comet;
+  t.pushInputFrame(0, CF({ rh: 1 }));
+  t.stepSim(); // the last drop goes here
+  const enAtZero = { comet: EP().comet, energy: EP().energy };
+  t.pushInputFrame(0, CF({ rh: 1 }));
+  t.stepSim(); // dry, and the button is STILL held
+  ok("the comet cuts out at an empty pool even with the button still held",
+    enCutMid === true && enAtZero.comet === true && enAtZero.energy === 0 &&
+    EP().comet === false && EP().input.cometWant === true,
+    JSON.stringify({ mid: enCutMid, atZero: enAtZero, comet: EP().comet, want: EP().input.cometWant }));
+
+  // (3) the re-arm floor, and (4) the asymmetry a running comet keeps.
+  // The regen is switched off for the leg, so the pool sits exactly where it is
+  // put and the floor is the only thing that can move the flag.
+  {
+    const undoRegen = enDrive("energy-regen", 0);
+    enPrep();
+    const enFloorCap = t.energyCap(0);
+    const enFloor = enFloorCap * EN().ENARM;
+    EP().energy = enFloor - EN().COMETDRAIN; // one drain's worth UNDER the line
+    EP().enIdle = 0;
+    let enReArmed = false;
+    for (let k = 0; k < 8; k++) {
+      t.pushInputFrame(0, CF({ rh: 1 }));
+      t.stepSim();
+      if (EP().comet) enReArmed = true;
+    }
+    ok("a comet will not re-arm below ENARM × cap, however long the button is held",
+      !enReArmed && Math.abs(EP().energy - (enFloor - EN().COMETDRAIN)) < 1e-9,
+      "floor=" + enFloor + " energy=" + EP().energy + " armed=" + enReArmed);
+    EP().energy = enFloor; // ...and EXACTLY at the line it does
+    t.pushInputFrame(0, CF({ rh: 1 }));
+    t.stepSim();
+    ok("...and it re-arms at exactly the floor, paying the tick's drain",
+      EP().comet === true && Math.abs(EP().energy - (enFloor - EN().COMETDRAIN)) < 1e-9,
+      "comet=" + EP().comet + " energy=" + EP().energy);
+    for (let k = 0; k < 10; k++) { t.pushInputFrame(0, CF({ rh: 1 })); t.stepSim(); }
+    ok("a RUNNING comet keeps running below the floor — the arm rule is asymmetric",
+      EP().comet === true && EP().energy < enFloor && EP().energy > 0,
+      "energy=" + EP().energy + " floor=" + enFloor);
+    undoRegen();
+  }
+
+  // (5) the recharge delay, and (6) the regen rate and its ceiling
+  {
+    const undoRegen = enDrive("energy-regen", 1); // a whole point per tick reads exactly
+    const undoDelay = enDrive("energy-delay", 5);
+    enPrep();
+    for (let k = 0; k < 20; k++) { t.pushInputFrame(0, CF({ rh: 1 })); t.stepSim(); } // spend
+    const enBurnt = EP().energy;
+    for (let k = 0; k < EN().ENDELAY; k++) { t.pushInputFrame(0, CF({ rh: 0 })); t.stepSim(); }
+    const enHeldOff = EP().energy;
+    t.pushInputFrame(0, CF({ rh: 0 }));
+    t.stepSim();
+    const enFirstTick = EP().energy;
+    ok("ENDELAY holds the recharge off for exactly that many ticks after the last spend",
+      enHeldOff === enBurnt && Math.abs(enFirstTick - enBurnt - EN().ENREGEN) < 1e-9,
+      "burnt=" + enBurnt + " heldOff=" + enHeldOff + " first=" + enFirstTick);
+    for (let k = 0; k < 9; k++) { t.pushInputFrame(0, CF({ rh: 0 })); t.stepSim(); }
+    const enTenTicks = EP().energy;
+    for (let k = 0; k < 400; k++) { t.pushInputFrame(0, CF({ rh: 0 })); t.stepSim(); }
+    ok("ENREGEN refills at the stated rate and never past the cap",
+      Math.abs(enTenTicks - enBurnt - 10 * EN().ENREGEN) < 1e-9 &&
+      EP().energy === EP().energyMax && EP().energyMax === t.energyCap(0),
+      "ten=" + enTenTicks + " full=" + EP().energy + " cap=" + EP().energyMax);
+    undoDelay();
+    undoRegen();
+  }
+
+  // (7) COMETHIT — the WORK price, billed by BOTH halves of the knob
+  {
+    // a ram, measured against the same ram at the shipped 0: the difference is
+    // the knob and nothing else (the tick's own COMETDRAIN cancels out)
+    const enRamCost = () => {
+      enPrep();
+      t.pushInputFrame(0, CF({ rh: 1 }));
+      t.stepSim(); // the flag lands; the ring is empty, so it persists
+      enc.spawnEnemy(ship().x + 200, ship().y, 0, "charger");
+      const body = enc.E.enemies[0];
+      body.x = ship().x;
+      body.y = ship().y;
+      const was = EP().energy;
+      t.stepSim();
+      return was - EP().energy;
+    };
+    const enRamFree = enRamCost();
+    const undoHit = enDrive("comet-hit", 10);
+    const enRamPaid = enRamCost();
+    // ...and the other half: a negated incoming hit is work too
+    enPrep();
+    t.pushInputFrame(0, CF({ rh: 1 }));
+    t.stepSim();
+    const enNegWas = EP().energy;
+    const enNegated = enc.damagePlayer(1);
+    const enNegCost = enNegWas - EP().energy;
+    undoHit();
+    // a BODY ram is both halves of the knob at once — contactEvent negates the
+    // body's contact damage through hitPlayer AND deals the comet's own — so it
+    // bills twice, while a beam the comet merely eats bills once. That is the
+    // knob reading what it says: one charge per COMET EVENT, not per touch.
+    ok("COMETHIT bills the ram and the negation alike, and ships inert at 0",
+      Math.abs(enRamFree - EN().COMETDRAIN) < 1e-9 &&
+      Math.abs(enRamPaid - enRamFree - 20) < 1e-9 &&
+      enNegated === false && Math.abs(enNegCost - 10) < 1e-9,
+      "free=" + enRamFree + " paid=" + enRamPaid + " negation=" + enNegCost);
+  }
+
+  // (7b) COMETCD — the comet's bite RATE, split off CONTACTCD.
+  // The rate is what prices COMETHIT and pays OVERLOAD, so it needed its own
+  // knob; the two must move independently in BOTH directions, and at the
+  // shipped 62 they must be indistinguishable — that last claim is what keeps
+  // the committed traces honest about this being a day-one no-op.
+  {
+    // how many contact CLAIMS a parked body pays over a stretch of ticks. The
+    // body is put back on the ship each tick and healed, so a touch is
+    // available on every one of them and the cooldown is the only gate.
+    // contactsDealt is contactEvent's own counter — the claim, not the damage.
+    const enBites = (rh, ticks) => {
+      enPrep();
+      enc.E.seats[0].hull = 9999; // the non-comet leg really takes the contact damage
+      if (rh) { t.pushInputFrame(0, CF({ rh: 1 })); t.stepSim(); }
+      enc.spawnEnemy(ship().x + 200, ship().y, 0, "dart");
+      const body = enc.E.enemies[0];
+      const was = enc.E.contactsDealt;
+      for (let k = 0; k < ticks; k++) {
+        body.x = ship().x;
+        body.y = ship().y;
+        body.vx = 0;
+        body.vy = 0;
+        body.hp = 9999; // a comet ram would otherwise kill it inside the window
+        t.stepSim();
+      }
+      return enc.E.contactsDealt - was;
+    };
+    const enPaceTicks = 130; // shorter than the pool: the comet must not cut out mid-count
+    const enPaceCometBase = enBites(1, enPaceTicks);
+    const enPaceRamBase = enBites(0, enPaceTicks);
+    const undoCometCd = enDrive("comet-cd", 10); // only the COMET's rate moves
+    const enPaceCometFast = enBites(1, enPaceTicks);
+    const enPaceRamHeld = enBites(0, enPaceTicks);
+    undoCometCd();
+    const undoContactCd = enDrive("contactcd", 10); // ...and now only the NORMAL ram's
+    const enPaceRamFast = enBites(0, enPaceTicks);
+    const enPaceCometHeld = enBites(1, enPaceTicks);
+    undoContactCd();
+    ok("at the shipped defaults COMETCD and CONTACTCD are indistinguishable",
+      enc.tunables().COMETCD === enc.tunables().CONTACTCD &&
+      enPaceCometBase === enPaceRamBase && enPaceCometBase > 0,
+      "comet=" + enPaceCometBase + " ram=" + enPaceRamBase +
+      " cd=" + enc.tunables().COMETCD + "/" + enc.tunables().CONTACTCD);
+    ok("COMETCD paces comet touches alone — a normal ram's rate never follows it",
+      enPaceCometFast > enPaceCometBase && enPaceRamHeld === enPaceRamBase,
+      "comet=" + enPaceCometFast + " (was " + enPaceCometBase + ") ram=" +
+      enPaceRamHeld + " (was " + enPaceRamBase + ")");
+    ok("...and the reverse: CONTACTCD paces a normal ram alone, and the comet never follows",
+      enPaceRamFast > enPaceRamBase && enPaceCometHeld === enPaceCometBase,
+      "ram=" + enPaceRamFast + " (was " + enPaceRamBase + ") comet=" +
+      enPaceCometHeld + " (was " + enPaceCometBase + ")");
+  }
+
+  // (8) COMETTHR — a burning comet costs more than a coasting one
+  {
+    const undoThr = enDrive("comet-thr", 2);
+    enPrep();
+    t.pushInputFrame(0, CF({ rh: 1 }));
+    t.stepSim(); // the flag lands
+    const enCoastWas = EP().energy;
+    t.pushInputFrame(0, CF({ rh: 1 }));
+    t.stepSim(); // ...and a tick with no thrust at all
+    const enCoast = enCoastWas - EP().energy;
+    const enBurnWas = EP().energy;
+    t.pushInputFrame(0, CF({ rh: 1, tx: 8, ty: 5 }));
+    t.stepSim();
+    const enBurn = enBurnWas - EP().energy;
+    undoThr();
+    ok("COMETTHR prices the thrust: a burning comet costs more than a coasting one",
+      Math.abs(enCoast - EN().COMETDRAIN) < 1e-9 && enBurn > enCoast,
+      "coast=" + enCoast + " burn=" + enBurn);
+  }
+
+  // (9) ENORB — salvage tops the pool up, and ships switched off
+  {
+    const undoRegen = enDrive("energy-regen", 0); // only the orb may move the pool
+    const enOrbGain = () => {
+      enPrep();
+      EP().energy = t.energyCap(0) - 40; // room UNDER THE CAP for a refill to show —
+                                         // read off the live cap, never a magic number,
+                                         // or an ENMAX retune buries the 20 the orb adds
+      EP().enIdle = 0;
+      enc.E.orbs.push({ id: 9001, x: ship().x, y: ship().y, vx: 0, vy: 0 });
+      const was = EP().energy;
+      t.pushInputFrame(0, CF({ rh: 0 }));
+      t.stepSim();
+      return { gain: EP().energy - was, orbs: enc.E.orbs.length };
+    };
+    const enOrbOff = enOrbGain();
+    const undoOrb = enDrive("energy-orb", 20);
+    const enOrbOn = enOrbGain();
+    undoOrb();
+    undoRegen();
+    ok("ENORB tops the pool up on pickup, and the shipped 0 leaves it alone",
+      enOrbOff.gain === 0 && enOrbOff.orbs === 0 &&
+      enOrbOn.gain === 20 && enOrbOn.orbs === 0,
+      JSON.stringify({ off: enOrbOff, on: enOrbOn }));
+  }
+
+  // (10) ENERGY CELL — the cap rises per rank, and the purchase deals it filled
+  {
+    enPrep();
+    const enCellIdx = enc.shopInfo().findIndex((r) => r.name === "ENERGY CELL");
+    const enCapBase = t.energyCap(0);
+    EP().energy = 10; // drained, so the fill is observable rather than assumed
+    enc.addXp(1000);
+    const enBought = enc.buy(enCellIdx);
+    const enCap1 = t.energyCap(0);
+    const enFilled = { energy: EP().energy, max: EP().energyMax, idle: EP().enIdle };
+    enc.buy(enCellIdx); // rank 2 — re-derived from the rank, never compounded
+    const enCap2 = t.energyCap(0);
+    ok("ENERGY CELL raises the cap by ENCELL × ENMAX per rank and deals the seat filled",
+      enBought === true && enCellIdx >= 0 &&
+      Math.abs(enCap1 - enCapBase - EN().ENCELL * EN().ENMAX) < 1e-9 &&
+      Math.abs(enCap2 - enCapBase - 2 * EN().ENCELL * EN().ENMAX) < 1e-9 &&
+      enFilled.energy === enCap1 && enFilled.max === enCap1 && enFilled.idle === 0,
+      JSON.stringify({ base: enCapBase, r1: enCap1, r2: enCap2, filled: enFilled }));
+  }
+
+  // (11) RECHARGER — the regen rate rises per rank, measured through the sim
+  {
+    const undoDelay = enDrive("energy-delay", 0); // no delay to wait out between reads
+    enPrep();
+    const enRegenTick = () => {
+      EP().energy = 10;
+      EP().enIdle = 0;
+      const was = EP().energy;
+      t.pushInputFrame(0, CF({ rh: 0 }));
+      t.stepSim();
+      return EP().energy - was;
+    };
+    const enRegen0 = enRegenTick();
+    enc.addXp(1000);
+    enc.buy(enc.shopInfo().findIndex((r) => r.name === "RECHARGER"));
+    const enRegen1 = enRegenTick();
+    undoDelay();
+    ok("RECHARGER raises the regen rate by ENRECH per rank",
+      Math.abs(enRegen0 - EN().ENREGEN) < 1e-9 &&
+      Math.abs(enRegen1 - EN().ENREGEN * (1 + EN().ENRECH)) < 1e-9,
+      "rank0=" + enRegen0 + " rank1=" + enRegen1 + " regen=" + EN().ENREGEN);
+  }
+
+  // (12) OVERLOAD — a draining comet bites harder, and rank 0 changes nothing
+  {
+    const enFuryIdx = enc.shopInfo().findIndex((r) => r.name === "OVERLOAD");
+    // `energy` null means "leave the pool full" — the cap has to be read INSIDE
+    // the leg, because enPrep's restart clears every rank the cap is derived from
+    const enFuryRam = (energy, ranks) => {
+      enPrep();
+      if (ranks) { enc.addXp(1000); for (let k = 0; k < ranks; k++) enc.buy(enFuryIdx); }
+      t.pushInputFrame(0, CF({ rh: 1 }));
+      t.stepSim();
+      EP().energy = energy === null ? t.energyCap(0) : energy;
+      enc.spawnEnemy(ship().x + 200, ship().y, 0, "charger");
+      const body = enc.E.enemies[0];
+      body.x = ship().x; // parked ON the ship: the touch cannot depend on how
+      body.y = ship().y; // far the body walked this tick
+      const hpWas = body.hp;
+      t.stepSim();
+      // the frac contactEvent actually read: energyStep drains BEFORE the
+      // encounter steps, so the post-drain fraction is the honest denominator
+      return { dHp: hpWas - body.hp, frac: t.energyFrac(0), rank: enc.state().mods.fury };
+    };
+    const enFury0Full = enFuryRam(null, 0);
+    const enFury0Low = enFuryRam(5, 0);
+    const enFury3Low = enFuryRam(5, 3);
+    const enFury3Full = enFuryRam(null, 3);
+    const enWant = (r, frac) => cmTun.COMETDMG * (1 + EN().COMETFURY * r * (1 - frac));
+    ok("OVERLOAD rank 0 changes nothing: a comet ram pays COMETDMG at any pool level",
+      Math.abs(enFury0Full.dHp - cmTun.COMETDMG) < 1e-9 &&
+      Math.abs(enFury0Low.dHp - cmTun.COMETDMG) < 1e-9,
+      JSON.stringify({ full: enFury0Full, low: enFury0Low }));
+    ok("OVERLOAD makes a near-empty comet bite harder than a full one, linearly in the pool",
+      enFury3Low.rank === 3 && enFury3Low.dHp > enFury3Full.dHp &&
+      Math.abs(enFury3Low.dHp - enWant(3, enFury3Low.frac)) < 1e-9 &&
+      Math.abs(enFury3Full.dHp - enWant(3, enFury3Full.frac)) < 1e-9,
+      JSON.stringify({ low: enFury3Low, full: enFury3Full }));
+  }
+
+  // (13) COMETAOEDMG — the halo becomes real reach, and the shipped 0 does not
+  {
+    // Parked 15 px beyond body contact and held still: at the shipped 0 the
+    // sweep must miss, and a wide reach must catch it. The gap is 15 rather
+    // than 1 on purpose — the body still takes its own step before the sweep
+    // runs, and no archetype closes 15 px in one tick, so the leg measures the
+    // REACH and never the enemy's walk.
+    const enReachHit = (aoe) => {
+      const undo = enDrive("comet-aoedmg", aoe);
+      enPrep();
+      t.pushInputFrame(0, CF({ rh: 1 }));
+      t.stepSim(); // full pool, comet up — the reach is at its widest
+      enc.spawnEnemy(ship().x + 400, ship().y, 0, "charger");
+      const body = enc.E.enemies[0];
+      body.x = ship().x + body.r + enShipR + 15;
+      body.y = ship().y;
+      body.vx = 0;
+      body.vy = 0;
+      const hpWas = body.hp;
+      t.stepSim();
+      const hit = hpWas - body.hp > 0;
+      undo();
+      return hit;
+    };
+    const enReachOff = enReachHit(0);
+    const enReachOn = enReachHit(40);
+    ok("COMETAOEDMG widens the contact sweep, and at the shipped 0 the reach is exactly e.r + SHIP_R",
+      enReachOff === false && enReachOn === true,
+      "shipped=" + enReachOff + " widened=" + enReachOn);
+  }
+
+  // (14) a dead seat neither burns nor rams, and comes back on a full pool
+  {
+    enPrep();
+    t.pushInputFrame(0, CF({ rh: 1 }));
+    t.stepSim();
+    enc.E.seats[0].hull = 1;
+    enc.damagePlayer(99); // ...but a comet negates it, so drop the flag first
+    EP().input.cometWant = false;
+    t.pushInputFrame(0, CF({ rh: 0 }));
+    t.stepSim();
+    enc.damagePlayer(99);
+    const enDown = enc.E.seats[0].hull <= 0;
+    EP().energy = 20;
+    EP().input.cometWant = true; // the corpse holds the button down
+    t.stepSim();
+    const enCorpse = { comet: EP().comet, energy: EP().energy };
+    enc.respawnSeat(0);
+    ok("a dead seat neither burns nor rams, and respawn returns it on a full pool",
+      enDown && enCorpse.comet === false && enCorpse.energy >= 20 &&
+      EP().energy === EP().energyMax && EP().energyMax === t.energyCap(0) && EP().enIdle === 0,
+      JSON.stringify({ down: enDown, corpse: enCorpse, after: EP().energy, cap: EP().energyMax }));
+    EP().input.cometWant = false;
+  }
+
+  // (15) the halo tracks the pool. Computed, never pixel-probed: the pixel
+  // sections deliberately never raise the comet flag around their ink
+  // comparisons, so the readout is asserted as the arithmetic drawCometGlow does
+  {
+    enPrep();
+    t.pushInputFrame(0, CF({ rh: 1 }));
+    t.stepSim();
+    EP().energy = t.energyCap(0); // the tick's own drain put it just under full
+    const enHaloFull = enShipR + EN().COMETAOE * t.energyFrac(0);
+    EP().energy = t.energyCap(0) / 2;
+    const enHaloHalf = enShipR + EN().COMETAOE * t.energyFrac(0);
+    EP().energy = 0;
+    const enHaloDry = enShipR + EN().COMETAOE * t.energyFrac(0);
+    // the dry case is the one with teeth: EXACTLY the ship's own radius, with no
+    // floor left holding a ring around a spent comet
+    ok("the comet halo grows with the pool and collapses onto the bare hull as it empties",
+      Math.abs(enHaloFull - (enShipR + EN().COMETAOE)) < 1e-6 &&
+      Math.abs(enHaloHalf - (enShipR + EN().COMETAOE / 2)) < 1e-6 &&
+      Math.abs(enHaloDry - enShipR) < 1e-9,
+      "full=" + enHaloFull + " half=" + enHaloHalf + " dry=" + enHaloDry);
+  }
+
+  t.setInputMode(cmInputWas);
+  t.setInputLag(cmLagWas);
+  enc.reset();
 
   // ---- U. BLAST CHARGE: the splash a terminating player shot leaves ----
   // Rank 0 splashes nothing at all. Every rank above it damages every OTHER
@@ -1973,12 +3395,9 @@ window.runWave1Checks = function () {
   const inD = rim1 - 3;    // its circle overlaps the blast by 3 px
   const outD = rim1 + 3;   // 3 px of daylight past the rim
   const midD = rim2 - 5;   // outside rank one's rim, inside rank two's
-  const blastRanks = (n) => { // one staged shop visit, n ranks — the flow is F's
-    enc.E.state = "cleared";
-    enc.openShop();
+  const blastRanks = (n) => { // n ranks, bought mid-wave — the panel needs no visit
     enc.addXp(1000);
     for (let k = 0; k < n; k++) enc.buy(blastIdx);
-    enc.E.state = "active"; // back to a live field without dealing a wave
   };
   // one shot that terminates on a body, with a neighbour parked at each given
   // distance from the impact point. keep=true skips the reset, so a leg can
@@ -2090,11 +3509,9 @@ window.runWave1Checks = function () {
   // ---- V. the BLAST CHARGE row: 8/16/32, three ranks, and the run's end ----
   enc.reset();
   enc.advance(1);
-  enc.E.state = "cleared";
-  enc.openShop();
-  enc.addXp(1000);
-  ok("the catalog's sixth row is BLAST CHARGE, unowned and unmaxed",
-    blastIdx === 5 && enc.shopInfo()[blastIdx].owned === 0 &&
+  enc.addXp(1000); // mid-wave — the panel needs no staged visit
+  ok("the catalog's fifth row is BLAST CHARGE, unowned and unmaxed",
+    blastIdx === 4 && enc.shopInfo()[blastIdx].owned === 0 &&
     enc.shopInfo()[blastIdx].maxed === false && enc.shopInfo()[blastIdx].available === true,
     JSON.stringify(enc.shopInfo()[blastIdx]));
   const bCosts = [];
@@ -2111,24 +3528,24 @@ window.runWave1Checks = function () {
     enc.buy(blastIdx) === false && enc.shopInfo()[blastIdx].maxed === true &&
     enc.state().owned[blastIdx] === 3 && enc.state().mods.blast === 3,
     "owned=" + enc.state().owned[blastIdx] + " rank=" + enc.state().mods.blast);
-  // the sixth card sells through the real pointer path, click and all
+  // the last card sells through the real pointer path, click and all
   enc.restart();
   enc.advance(1);
-  enc.E.state = "cleared";
-  enc.openShop();
   enc.addXp(8);
   clickCard(blastIdx);
   s = enc.state();
-  ok("a click on the sixth card buys the sixth row and the shop stays open",
-    s.mods.blast === 1 && s.owned[blastIdx] === 1 && s.xp === 0 && s.state === "shop",
+  ok("a click on the last card buys the last row, mid-wave",
+    s.mods.blast === 1 && s.owned[blastIdx] === 1 && s.xp === 0 && s.state === "warning",
     "rank=" + s.mods.blast + " xp=" + s.xp + " state=" + s.state);
-  // The grid itself: every card and the button land wholly on the field, no
-  // two cards overlap, and the detail line and the button sit clear below the
-  // last row. This is the check that fails the day a seventh row is appended —
-  // three columns of two rows is what 512 × 342 holds.
+  // The column itself: every card lands wholly inside the panel's logical
+  // space, no two cards overlap, and the header and detail bands sit clear
+  // of the column. This is the check that fails the day a ninth row
+  // outgrows the panel height game.js is fitting into the gutter — the pool's
+  // three rows already took it from five cards to eight, and panelPlace scales
+  // the whole taller column into the same gutter, so every card draws smaller.
   const lay = enc.shopLayout();
-  const onField = lay.cards.every((c) => c.x >= 0 && c.y >= 0 && c.x + c.w <= t.FW && c.y + c.h <= t.FH);
-  const gridBottom = Math.max(...lay.cards.map((c) => c.y + c.h));
+  const onPanel = lay.cards.every((c) => c.x >= 0 && c.y >= 0 && c.x + c.w <= lay.w && c.y + c.h <= lay.h);
+  const colBottom = Math.max(...lay.cards.map((c) => c.y + c.h));
   let overlap = false;
   for (let a = 0; a < lay.cards.length; a++) {
     for (let b = a + 1; b < lay.cards.length; b++) {
@@ -2136,13 +3553,12 @@ window.runWave1Checks = function () {
       if (p.x < q.x + q.w && q.x < p.x + p.w && p.y < q.y + q.h && q.y < p.y + p.h) overlap = true;
     }
   }
-  ok("six cards, the detail line and the button all fit the field without overlapping",
-    lay.cards.length === 6 && lay.rows === 2 && onField && !overlap &&
-    lay.titleY < lay.grid.y && lay.detailY > gridBottom &&
-    lay.btn.y > lay.detailY && lay.btn.y + lay.btn.h < t.FH &&
-    lay.btn.x >= 0 && lay.btn.x + lay.btn.w <= t.FW && lay.noteY <= t.FH,
-    JSON.stringify({ rows: lay.rows, gridBottom, detailY: lay.detailY, btn: lay.btn,
-                     noteY: lay.noteY, onField, overlap, FH: t.FH }));
+  ok("eight cards, the header and the hint band all fit the panel without overlapping",
+    lay.cards.length === 8 && onPanel && !overlap &&
+    lay.headerY < lay.cards[0].y && lay.detailTop >= colBottom && lay.detailTop < lay.h &&
+    lay.h === lay.detailTop + lay.detailH,
+    JSON.stringify({ onPanel, overlap, colBottom, detailTop: lay.detailTop,
+      detailH: lay.detailH, h: lay.h }));
   // ...and the hit test agrees with the draw for every one of the six, corner
   // to corner: a card's own rect hits it, and one pixel outside does not
   const hitAgrees = liveVal(() => lay.cards.every((c) => {
@@ -2156,27 +3572,6 @@ window.runWave1Checks = function () {
     return enc.state().shopHover !== c.i;
   }));
   ok("the hit test resolves every card to its own rect and nothing else", hitAgrees);
-  const btnHit = liveVal(() => {
-    enc.shopHover(lay.btn.x + lay.btn.w / 2, lay.btn.y + lay.btn.h / 2);
-    const on = enc.state().shopBtn === true && enc.state().shopHover === -1;
-    enc.shopHover(lay.btn.x + lay.btn.w / 2, lay.btn.y - 2);
-    return on && enc.state().shopBtn === false;
-  });
-  ok("the NEXT WAVE button hit-tests to its own rect and no further", btnHit);
-  // shopPopupRect picks the band with the most room, so a top-row card sends
-  // the art DOWN and a bottom-row card sends it UP. Only one row carries art
-  // today and it is a bottom-row card, so the other branch would otherwise
-  // ship untested — check every card, and check both branches were taken.
-  const popRects = lay.cards.map((c) => ({ c, p: enc.shopPopupRect(c.i) }));
-  const popClear = popRects.every(({ c, p }) =>
-    p.x >= 0 && p.y >= 0 && p.x + p.w <= t.FW && p.y + p.h <= t.FH &&
-    (p.y + p.h <= c.y || p.y >= c.y + c.h));
-  const popBothWays = popRects.some(({ c, p }) => p.y + p.h <= c.y) &&
-                      popRects.some(({ c, p }) => p.y >= c.y + c.h);
-  ok("every row's hover art lands on the field and clear of its own card",
-    popClear && popBothWays,
-    JSON.stringify({ clear: popClear, bothWays: popBothWays,
-      rects: popRects.map(({ c, p }) => [c.i, p.y, p.y + p.h, c.y, c.y + c.h]) }));
   // and the rank dies with the run — the splash is a purchase, never a meta-unlock
   enc.restart();
   enc.advance(1);
@@ -2213,12 +3608,12 @@ window.runWave1Checks = function () {
     enc.E.groups.length = 0;
     enc.E.hull = 99; // observation, not survival: a lance must not end a leg early
   };
-  // walk the REAL wave transitions up to wave w (cleared → shop → continue),
-  // because no hook deals a wave directly and the per-wave scaling is exactly
-  // what the late-wave legs are about
+  // deal wave w directly through the sim's own startWave (enc.dealWave) —
+  // the same call encStep makes when a clear hold expires, so the per-wave
+  // scaling the late-wave legs are about is the production deal
   const jumpTo = (w) => {
     enc.reset();
-    while (enc.state().wave < w) { enc.E.state = "cleared"; enc.openShop(); enc.continueFromShop(); }
+    if (w > 1) enc.dealWave(w);
     enc.advance(1);
     enc.E.groups.length = 0;
     enc.E.hull = 99;
@@ -2581,18 +3976,22 @@ window.runWave1Checks = function () {
   ok("an off-screen missile earns its own edge chevron, and an on-screen one does not",
     misArrow.length === 1 && misArrow[0].type === "missile" && misSeen.length === 0,
     "off=" + JSON.stringify(misArrow.map((a) => a.type)) + " on=" + misSeen.length);
-  // ordnance lives inside encStep, so every screen that freezes the sim freezes
-  // it too — a shop visit must not be a free 90 ticks of flight
+  // ordnance lives inside encStep, so the ONE remaining freeze — the dead
+  // screen — holds it too, and a wave-clear banner (a live world) does not
   bare();
   const misHeld = enc.spawnMissile(ship().x, ship().y - 1400, 0);
-  enc.E.state = "cleared";
-  enc.openShop();
+  const misDead = enc.E.state; // remember the live state the stage interrupts
+  enc.E.state = "dead";
   const misHeldX = misHeld.x;
   const misHeldY = misHeld.y;
   enc.advance(40);
-  ok("a frozen shop holds the ordnance mid-flight, like everything else in the sim",
+  ok("the dead freeze holds the ordnance mid-flight, like everything else in the sim",
     enc.frozen() && misHeld.x === misHeldX && misHeld.y === misHeldY && enc.state().missiles === 1,
     "frozen=" + enc.frozen() + " moved=" + (misHeld.x !== misHeldX || misHeld.y !== misHeldY));
+  enc.E.state = misDead;
+  enc.advance(1);
+  ok("...and a live tick moves it again — no other screen freezes the sim",
+    misHeld.x !== misHeldX || misHeld.y !== misHeldY);
   // and none of it survives a restart, counter included
   bare();
   enc.spawnMissile(ship().x + 150, ship().y, 0);
@@ -2948,7 +4347,7 @@ window.runWave1Checks = function () {
   // stolen or reordered number moves them and the two keys separate.
   const detRun = () => {
     enc.reset();
-    while (enc.state().wave < 5) { enc.E.state = "cleared"; enc.openShop(); enc.continueFromShop(); }
+    enc.dealWave(5);
     enc.E.hull = 99999; // a parked ship in wave 5 is a target — the run must not end early
     let shards = 0;
     let air = 0;
@@ -2980,6 +4379,1024 @@ window.runWave1Checks = function () {
     detA.shards > 0 && detA.air > 0 && detA.kills > 0 &&
     detA.shards === detB.shards && detA.air === detB.air && detA.shot === detB.shot,
     "shards=" + detA.shards + " ordnance=" + detA.air + " kills=" + detA.kills + " shot=" + detA.shot);
+
+  // ---- AC. per-seat upgrade terms — phase 08.5 ----
+  // Every rank, price and effect is PERSONAL now: termsFor(seat) is the one
+  // derivation, and the panel draws the LOCAL seat's view (seat 0 until
+  // phase 09 lands localSeat). The pixel legs extend section R's draw-level
+  // probes: the drawn card must IGNORE another seat's purchase and MOVE for
+  // the local seat's — both directions, so a panel that stopped reading
+  // ranks at all cannot pass as "nothing moved".
+  t.setPlayerCount(2);
+  enc.restart();
+  enc.addXp(100, 0);
+  enc.addXp(100, 1);
+  const acAB = enc.shopInfo().findIndex((r) => r.name === "AFTERBURNER");
+  const acRL = enc.shopInfo().findIndex((r) => r.name === "RAPID LOADER");
+  // the derivation itself, both seats stock
+  ok("termsFor derives stock terms for both fresh seats, and a missing seat derives stock",
+    enc.termsFor(0).speed === 0 && enc.termsFor(1).speed === 0 &&
+    Math.abs(enc.termsFor(0).cool - 1) < 1e-12 && enc.termsFor(9).speed === 0 &&
+    enc.termsFor(9).cool === 1,
+    JSON.stringify({ t0: enc.termsFor(0), ghost: enc.termsFor(9) }));
+  // the drawn card, before any purchase
+  const acPlace = t.panelPlaceFor("shop");
+  const acLay = enc.shopLayout();
+  const acCard = acLay.cards[acAB];
+  const acStrip = () => { // a grid across the card's lower band — price text
+    const pts = [];      // and rank pips both live there at every fit
+    for (let px = 2; px <= acCard.w - 2; px += 4) {
+      for (let py = Math.round(acCard.h * 0.55); py <= acCard.h - 2; py += 3) {
+        const q = panelField(acPlace, acCard.x + px, acCard.y + py);
+        pts.push(arrPx(q.x, q.y));
+      }
+    }
+    return pts.join("|");
+  };
+  t.render();
+  const acInkStock = acStrip();
+  // seat 1 buys — the LOCAL panel must not move an ink grain
+  const acSale1 = enc.buy(acAB, 1);
+  t.render();
+  const acInkAfterRemote = acStrip();
+  ok("a REMOTE seat's purchase moves nothing on the drawn local card",
+    acSale1 === true && acInkAfterRemote === acInkStock,
+    "sale=" + acSale1 + " moved=" + (acInkAfterRemote !== acInkStock));
+  ok("...while the remote seat's own price doubled and the local seat's did not",
+    enc.shopInfo(1)[acAB].cost === 8 && enc.shopInfo(0)[acAB].cost === 4 &&
+    enc.shopPriceLabel(acAB) === "4 XP" && enc.shopPriceLabel(acAB, 1) === "8 XP",
+    JSON.stringify({ s0: enc.shopInfo(0)[acAB].cost, s1: enc.shopInfo(1)[acAB].cost }));
+  // seat 0 buys — the SAME probe must move (the non-vacuity direction)
+  const acSale0 = enc.buy(acAB, 0);
+  t.render();
+  const acInkAfterLocal = acStrip();
+  ok("the LOCAL seat's purchase moves the drawn card — the probe is live, not a scrim",
+    acSale0 === true && acInkAfterLocal !== acInkStock,
+    "sale=" + acSale0 + " moved=" + (acInkAfterLocal !== acInkStock));
+  // effects isolated at the derivation: fire cooldown, blast radius
+  enc.buy(acRL, 1);
+  ok("RAPID LOADER on seat 1 leaves seat 0's cooldown term at stock",
+    Math.abs(enc.termsFor(1).cool - 1 / 1.15) < 1e-12 && enc.termsFor(0).cool === 1,
+    JSON.stringify({ c1: enc.termsFor(1).cool, c0: enc.termsFor(0).cool }));
+  ok("blastRadius sizes off the asked seat's own rank",
+    enc.blastRadius(0) === 0 && enc.blastRadius(1) === 0 &&
+    (enc.E.seats[1].owned[enc.shopInfo().findIndex((r) => r.name === "BLAST CHARGE")] = 2,
+     enc.blastRadius(1) > 0 && enc.blastRadius(0) === 0),
+    JSON.stringify({ r0: enc.blastRadius(0), r1: enc.blastRadius(1) }));
+  // the term epoch: one step per sale, one step per reset, NEVER backwards —
+  // and a restart resets every seat's ranks through the same primitive
+  const acSeq1 = enc.E.seats[1].termSeq;
+  const acSeq0 = enc.E.seats[0].termSeq;
+  enc.buy(acAB, 1);
+  ok("a sale steps the buyer's termSeq alone",
+    enc.E.seats[1].termSeq === acSeq1 + 1 && enc.E.seats[0].termSeq === acSeq0,
+    JSON.stringify({ acSeq1, now1: enc.E.seats[1].termSeq, now0: enc.E.seats[0].termSeq }));
+  enc.resetSeatUpgrades(1);
+  ok("resetSeatUpgrades clears ONE seat's ranks, steps ITS epoch, and touches no other seat",
+    enc.E.seats[1].owned.every((n) => n === 0) && enc.E.seats[1].termSeq === acSeq1 + 2 &&
+    enc.E.seats[0].owned[acAB] === 1 && enc.E.seats[0].termSeq === acSeq0,
+    JSON.stringify({ owned1: enc.E.seats[1].owned, owned0: enc.E.seats[0].owned }));
+  const acSeqPre = enc.E.seats[0].termSeq;
+  enc.restart();
+  ok("a restart resets every seat's ranks and still INCREMENTS the epochs — never rewinds",
+    enc.E.seats[0].owned.every((n) => n === 0) && enc.E.seats[1].owned.every((n) => n === 0) &&
+    enc.E.seats[0].termSeq === acSeqPre + 1,
+    JSON.stringify({ pre: acSeqPre, post: enc.E.seats[0].termSeq }));
+  // a DOWNED seat may browse but not buy — and the refusal touches no rank
+  // on any seat (the phase-08 rule, restated per seat)
+  enc.addXp(50, 1);
+  enc.E.seats[1].hull = 0;
+  ok("a downed seat's buy is refused and no seat's ranks move",
+    enc.buy(acAB, 1) === false && enc.E.seats[1].owned[acAB] === 0 &&
+    enc.E.seats[0].owned[acAB] === 0 && enc.E.seats[1].xp === 50,
+    JSON.stringify({ owned1: enc.E.seats[1].owned[acAB], xp1: enc.E.seats[1].xp }));
+  t.setPlayerCount(1);
+  enc.restart();
+
+  // ---- (PvP) players are dangerous to each other, and only a PLAYER kill
+  // takes a run away. Two seats, staged directly: hitPlayer's third argument
+  // is the damage SOURCE, and everything below turns on whether it is present.
+  {
+    t.setPlayerCount(2);
+    const pvInputWas = t.inputState().INPUTMODE;
+    t.setInputMode("tick");
+    t.setInputLag(0);
+    const PF = (o) => ({ tx: 0, ty: 0, ax: 0, ay: 0, fp: 0, fh: false, kx: 0, ky: 0, cx: 0, cy: 0, ...o });
+    const pvPrep = () => {
+      enc.restart(9114);
+      enc.E.groups = [];
+      enc.E.enemies.length = 0;
+      t.G.bullets.length = 0;
+      t.G.started = true;
+      t.G.running = true;
+      for (const P of t.players) { P.comet = false; P.input.cometWant = false; P.vel.x = 0; P.vel.y = 0; }
+      for (let s = 0; s < t.players.length; s++) t.energyFill(s);
+      for (const S of enc.E.seats) { S.score = 0; S.invuln = 0; S.respawnT = 0; }
+      t.players[0].ship.x = 1000; t.players[0].ship.y = 1000;
+      t.players[1].ship.x = 1400; t.players[1].ship.y = 1000;
+      enc.E.shipPrev = null;
+    };
+    // a SWEPT round: it has already travelled px,py -> x,y this tick, so one
+    // resolveBulletHits() pass sees a real segment and no integrate step is
+    // needed to put it there
+    const pvShot = (owner, px, py, x, y, dmg) => ({ x, y, px, py, vx: x - px, vy: y - py,
+      r: 2.2, dmg: dmg === undefined ? 1 : dmg, owner, dead: false, spent: false, ttl: 60 });
+
+    // (a) a bullet from another seat takes hull, and the seat's own never can
+    pvPrep();
+    enc.E.seats[1].hull = 3;
+    t.G.bullets.push(pvShot(0, 1340, 1000, 1420, 1000));
+    enc.resolveBulletHits();
+    const pvBulletHit = enc.E.seats[1].hull;
+    pvPrep();
+    enc.E.seats[1].hull = 3;
+    t.G.bullets.push(pvShot(1, 1340, 1000, 1420, 1000)); // seat 1's OWN round, through seat 1
+    enc.resolveBulletHits();
+    ok("a bullet takes another seat's hull, and a seat's own round passes straight through it",
+      pvBulletHit === 2 && enc.E.seats[1].hull === 3,
+      "cross=" + pvBulletHit + " self=" + enc.E.seats[1].hull);
+
+    // (a2) an UNOWNED round reaches no ship at all
+    pvPrep();
+    enc.E.seats[1].hull = 3;
+    t.G.bullets.push(pvShot("none", 1340, 1000, 1420, 1000));
+    enc.resolveBulletHits();
+    ok("an unowned bullet cannot take a hull — the shooter < 0 continue drops it before the ship class",
+      enc.E.seats[1].hull === 3, "hull=" + enc.E.seats[1].hull);
+
+    // (b) enemies win an EXACT tie: the ship class is tested LAST and joins
+    // the same running minimum under a strict <, so a body whose entry
+    // parameter is bit-for-bit the ship's takes the round. The tie is
+    // CONSTRUCTED, not hoped for: along a straight shot at y = 1000 a circle
+    // of radius R centred at cx is entered at x = cx - R, so placing the body
+    // at (shipX - shipReach) + bodyReach makes the two entry points the same
+    // x — and therefore the same t.
+    pvPrep();
+    enc.E.seats[1].hull = 3;
+    enc.spawnEnemy(1400, 1000, 0, "dart");
+    const pvTieFoe = enc.E.enemies[enc.E.enemies.length - 1];
+    const pvTieR = 2.2;                       // the staged round's own radius
+    const pvTieShipR = enShipR + pvTieR;      // the ship candidate's inflated reach
+    pvTieFoe.x = (1400 - pvTieShipR) + (pvTieFoe.r + pvTieR);
+    const pvTieHp = pvTieFoe.hp;
+    // the tie itself, read off production's own solver rather than asserted by faith
+    const pvTieTf = enc.segCircleEntryT(1340, 1000, 1420, 1000, pvTieFoe.x, pvTieFoe.y, pvTieFoe.r + pvTieR);
+    const pvTieTs = enc.segCircleEntryT(1340, 1000, 1420, 1000, 1400, 1000, pvTieShipR);
+    t.G.bullets.push(pvShot(0, 1340, 1000, 1420, 1000));
+    enc.resolveBulletHits();
+    ok("enemies win an EXACT tie against a ship — the ship candidate joins the same minimum last",
+      pvTieTf === pvTieTs && pvTieFoe.hp < pvTieHp && enc.E.seats[1].hull === 3,
+      "tFoe=" + pvTieTf + " tShip=" + pvTieTs + " foeHp=" + pvTieFoe.hp + "/" + pvTieHp +
+      " hull=" + enc.E.seats[1].hull);
+
+    // ...and the OTHER half of the same rule, which the enemy leg alone does
+    // not cover: ORDNANCE also beats a ship on an exact tie, because the
+    // missile loop is tested before the ship loop under the same strict <.
+    // Without this, hoisting the ship loop above the missile loop passes.
+    pvPrep();
+    enc.E.seats[1].hull = 3;
+    const pvTieM = enc.spawnMissile(1400, 1000, 0);
+    pvTieM.x = (1400 - pvTieShipR) + (pvTieM.r + pvTieR); // the same construction
+    pvTieM.y = 1000;
+    const pvTieMhp = pvTieM.hp;
+    const pvTieTm = enc.segCircleEntryT(1340, 1000, 1420, 1000, pvTieM.x, pvTieM.y, pvTieM.r + pvTieR);
+    const pvTieShotM = enc.E.missilesShot;
+    t.G.bullets.push(pvShot(0, 1340, 1000, 1420, 1000));
+    enc.resolveBulletHits();
+    ok("ordnance ALSO wins an exact tie against a ship — missiles are tested before the ship class",
+      pvTieTm === pvTieTs && enc.E.missiles.length === 0 &&
+      enc.E.missilesShot === pvTieShotM + 1 && enc.E.seats[1].hull === 3,
+      "tMissile=" + pvTieTm + " tShip=" + pvTieTs + " live=" + enc.E.missiles.length +
+      " shot=" + (enc.E.missilesShot - pvTieShotM) + " hull=" + enc.E.seats[1].hull +
+      " mhp=" + pvTieMhp);
+
+    // (c) a NEGATED strike (the victim is in comet) still consumes the round,
+    // moves no hull, and counts no hitsDealt — the anvil precedent
+    pvPrep();
+    enc.E.seats[1].hull = 3;
+    t.players[1].comet = true;
+    const pvNegDealt = enc.E.hitsDealt;
+    t.G.bullets.push(pvShot(0, 1340, 1000, 1420, 1000));
+    const pvNegBullet = t.G.bullets[t.G.bullets.length - 1];
+    enc.resolveBulletHits();
+    ok("a comet negates the round, and the round is CONSUMED anyway — no hull, no hitsDealt",
+      pvNegBullet.dead === true && enc.E.seats[1].hull === 3 && enc.E.hitsDealt === pvNegDealt,
+      JSON.stringify({ dead: pvNegBullet.dead, hull: enc.E.seats[1].hull,
+                       dealt: enc.E.hitsDealt - pvNegDealt }));
+
+    // (d) a GRACED strike is consumed on the same terms
+    pvPrep();
+    enc.E.seats[1].hull = 3;
+    enc.E.seats[1].invuln = 30;
+    t.G.bullets.push(pvShot(0, 1340, 1000, 1420, 1000));
+    const pvGraceBullet = t.G.bullets[t.G.bullets.length - 1];
+    enc.resolveBulletHits();
+    ok("an i-framed strike is consumed too — a bullet that reached a hull never flies on",
+      pvGraceBullet.dead === true && enc.E.seats[1].hull === 3,
+      JSON.stringify({ dead: pvGraceBullet.dead, hull: enc.E.seats[1].hull }));
+
+    // (e) THE TOLL. A PvP kill zeroes the score, resets the ranks and the
+    // bought hull cap, and drops PVPORBS orbs. The killer keeps everything.
+    pvPrep();
+    enc.addXp(60, 0);
+    enc.addXp(60, 1);
+    const pvBuyAB = enc.shopInfo().findIndex((r) => r.name === "AFTERBURNER");
+    const pvBuyMH = enc.shopInfo().findIndex((r) => r.name === "MAX HULL");
+    enc.buy(pvBuyAB, 1);
+    enc.buy(pvBuyMH, 1);
+    const pvSeqBefore = enc.E.seats[1].termSeq;
+    const pvHullMaxBought = enc.E.seats[1].hullMax;
+    const pvKillerScore = enc.E.seats[0].score;
+    const pvKillerOwned = enc.E.seats[0].owned.join(",");
+    const pvOrbsBefore = enc.E.orbs.length;
+    enc.E.seats[1].hull = 1;
+    enc.E.seats[1].invuln = 0;
+    window.Encounter.drainEvents(); // the buys above queued their own termChange
+                                    // markers; this leg is about the DEATH tick alone
+    const pvEv = [];
+    enc.recordEvents();
+    const pvKilled = enc.damagePlayer(5, 1, 0); // seat 0 lands the killing blow
+    // only termChange carries seat/termSeq into the record (drainStep's rule),
+    // so the marker is identified by its payload and the cue by its kind
+    const pvEvRec = enc.stopEvents();
+    for (const e of pvEvRec) pvEv.push(e.kind);
+    ok("MAX HULL really raised the victim's stored cap before the kill — the reset below has teeth",
+      pvHullMaxBought === ECFG.player.hull + 1, "hullMax=" + pvHullMaxBought);
+    ok("a PvP kill zeroes the victim's score, resets its ranks and its bought hull cap",
+      pvKilled === true && enc.E.seats[1].score === 0 &&
+      enc.E.seats[1].owned.every((n) => n === 0) &&
+      enc.E.seats[1].hullMax === ECFG.player.hull &&
+      enc.E.seats[1].termSeq === pvSeqBefore + 1,
+      JSON.stringify({ score: enc.E.seats[1].score, owned: enc.E.seats[1].owned,
+                       hullMax: enc.E.seats[1].hullMax, seq: enc.E.seats[1].termSeq }));
+    ok("...and drops exactly PVPORBS orbs at the death point",
+      enc.E.orbs.length - pvOrbsBefore === enc.tunables().PVPORBS,
+      "dropped=" + (enc.E.orbs.length - pvOrbsBefore) + " want=" + enc.tunables().PVPORBS);
+    ok("...while the KILLER's own score and ranks are untouched — a kill pays no bounty to the killer",
+      enc.E.seats[0].score === pvKillerScore && enc.E.seats[0].owned.join(",") === pvKillerOwned,
+      JSON.stringify({ score: enc.E.seats[0].score, owned: enc.E.seats[0].owned }));
+    ok("termChange and death BOTH ride the one death tick, the marker before the cue",
+      pvEv.join(" ") === "termChange death" &&
+      pvEvRec[0].seat === 1 && pvEvRec[0].termSeq === pvSeqBefore + 1,
+      JSON.stringify(pvEvRec));
+    // the respawn fills to the RESET cap, never to the bought one
+    enc.respawnSeat(1);
+    ok("the victim re-enters on the stock hull cap, not the one it had bought",
+      enc.E.seats[1].hull === ECFG.player.hull && enc.E.seats[1].hullMax === ECFG.player.hull,
+      JSON.stringify({ hull: enc.E.seats[1].hull, hullMax: enc.E.seats[1].hullMax }));
+
+    // (f) the exception is CARVED: a PvE kill on the same staging keeps
+    // everything, and so does a restart
+    pvPrep();
+    enc.addXp(60, 1);
+    enc.buy(enc.shopInfo().findIndex((r) => r.name === "AFTERBURNER"), 1);
+    const pvPveScore = enc.E.seats[1].score;
+    const pvPveOwned = enc.E.seats[1].owned.join(",");
+    const pvPveOrbs = enc.E.orbs.length;
+    enc.E.seats[1].hull = 1;
+    enc.E.seats[1].invuln = 0;
+    const pvPveKilled = enc.damagePlayer(5, 1); // NO source — the PvE path
+    ok("a PvE kill keeps the score, the ranks and the hull cap, and drops nothing",
+      pvPveKilled === true && enc.E.seats[1].hull === 0 &&
+      enc.E.seats[1].score === pvPveScore &&
+      enc.E.seats[1].owned.join(",") === pvPveOwned &&
+      enc.E.orbs.length === pvPveOrbs,
+      JSON.stringify({ score: enc.E.seats[1].score, owned: enc.E.seats[1].owned,
+                       orbs: enc.E.orbs.length - pvPveOrbs }));
+
+    // (g) the orb drop is world-CLAMPED — a seat killed against a wall pays a
+    // bounty that is still inside the world (the enemy drop is not clamped)
+    pvPrep();
+    t.players[1].ship.x = 1;
+    t.players[1].ship.y = 1;
+    enc.E.seats[1].hull = 1;
+    enc.E.seats[1].invuln = 0;
+    const pvWallFrom = enc.E.orbs.length;
+    enc.damagePlayer(5, 1, 0);
+    const pvWallOrbs = enc.E.orbs.slice(pvWallFrom);
+    ok("the PvP drop is clamped into the world — a wall death still pays a reachable bounty",
+      pvWallOrbs.length === enc.tunables().PVPORBS &&
+      pvWallOrbs.every((o) => o.x > 1 && o.y > 1 && o.x < t.WW && o.y < t.WH),
+      JSON.stringify(pvWallOrbs.map((o) => ({ x: o.x, y: o.y }))));
+
+    // (h) the orbs are STANDARD 1-XP orbs: any living seat banks them, the
+    // killer included — and each pays exactly one XP
+    pvPrep();
+    enc.E.seats[1].hull = 1;
+    enc.E.seats[1].invuln = 0;
+    enc.damagePlayer(5, 1, 0);
+    const pvBank = enc.E.orbs[enc.E.orbs.length - 1];
+    const pvBankScore = enc.E.seats[0].score;
+    t.players[0].ship.x = pvBank.x;
+    t.players[0].ship.y = pvBank.y;
+    const pvBankOrbs = enc.E.orbs.length;
+    t.stepSim();
+    ok("a PvP orb is a standard 1-XP orb the KILLER may bank like any other",
+      enc.E.orbs.length < pvBankOrbs && enc.E.seats[0].score > pvBankScore,
+      JSON.stringify({ orbs: enc.E.orbs.length, was: pvBankOrbs,
+                       score: enc.E.seats[0].score, wasScore: pvBankScore }));
+
+    // (i) mutual kills in one tick: bullets outlive their owners, so both
+    // seats can die on the same tick and BOTH pay the toll. Deterministic —
+    // the resolution walks G.bullets in array order.
+    pvPrep();
+    enc.addXp(9, 0);
+    enc.addXp(9, 1);
+    enc.E.seats[0].hull = 1;
+    enc.E.seats[1].hull = 1;
+    t.G.bullets.push(pvShot(0, 1340, 1000, 1420, 1000, 5));
+    t.G.bullets.push(pvShot(1, 1060, 1000, 980, 1000, 5));
+    enc.resolveBulletHits();
+    ok("a mutual kill in one tick resets BOTH seats — a dead shooter's round still kills",
+      enc.E.seats[0].hull === 0 && enc.E.seats[1].hull === 0 &&
+      enc.E.seats[0].score === 0 && enc.E.seats[1].score === 0,
+      JSON.stringify(enc.E.seats.map((S) => ({ hull: S.hull, score: S.score }))));
+
+    // ---- the comet RAM against a player ----------------------------------
+    const pvRamStage = (attackerComet, victimComet) => {
+      pvPrep();
+      enc.E.seats[0].hull = 99;
+      enc.E.seats[1].hull = 99;
+      t.players[0].comet = !!attackerComet;
+      t.players[1].comet = !!victimComet;
+      t.players[1].ship.x = 1010; // inside the SHIP_R * 2 box
+      t.players[1].ship.y = 1000;
+      enc.E.shipPrev = [{ x: 1000, y: 1000 }, { x: 1010, y: 1000 }];
+    };
+
+    pvRamStage(true, false);
+    const pvRamHullWas = enc.E.seats[1].hull;
+    enc.resolvePvpRams();
+    const pvRamDmg = pvRamHullWas - enc.E.seats[1].hull;
+    ok("a comet ram takes another seat's hull for COMETDMG × fury",
+      pvRamDmg > 0 && Math.abs(pvRamDmg - enc.tunables().COMETDMG *
+        (1 + EN().COMETFURY * enc.termsFor(0).fury * (1 - t.energyFrac(0)))) < 1e-9,
+      "dealt=" + pvRamDmg + " COMETDMG=" + enc.tunables().COMETDMG);
+    ok("...and stamps the ORDERED pair's window, in that direction only",
+      enc.pvpCd()["0:1"] === enc.tunables().COMETCD && enc.pvpCd()["1:0"] === undefined,
+      JSON.stringify(enc.pvpCd()));
+
+    // one bite per pair per window: the overlap holds, the hull does not move
+    // again until the window has run all the way out
+    pvRamStage(true, false);
+    enc.resolvePvpRams();
+    const pvPaceAfterFirst = enc.E.seats[1].hull;
+    let pvPaceBites = 0;
+    for (let k = 0; k < enc.tunables().COMETCD - 1; k++) {
+      enc.resolvePvpRams();
+      if (enc.E.seats[1].hull < pvPaceAfterFirst) pvPaceBites++;
+    }
+    const pvPaceHeld = enc.E.seats[1].hull === pvPaceAfterFirst;
+    enc.E.seats[1].invuln = 0; // the post-hit grace is a SEPARATE gate; the window is what is under test
+    enc.resolvePvpRams();
+    ok("one bite per pair per COMETCD window — the overlap is refused for the whole window, then bites",
+      pvPaceHeld && pvPaceBites === 0 && enc.E.seats[1].hull < pvPaceAfterFirst,
+      JSON.stringify({ held: pvPaceHeld, bites: pvPaceBites,
+                       cd: enc.tunables().COMETCD, hull: enc.E.seats[1].hull }));
+
+    // comet vs comet: both sweeps run, both are negated, both pools bill
+    // COMETHIT, and NO hull moves — the gate order alone produces this
+    pvRamStage(true, true);
+    const pvCvcHulls = [enc.E.seats[0].hull, enc.E.seats[1].hull];
+    const pvCvcEnergy = [t.players[0].energy, t.players[1].energy];
+    enc.resolvePvpRams();
+    ok("comet against comet is a mutual no-op: no hull moves on either side",
+      enc.E.seats[0].hull === pvCvcHulls[0] && enc.E.seats[1].hull === pvCvcHulls[1],
+      JSON.stringify({ now: [enc.E.seats[0].hull, enc.E.seats[1].hull], was: pvCvcHulls }));
+    ok("...and BOTH pair windows are stamped, so the overlap cannot re-bill COMETHIT every tick",
+      enc.pvpCd()["0:1"] === enc.tunables().COMETCD && enc.pvpCd()["1:0"] === enc.tunables().COMETCD,
+      JSON.stringify(enc.pvpCd()));
+    // COMETHIT ships at 0, so the pools are EQUAL by contract; the stamps
+    // above are what prove the two strikes actually happened. Drive the knob
+    // off 0 and the billing itself becomes visible.
+    const pvCvcShipped = t.players[0].energy === pvCvcEnergy[0] && t.players[1].energy === pvCvcEnergy[1];
+    const undoHit = enDrive("comet-hit", 5);
+    pvRamStage(true, true);
+    const pvCvcEn2 = [t.players[0].energy, t.players[1].energy];
+    enc.resolvePvpRams();
+    const pvCvcBilled = t.players[0].energy < pvCvcEn2[0] && t.players[1].energy < pvCvcEn2[1];
+    undoHit();
+    ok("each side bills its OWN negation: inert at the shipped COMETHIT 0, visible the moment it moves",
+      pvCvcShipped && pvCvcBilled && EN().COMETHIT === 0,
+      JSON.stringify({ shippedEqual: pvCvcShipped, billed: pvCvcBilled, COMETHIT: EN().COMETHIT }));
+
+    // a NON-comet attacker never rams: the sweep is comet-only
+    pvRamStage(false, false);
+    const pvColdHull = enc.E.seats[1].hull;
+    enc.resolvePvpRams();
+    ok("two ships that merely overlap do nothing — the PvP ram is the COMET's weapon alone",
+      enc.E.seats[1].hull === pvColdHull && Object.keys(enc.pvpCd()).length === 0,
+      "hull=" + enc.E.seats[1].hull + " cd=" + JSON.stringify(enc.pvpCd()));
+
+    // a ram cannot reach an i-framed seat: the gate order refuses it INSIDE
+    // hitPlayer, so the sweep needs no second guard of its own
+    pvRamStage(true, false);
+    enc.E.seats[1].invuln = 30;
+    const pvIframeHull = enc.E.seats[1].hull;
+    enc.resolvePvpRams();
+    ok("a ram cannot reach an i-framed seat, and takes no window for the attempt",
+      enc.E.seats[1].hull === pvIframeHull && enc.pvpCd()["0:1"] === undefined,
+      "hull=" + enc.E.seats[1].hull + " cd=" + JSON.stringify(enc.pvpCd()));
+
+    // the respawn teleport cannot be rammed across: respawnSeat snaps
+    // shipPrev, so no sweep segment spans the deal
+    pvRamStage(true, false);
+    t.players[1].ship.x = 2600; // the victim is far away...
+    t.players[1].ship.y = 2600;
+    enc.E.shipPrev[1].x = 2600;
+    enc.E.shipPrev[1].y = 2600;
+    enc.E.seats[0].hull = 0;    // ...and the ATTACKER is the one re-entering
+    enc.E.seats[0].respawnT = 1;
+    enc.E.seats[0].hull = 1;
+    t.players[0].ship.x = 2610; // a deal that lands right on the victim
+    t.players[0].ship.y = 2600;
+    enc.respawnSeat(0);
+    const pvTeleHull = enc.E.seats[1].hull;
+    enc.resolvePvpRams();
+    ok("a respawn deal is never a ram — respawnSeat's shipPrev snap leaves no segment to sweep",
+      enc.E.seats[1].hull === pvTeleHull,
+      "hull=" + enc.E.seats[1].hull + " prev=" + JSON.stringify(enc.E.shipPrev[0]));
+
+    // THE SWEEP ORDER INSIDE encStep. resolvePvpRams() runs BEFORE
+    // resolveBulletHits(), and that ordering is load-bearing rather than
+    // cosmetic: a seat the ram killed is already excluded by seatAlive() when
+    // the bullet pass walks its candidates, so an in-flight round does NOT
+    // stop on the corpse — it flies on. Swapping the two calls in encStep
+    // passes every other check in this repo, so the leg has to drive a REAL
+    // encStep (t.stepSim), never the two resolvers called in an order this
+    // file chose itself, or it would only be testing its own arithmetic.
+    {
+      pvPrep();
+      t.pushInputFrame(0, PF({ rh: 1 }));
+      t.stepSim();                       // the gate raises the comet from the ring
+      t.players[1].ship.x = 1506; t.players[1].ship.y = 1800;
+      t.players[0].ship.x = 1500; t.players[0].ship.y = 1800;
+      t.players[0].vel.x = 0; t.players[0].vel.y = 0;
+      t.players[1].vel.x = 0; t.players[1].vel.y = 0;
+      enc.E.shipPrev = [{ x: 1500, y: 1800 }, { x: 1506, y: 1800 }];
+      enc.E.seats[1].hull = 1;           // the ram kills outright this tick
+      enc.E.seats[1].invuln = 0;
+      // the round is staged PRE-travel: encStep integrates it, so it sweeps
+      // 1560 -> 1480 across seat 1's disc on the very tick the ram lands
+      const ordBullet = { x: 1560, y: 1800, px: 1560, py: 1800, vx: -80, vy: 0,
+        r: 2.2, dmg: 1, owner: 0, dead: false, spent: false, ttl: 60 };
+      t.G.bullets.push(ordBullet);
+      const ordDealt = enc.E.hitsDealt;
+      t.pushInputFrame(0, PF({ rh: 1 }));
+      t.stepSim();
+      ok("the ram resolves BEFORE the bullet pass — a round cannot register on the seat the ram just killed",
+        enc.E.seats[1].hull === 0 && ordBullet.dead === false &&
+        enc.E.hitsDealt === ordDealt &&
+        enc.segCircleEntryT(ordBullet.px, ordBullet.py, ordBullet.x, ordBullet.y,
+                            1506, 1800, enShipR + ordBullet.r) >= 0,
+        JSON.stringify({ hull: enc.E.seats[1].hull, bulletDead: ordBullet.dead,
+                         dealt: enc.E.hitsDealt - ordDealt,
+                         sweptTheDisc: enc.segCircleEntryT(ordBullet.px, ordBullet.py,
+                           ordBullet.x, ordBullet.y, 1506, 1800, enShipR + ordBullet.r) }));
+    }
+
+    // FURY READS THE RAMMER, never the rammed. The damage leg above runs both
+    // seats at rank 0, where the two reads are indistinguishable — so this one
+    // buys OVERLOAD on the ATTACKER, drains the ATTACKER's pool, and gives the
+    // VICTIM a different rank on a full pool. Every wrong-seat substitution
+    // (victim rank, victim pool, or both) lands on a different number.
+    {
+      pvRamStage(true, false);
+      const ovRow = enc.shopInfo().findIndex((r) => r.name === "OVERLOAD");
+      enc.addXp(200, 0);
+      enc.addXp(200, 1);
+      enc.buy(ovRow, 0); enc.buy(ovRow, 0);  // attacker at OVERLOAD rank 2
+      enc.buy(ovRow, 1);                     // victim at rank 1 — deliberately different
+      t.players[0].energy = 0;               // ...and the attacker EMPTY
+      t.players[1].energy = t.energyCap(1);  // while the victim is full
+      const ovRank = [enc.termsFor(0).fury, enc.termsFor(1).fury];
+      const ovFrac = [t.energyFrac(0), t.energyFrac(1)];
+      const ovWant = enc.tunables().COMETDMG * (1 + EN().COMETFURY * ovRank[0] * (1 - ovFrac[0]));
+      const ovWrong = enc.tunables().COMETDMG * (1 + EN().COMETFURY * ovRank[1] * (1 - ovFrac[1]));
+      const ovHullWas = enc.E.seats[1].hull;
+      enc.resolvePvpRams();
+      const ovDealt = ovHullWas - enc.E.seats[1].hull;
+      ok("OVERLOAD scales the ram off the RAMMING seat's rank and the RAMMING seat's pool",
+        ovRank[0] === 2 && ovRank[1] === 1 && Math.abs(ovDealt - ovWant) < 1e-9 &&
+        Math.abs(ovWant - ovWrong) > 1e-9,
+        JSON.stringify({ dealt: ovDealt, wantFromAttacker: ovWant,
+                         wouldBeFromVictim: ovWrong, ranks: ovRank, fracs: ovFrac }));
+    }
+
+    // THE RAM BILLS THE ATTACKER. COMETHIT ships at 0, so the shipped run
+    // cannot see this at all — deleting the ram's energySpend passes every
+    // check in the repo. Drive the real slider and watch the attacker pay.
+    {
+      const undoRamHit = enDrive("comet-hit", 5);
+      pvRamStage(true, false);
+      const rbEn = [t.players[0].energy, t.players[1].energy];
+      const rbHull = enc.E.seats[1].hull;
+      enc.resolvePvpRams();
+      const rbSpent = rbEn[0] - t.players[0].energy;
+      const rbVictim = rbEn[1] - t.players[1].energy;
+      undoRamHit();
+      ok("a REGISTERED ram bills COMETHIT to the attacker alone — the victim's pool never pays for being hit",
+        enc.E.seats[1].hull < rbHull && Math.abs(rbSpent - 5) < 1e-9 && rbVictim === 0,
+        JSON.stringify({ attackerSpent: rbSpent, victimSpent: rbVictim,
+                         hull: enc.E.seats[1].hull, was: rbHull }));
+    }
+
+    // A CORPSE DOES NOT RAM. The attacker guard is seatAlive(a), and it is
+    // separate from the comet flag on purpose: the flag is raised by the
+    // energy gate at the TOP of a tick and nothing lowers it mid-tick, so a
+    // seat that dies part-way through an encStep still reads cometActive for
+    // the rest of that tick. The production route into that state is narrow
+    // (hitPlayer's negation branch makes a burning seat very hard to kill),
+    // which is exactly why the guard needs a check rather than a reachability
+    // argument — removing seatAlive(a) lets a corpse keep biting and no other
+    // check in this repo notices.
+    {
+      pvRamStage(true, false);
+      enc.E.seats[0].hull = 0;   // the attacker is dead...
+      t.players[0].comet = true; // ...and its flag is still up from this tick's gate
+      const cpHull = enc.E.seats[1].hull;
+      enc.resolvePvpRams();
+      ok("a dead attacker with a stale comet flag rams nothing and takes no pair window",
+        cometActive(0) === true && enc.E.seats[0].hull === 0 &&
+        enc.E.seats[1].hull === cpHull && Object.keys(enc.pvpCd()).length === 0,
+        JSON.stringify({ cometStillUp: cometActive(0), victimHull: enc.E.seats[1].hull,
+                         was: cpHull, cd: enc.pvpCd() }));
+    }
+
+    // COMETCD 0: the pair bites every tick, and the store stays EMPTY. A 0 is
+    // falsy at the gate and would be deleted at the next expiry anyway, so
+    // writing it would put a key that decides NOTHING into the hash — and the
+    // zero-bytes rule that kept every committed fixture alive is only worth
+    // something if "sparse by construction" is literally true.
+    {
+      const undoZeroCd = enDrive("comet-cd", 0);
+      pvRamStage(true, false);
+      let zcBites = 0;
+      let zcStoreEverFilled = false;
+      let zcHullWas = enc.E.seats[1].hull;
+      for (let k = 0; k < 6; k++) {
+        enc.E.seats[1].invuln = 0; // the GRACE is a separate gate; the window is under test
+        enc.resolvePvpRams();
+        if (enc.E.seats[1].hull < zcHullWas) { zcBites++; zcHullWas = enc.E.seats[1].hull; }
+        if (Object.keys(enc.pvpCd()).length) zcStoreEverFilled = true;
+      }
+      undoZeroCd();
+      ok("at COMETCD 0 the pair bites every tick and the store never holds a key that decides nothing",
+        zcBites === 6 && zcStoreEverFilled === false,
+        JSON.stringify({ bites: zcBites, storeEverFilled: zcStoreEverFilled,
+                         cd: enc.pvpCd() }));
+    }
+
+    // TWO COMETS CROSSING AT SPEED. The sweep runs in the RELATIVE frame, so
+    // no closing speed can carry one hull through another. The leg drives the
+    // real sweep at a rank-0 comet's travel and at a rank-5 one's, and it
+    // computes what the ATTACKER-ONLY sweep (the first draft of this file,
+    // and the shape the design note asked for) would have answered — through
+    // production's own segCircleHit, not a copy. The rank-5 case is the whole
+    // point: the attacker-only form misses it outright, and rank 5 is 124 XP
+    // on an UNCAPPED row, not a whale's build.
+    const pvCross = (h) => {
+      pvPrep();
+      enc.E.seats[0].hull = 999;
+      enc.E.seats[1].hull = 999;
+      t.players[0].comet = true;
+      t.players[1].comet = false;
+      // a true crossing: the attacker runs west→east through (1500,1800) while
+      // the victim runs north→south through it, so they MEET mid-tick
+      enc.E.shipPrev = [{ x: 1500 - h, y: 1800 }, { x: 1500, y: 1800 - h }];
+      t.players[0].ship.x = 1500 + h; t.players[0].ship.y = 1800;
+      t.players[1].ship.x = 1500;     t.players[1].ship.y = 1800 + h;
+      const hullWas = enc.E.seats[1].hull;
+      enc.resolvePvpRams();
+      return {
+        rammed: enc.E.seats[1].hull < hullWas,
+        // what the attacker-only sweep would have said, off the same solver
+        attackerOnly: enc.segCircleHit(1500 - h, 1800, 1500 + h, 1800,
+                                       t.players[1].ship.x, t.players[1].ship.y, enShipR * 2),
+      };
+    };
+    const pvSlow = pvCross(6);   // a rank-0 comet: (VMAX + 0) × COMETVMAX
+    const pvFast = pvCross(20);  // AFTERBURNER rank 5 territory
+    ok("two comets crossing at a rank-0 speed ram each other, and the attacker-only sweep agreed there",
+      pvSlow.rammed === true && pvSlow.attackerOnly === true, JSON.stringify(pvSlow));
+    ok("...and at AFTERBURNER speeds they STILL ram — the attacker-only sweep would have let them pass through",
+      pvFast.rammed === true && pvFast.attackerOnly === false, JSON.stringify(pvFast));
+
+    // the store is SPARSE and self-pruning, and a restart clears it — which
+    // is exactly what keeps it out of every PvP-free hash
+    pvRamStage(true, false);
+    enc.resolvePvpRams();
+    const pvStoreOpen = Object.keys(enc.pvpCd()).length;
+    for (let k = 0; k < enc.tunables().COMETCD; k++) enc.resolvePvpRams();
+    const pvStoreEmptyAgain = Object.keys(enc.pvpCd()).length;
+    pvRamStage(true, false);
+    enc.resolvePvpRams();
+    enc.restart();
+    ok("the pair store opens one key, prunes itself at expiry, and never survives a restart",
+      pvStoreOpen === 1 && pvStoreEmptyAgain === 0 && Object.keys(enc.pvpCd()).length === 0,
+      JSON.stringify({ open: pvStoreOpen, pruned: pvStoreEmptyAgain, afterRestart: enc.pvpCd() }));
+
+    // the hash asymmetry that would have broken every committed fixture: an
+    // EMPTY store must contribute zero bytes, so a run with no PvP in it
+    // hashes exactly as it did before this phase existed
+    pvPrep();
+    const pvHashClean = t.hashState();
+    enc.E.pvpCd["0:1"] = 7;
+    const pvHashStamped = t.hashState();
+    delete enc.E.pvpCd["0:1"];
+    const pvHashBack = t.hashState();
+    // ...and the fold is ORDER-FREE: two stores with the same pairs hash the
+    // same however they were inserted
+    enc.E.pvpCd["1:0"] = 3; enc.E.pvpCd["0:1"] = 7;
+    const pvHashOrderA = t.hashState();
+    enc.E.pvpCd = {}; enc.E.pvpCd["0:1"] = 7; enc.E.pvpCd["1:0"] = 3;
+    const pvHashOrderB = t.hashState();
+    enc.E.pvpCd = {};
+    ok("an EMPTY pair store folds for zero bytes, a stamped one moves the hash, and the fold is order-free",
+      pvHashClean === pvHashBack && pvHashStamped !== pvHashClean &&
+      pvHashOrderA === pvHashOrderB && pvHashOrderA !== pvHashClean &&
+      t.hashState() === pvHashClean,
+      JSON.stringify({ clean: pvHashClean, stamped: pvHashStamped, back: pvHashBack,
+                       orderA: pvHashOrderA, orderB: pvHashOrderB }));
+
+    // THE DOWN CARD'S COPY. It is a claim about the RULES, so it is pinned
+    // rather than left as an unguarded literal: nothing on the wire says why
+    // a seat died, so a line naming the score would be a lie for one of the
+    // two death kinds. The old copy promised "score stands", which a PvP
+    // death makes false; the wallet clause is true in both worlds.
+    {
+      const card = enc.downCardLine({ respawnT: 180 });
+      ok("the SHIP DOWN card keeps its wallet promise and makes NO claim about the score",
+        card === "respawn in 3 · the unspent wallet is forfeit" &&
+        !/score/i.test(card) && !/stand/i.test(card),
+        JSON.stringify(card));
+      ok("...and the countdown is the seat's own respawn timer, in whole seconds",
+        enc.downCardLine({ respawnT: 1 }) === "respawn in 1 · the unspent wallet is forfeit" &&
+        enc.downCardLine({ respawnT: 121 }) === "respawn in 3 · the unspent wallet is forfeit",
+        JSON.stringify([enc.downCardLine({ respawnT: 1 }), enc.downCardLine({ respawnT: 121 })]));
+    }
+
+    t.setInputMode(pvInputWas);
+    t.setPlayerCount(1);
+    enc.restart();
+  }
+
+  // ---- phase 15: the pose ring and the fire-time rebate -------------------
+  {
+    const rwInputWas = t.inputState().INPUTMODE;
+    t.setInputMode("tick");
+    t.setPlayerCount(2);
+    const rwPrep = () => {
+      enc.restart(9151);
+      enc.E.groups = [];
+      enc.E.enemies.length = 0;
+      t.G.bullets.length = 0;
+      t.G.started = true;
+      t.G.running = true;
+      for (const P of t.players) { P.comet = false; P.input.cometWant = false;
+        P.input.fireHeld = false; P.input.fireDelta = 0;
+        P.vel.x = 0; P.vel.y = 0; P.cool = 0; }
+      for (let s = 0; s < t.players.length; s++) t.energyFill(s);
+      for (const S of enc.E.seats) { S.score = 0; S.invuln = 0; S.respawnT = 0; }
+      t.players[0].ship.x = 1000; t.players[0].ship.y = 1000;
+      t.players[1].ship.x = 1400; t.players[1].ship.y = 1600; // OFF the +x fire line
+      enc.E.shipPrev = null;
+      enc.poseLog.length = 0;
+    };
+    // a staged ring row — the E.shipPrev staging idiom, one level up
+    const rwRow = (o) => ({
+      ships: [{ x: 1000, y: 1000, alive: true },
+              { x: (o && o.s1x) !== undefined ? o.s1x : 1400,
+                y: (o && o.s1y) !== undefined ? o.s1y : 1600,
+                alive: !o || o.s1alive !== false }],
+      enemies: (o && o.enemies) || [],
+      missiles: (o && o.missiles) || [],
+    });
+    // an ORDINARY bullet exactly as fire() pushes it: at the shooter's pose,
+    // px=py=pose, about to be rebated
+    const rwShot = (owner, x, y, vx, vy) => {
+      const b = { id: 0, x, y, px: x, py: y, vx, vy, r: 2.2, dmg: 1,
+        owner, dead: false, spent: false, ttl: 60 };
+      t.G.bullets.push(b);
+      return b;
+    };
+
+    // (a) recording: one settled row per encStep, ships + liveness, capped
+    rwPrep();
+    for (let i = 0; i < 3; i++) t.stepSim();
+    const rwRows = enc.poseLog.length;
+    const rwNewest = enc.poseLog[enc.poseLog.length - 1];
+    ok("the ring records one row per encStep, from the same settled poses shipPrev keeps",
+      rwRows === 3 && rwNewest.ships.length === 2 &&
+      rwNewest.ships[0].x === enc.E.shipPrev[0].x &&
+      rwNewest.ships[0].y === enc.E.shipPrev[0].y &&
+      rwNewest.ships[1].alive === true,
+      JSON.stringify({ rows: rwRows, newest: rwNewest && rwNewest.ships }));
+    for (let i = 0; i < 30; i++) t.stepSim();
+    ok("...and holds exactly 22 rows — a 21-tick rewind inclusive of both endpoints",
+      enc.poseLog.length === enc.REWIND_ROWS && enc.REWIND_ROWS === 22,
+      "rows=" + enc.poseLog.length);
+    ok("rowForAge clamps past the oldest held row and never answers undefined",
+      enc.rowForAge(1) === enc.poseLog[enc.poseLog.length - 1] &&
+      enc.rowForAge(22) === enc.poseLog[0] &&
+      enc.rowForAge(500) === enc.poseLog[0],
+      "");
+
+    // (b) restart clears it — no pre-restart row is ever readable
+    enc.restart(9151);
+    ok("restart() clears the ring — no pre-restart pose row survives the cut",
+      enc.poseLog.length === 0, "rows=" + enc.poseLog.length);
+
+    // (c) the live-sweep mode table: seek is the ONLY live row — the exact
+    // project flags phase 12's client runs (the browser pin against js/net.js
+    // text lives in net-checks; this leg pins the shape and the one 1)
+    ok("the live-sweep table marks seek alone — every planted mode rewinds",
+      enc.LIVE_SWEEP.seek === 1 &&
+      ["tele", "pulse", "lockon", "windup", "dash", "tired"]
+        .every((m) => enc.LIVE_SWEEP[m] === 0),
+      JSON.stringify(enc.LIVE_SWEEP));
+
+    // (d) a rebated shot kills at the ERA pose the live sweep would miss.
+    // Rows say the dart sat on the +x fire line; the LIVE body has moved
+    // 300 px off it. The sweep must hit the era pose and the damage must
+    // land on the LIVE body — history is read-only, damage is at NOW.
+    rwPrep();
+    enc.spawnEnemy(1200, 1300, 0, "dart");
+    const rwDart = enc.E.enemies[enc.E.enemies.length - 1];
+    rwDart.mode = "tele"; // a PLANTED mode — the rebate must use the era pose
+    for (let i = 0; i < 6; i++)
+      enc.poseLog.push(rwRow({ enemies: [{ id: rwDart.id, x: 1200, y: 1000, r: rwDart.r, live: 0 }] }));
+    const rwHpWas = rwDart.hp;
+    const rwHitsWas = enc.E.hitsDealt;
+    const rwB = rwShot(0, 1140, 1000, 15, 0); // 60 px short, 4 ticks at BSPEED
+    enc.rebate(rwB, 5, 0);
+    enc.applyRebateHits(); // the resolve-phase split (corrective pass 2)
+    ok("a rebated shot lands on the ERA pose and pays the LIVE body at NOW",
+      rwB.dead === true && rwDart.hp === rwHpWas - 1 &&
+      enc.E.hitsDealt === rwHitsWas + 1,
+      JSON.stringify({ dead: rwB.dead, hp: rwDart.hp, was: rwHpWas }));
+    ok("...and the advance spent ttl and collapsed px onto x — one ordinary segment remains",
+      rwB.ttl < 60 && rwB.px === rwB.x && rwB.py === rwB.y,
+      JSON.stringify({ ttl: rwB.ttl, px: rwB.px, x: rwB.x }));
+
+    // (e) died-in-window: a row body whose id no longer resolves is DISCARDED
+    // and the sweep CONTINUES to the next candidate along the path
+    rwPrep();
+    enc.spawnEnemy(1200, 1300, 0, "dart");
+    const rwFar = enc.E.enemies[enc.E.enemies.length - 1];
+    rwFar.mode = "tele";
+    for (let i = 0; i < 6; i++)
+      enc.poseLog.push(rwRow({ enemies: [
+        { id: 99999, x: 1180, y: 1000, r: 6, live: 0 },            // died in the window
+        { id: rwFar.id, x: 1260, y: 1000, r: rwFar.r, live: 0 },   // still alive
+      ] }));
+    const rwFarHp = rwFar.hp;
+    const rwB2 = rwShot(0, 1140, 1000, 15, 0);
+    enc.rebate(rwB2, 10, 0);
+    enc.applyRebateHits();
+    ok("a died-in-window winner is discarded and the sweep continues to the next body",
+      rwB2.dead === true && rwFar.hp === rwFarHp - 1,
+      JSON.stringify({ dead: rwB2.dead, hp: rwFar.hp, was: rwFarHp }));
+
+    // (f) the PRESENTED-pose reconstruction for live-class (projected)
+    // bodies — corrective pass 2. A seek body's row entry sweeps at
+    // era pose + era velocity × Δ (wall-clamped): "sweep what the screen
+    // showed". Two discriminating geometries, the audit's own:
+    //   (f1) a laterally-crossing body whose PRESENTED pose is on the fire
+    //        line HITS — the frozen-NOW form (live pose off the line at
+    //        (1240,940)) would miss this;
+    //   (f2) a CLOSING body whose live pose is on the line but whose
+    //        presented pose is not MISSES — the frozen-NOW form was an aim
+    //        assist of up to (Δ−k)×speed px against the most common mode.
+    rwPrep();
+    enc.spawnEnemy(1240, 940, 0, "dart"); // live pose OFF the +x line
+    const rwLat = enc.E.enemies[enc.E.enemies.length - 1]; // mode stays "seek"
+    for (let i = 0; i < 10; i++)
+      enc.poseLog.push(rwRow({ enemies: [{ id: rwLat.id, x: 1240, y: 1019.2,
+        r: rwLat.r, vx: 0, vy: -2.4, live: 1 }] }));
+    const rwLatHp = rwLat.hp;
+    const rwBf1 = rwShot(0, 1140, 1000, 15, 0);
+    enc.rebate(rwBf1, 8, 0); // presented pose = (1240, 1019.2 − 2.4×8) = on the line
+    enc.applyRebateHits();
+    ok("a projected body's PRESENTED pose (era + v×Δ) is what the sweep hits",
+      rwBf1.dead === true && rwLat.hp === rwLatHp - 1,
+      JSON.stringify({ dead: rwBf1.dead, hp: rwLat.hp, was: rwLatHp }));
+    rwPrep();
+    enc.spawnEnemy(1240, 1000, 0, "dart"); // live pose ON the line — the bait
+    const rwClose = enc.E.enemies[enc.E.enemies.length - 1];
+    for (let i = 0; i < 10; i++)
+      enc.poseLog.push(rwRow({ enemies: [{ id: rwClose.id, x: 1240, y: 1100,
+        r: rwClose.r, vx: 0, vy: 2.4, live: 1 }] }));
+    const rwCloseHp = rwClose.hp;
+    const rwBf2 = rwShot(0, 1140, 1000, 15, 0);
+    enc.rebate(rwBf2, 8, 0); // presented pose = (1240, 1119.2) — nowhere near
+    enc.applyRebateHits();
+    ok("...and a body whose presented pose is OFF the line MISSES — no frozen-NOW aim assist",
+      rwBf2.dead === false && rwClose.hp === rwCloseHp,
+      JSON.stringify({ dead: rwBf2.dead, hp: rwClose.hp }));
+
+    // (g) the PLAYER era cap: PVPREWIND (140 ms → 8 ticks). The victim's rows
+    // inside the cap sit OFF the fire line; only rows older than the cap sit
+    // on it — so a Δ deeper than the cap must MISS (the shooter leads the
+    // remainder), and the same shot with the rows inside the cap must LAND.
+    rwPrep();
+    enc.poseLog.length = 0;
+    // ages 22..1 pushed oldest-first: rows at age ≥ 9 have the victim ON the
+    // line (1400,1000); rows at age ≤ 8 have it OFF (1400,1600)
+    for (let age = 22; age >= 1; age--)
+      enc.poseLog.push(rwRow(age >= 9 ? { s1x: 1400, s1y: 1000 } : {}));
+    const rwV = enc.E.seats[1];
+    rwV.hull = 5; rwV.invuln = 0;
+    const rwB4 = rwShot(0, 1340, 1000, 15, 0);
+    enc.rebate(rwB4, 12, 0); // eras age 12..8… every player row reads ≤ the cap
+    enc.applyRebateHits();
+    ok("a player target's era clamps to the PVPREWIND cap — beyond it the shot misses",
+      rwB4.dead === false && rwV.hull === 5,
+      JSON.stringify({ dead: rwB4.dead, hull: rwV.hull }));
+    // ...now the same geometry with the victim ON the line inside the cap
+    enc.poseLog.length = 0;
+    for (let age = 22; age >= 1; age--)
+      enc.poseLog.push(rwRow(age <= 8 ? { s1x: 1400, s1y: 1000 } : {}));
+    const rwB5 = rwShot(0, 1340, 1000, 15, 0);
+    enc.rebate(rwB5, 12, 0);
+    enc.applyRebateHits();
+    ok("...and an era inside the cap LANDS — hull paid at NOW, bullet consumed",
+      rwB5.dead === true && rwV.hull === 4 && enc.E.seats[1].hitFlash > 0,
+      JSON.stringify({ dead: rwB5.dead, hull: rwV.hull }));
+    // ...and at PVPREWIND 0 the same staged history cannot be hit at all:
+    // age 0 means LIVE pose, and the live victim sits off the line
+    t.setPvpTune("PVPREWIND", 0);
+    rwV.hull = 5; rwV.invuln = 0;
+    const rwB6 = rwShot(0, 1340, 1000, 15, 0);
+    enc.rebate(rwB6, 12, 0);
+    enc.applyRebateHits();
+    ok("PVPREWIND 0 is player compensation OFF — only the LIVE pose can be hit",
+      rwB6.dead === false && rwV.hull === 5,
+      JSON.stringify({ dead: rwB6.dead, hull: rwV.hull }));
+    t.setPvpTune("PVPREWIND", 140);
+
+    // (h) respawn invalidation: every held row marks the seat unhittable, so
+    // no rewound sweep crosses the teleport
+    rwPrep();
+    enc.poseLog.length = 0;
+    for (let age = 22; age >= 1; age--)
+      enc.poseLog.push(rwRow({ s1x: 1400, s1y: 1000 })); // ON the line, in range
+    enc.respawnSeat(1);
+    enc.E.seats[1].invuln = 0;
+    const rwHullR = enc.E.seats[1].hull;
+    const rwB7 = rwShot(0, 1340, 1000, 15, 0);
+    enc.rebate(rwB7, 6, 0);
+    enc.applyRebateHits();
+    ok("a respawn invalidates the seat's held rows — no rewound sweep crosses the teleport",
+      rwB7.dead === false && enc.E.seats[1].hull === rwHullR,
+      JSON.stringify({ dead: rwB7.dead, hull: enc.E.seats[1].hull }));
+
+    // (i) the world truncates the advance: a rebated round never bounces and
+    // never sparks here — it stops advancing at the wall and stays ordinary
+    rwPrep();
+    for (let i = 0; i < 3; i++) t.stepSim();
+    const rwB8 = rwShot(0, 60, 1000, -15, 0); // 4 ticks from the x=0 wall
+    enc.rebate(rwB8, 15, 0);
+    enc.applyRebateHits(); // nothing queued — the walls consume no target
+    ok("the advance truncates at the world bounds — no bounce, the ordinary loop owns walls",
+      rwB8.dead === false && rwB8.x < 0 && rwB8.px === rwB8.x &&
+      rwB8.ttl > 60 - 15, // the truncated segments were never paid for
+      JSON.stringify({ x: rwB8.x, ttl: rwB8.ttl }));
+
+    // (j) the END-TO-END path: a vt-bearing frame through pushInputFrame →
+    // drainSlice latch → fire() → rebate. The frame aims +x and fires; its
+    // vt is 5 ticks stale, so the spawned bullet leaves 5 segments ahead of
+    // an unrebated one — and the latch is FROZEN on frameless ticks.
+    rwPrep();
+    for (let i = 0; i < 25; i++) t.stepSim(); // a full ring of real rows
+    // seat 1 shoots: a REMOTE seat's aim resolves from its banked cursor
+    // (seatFireDir), never the page's live pointer — deterministic here
+    const rwTickNow = t.simTick();
+    t.pushInputFrame(1, { tx: 0, ty: 0, ax: 0, ay: 0, cx: 2400, cy: 1600,
+      fp: 1, fh: false, kx: 0, ky: 0, rh: 0, vt: rwTickNow + 1 - 5 }); // cursor due +x
+    t.stepSim(); // drains the frame (simTick is rwTickNow+1), fires, rebates
+    const rwB9 = t.G.bullets[t.G.bullets.length - 1];
+    ok("a vt-bearing frame's shot leaves Δ segments ahead — the whole path is live",
+      !!rwB9 && rwB9.x === 1400 + 15 * 6 && rwB9.y === 1600, // 5 rebated + 1 ordinary segment
+      JSON.stringify({ x: rwB9 && rwB9.x, delta: t.players[1].input.fireDelta }));
+    // item 8 (corrective pass 2): GENUINE frameless ticks between the drain
+    // and the read — the latch must hold its value across all of them
+    for (let i = 0; i < 12; i++) t.stepSim();
+    ok("...and the latch froze the drained Δ across twelve genuinely frameless ticks",
+      t.players[1].input.fireDelta === 5,
+      "fireDelta=" + t.players[1].input.fireDelta);
+    ok("the rebate queue is EMPTY at every tick end — it never crosses a tick",
+      enc.rebateQueue.length === 0, "queued=" + enc.rebateQueue.length);
+    // a frame WITHOUT vt resets the latch to zero — absence earns nothing
+    t.pushInputFrame(1, { tx: 0, ty: 0, ax: 0, ay: 0, cx: 2400, cy: 1600,
+      fp: 0, fh: false, kx: 0, ky: 0, rh: 0 });
+    t.stepSim();
+    ok("a frame without vt earns a zero rebate — the latch resets at the drain",
+      t.players[1].input.fireDelta === 0,
+      "fireDelta=" + t.players[1].input.fireDelta);
+
+    // (k) the MUTUAL TRADE under rebate — corrective pass 2's blocking
+    // item 1. Two lethal vt-bearing shots in ONE tick: both spawn and are
+    // consumed during the drain while BOTH seats still live, and both
+    // applications land at the resolve phase — so BOTH die and BOTH tolls
+    // fire, exactly phase 14's pinned mutual-trade semantics. Under the
+    // old drain-time application, ascending seat order silenced seat 1's
+    // shot (fire()'s seatAlive gate) — the audit's proven defect.
+    rwPrep();
+    const rwInvertWas = t.aimState().rightHeld !== t.aimState().aiming;
+    t.setInvert(false); // seat 0 is the LOCAL seat: with the right button
+                        // released and INVERT off, aiming() is false and
+                        // fireDir() falls through to the staged aimAngle —
+                        // the one deterministic aim path a DOM seat has
+    t.players[0].ship.x = 1000; t.players[0].ship.y = 1000;
+    t.players[1].ship.x = 1100; t.players[1].ship.y = 1000;
+    t.players[0].aimed = true; t.players[0].aimAngle = 0; // due east, at seat 1
+    for (let i = 0; i < 10; i++) t.stepSim(); // real settled rows — the era
+                                              // sweep reads the ring, and an
+                                              // empty ring sweeps nothing
+    enc.addXp(5, 0);
+    enc.addXp(5, 1);
+    enc.E.seats[0].hull = 1; enc.E.seats[1].hull = 1;
+    enc.E.seats[0].invuln = 0; enc.E.seats[1].invuln = 0;
+    const rwOrbsWas = enc.E.orbs.length;
+    const rwTickK = t.simTick();
+    t.pushInputFrame(0, { tx: 0, ty: 0, ax: 0, ay: 0, cx: 1000, cy: 1000,
+      fp: 1, fh: false, kx: 0, ky: 0, rh: 0, vt: rwTickK + 1 - 8 });
+    t.pushInputFrame(1, { tx: 0, ty: 0, ax: 0, ay: 0, cx: 100, cy: 1000,
+      fp: 1, fh: false, kx: 0, ky: 0, rh: 0, vt: rwTickK + 1 - 8 });
+    t.stepSim(); // both fire, both rebates consume (100 px < 8×15), both apply
+    ok("a mutual lethal vt trade kills BOTH seats — no seat-order tiebreaker",
+      enc.E.seats[0].hull === 0 && enc.E.seats[1].hull === 0,
+      JSON.stringify(enc.E.seats.map((S) => S.hull)));
+    ok("...and BOTH tolls fired — two scores zeroed, two bounties on the floor",
+      enc.E.seats[0].score === 0 && enc.E.seats[1].score === 0 &&
+      enc.E.orbs.length === rwOrbsWas + 2 * enc.tunables().PVPORBS,
+      JSON.stringify({ scores: enc.E.seats.map((S) => S.score),
+                       orbs: enc.E.orbs.length - rwOrbsWas }));
+    ok("...and the queue emptied inside the same tick",
+      enc.rebateQueue.length === 0, "queued=" + enc.rebateQueue.length);
+    t.setInvert(rwInvertWas);
+
+    // (l) the ANVIL'S FRONTAL SHIELD holds against rebated hits —
+    // corrective pass 2's blocking item 2. The winner is resolved at NOW,
+    // so face and arc are in hand: into the arc the shot is consumed with
+    // no damage (the live block, clang and all); around the arc it lands.
+    rwPrep();
+    enc.spawnEnemy(1300, 1000, 0, "anvil");
+    const rwAnvil = enc.E.enemies[enc.E.enemies.length - 1];
+    rwAnvil.face = Math.PI; // facing WEST — straight at the shooter
+    const rwAnvilRows = () => {
+      enc.poseLog.length = 0;
+      for (let i = 0; i < 10; i++)
+        enc.poseLog.push(rwRow({ enemies: [{ id: rwAnvil.id, x: 1300, y: 1000,
+          r: rwAnvil.r, vx: 0, vy: 0, live: 1 }] })); // seek-class, planted
+    };
+    rwAnvilRows();
+    const rwAnvilHp = rwAnvil.hp;
+    const rwHitsK = enc.E.hitsDealt;
+    const rwBl1 = rwShot(0, 1190, 1000, 15, 0);
+    enc.rebate(rwBl1, 8, 0);
+    enc.applyRebateHits();
+    ok("a rebated shot into the anvil's frontal arc is BLOCKED — consumed, no damage",
+      rwBl1.dead === true && rwAnvil.hp === rwAnvilHp &&
+      enc.E.hitsDealt === rwHitsK,
+      JSON.stringify({ dead: rwBl1.dead, hp: rwAnvil.hp, was: rwAnvilHp }));
+    t.G.bullets.length = 0;
+    rwAnvil.face = 0; // now facing EAST — the same shot lands on its back
+    rwAnvilRows();
+    const rwBl2 = rwShot(0, 1190, 1000, 15, 0);
+    enc.rebate(rwBl2, 8, 0);
+    enc.applyRebateHits();
+    ok("...and around the arc the same rebated shot LANDS",
+      rwBl2.dead === true && rwAnvil.hp === rwAnvilHp - 1 &&
+      enc.E.hitsDealt === rwHitsK + 1,
+      JSON.stringify({ dead: rwBl2.dead, hp: rwAnvil.hp }));
+
+    // (m) WAVE-BOUNDARY ring contiguity — corrective pass 2's item 3. The
+    // deal tick's early return used to skip the row while simTick advanced,
+    // ageing every era one tick for a ring-depth after every wave deal.
+    // Rows carry a diagnostic tick stamp now; drive a real boundary and pin
+    // every consecutive pair one tick apart.
+    rwPrep();
+    t.stepSim(); // idle → warning
+    enc.spawnEnemy(2000, 2000, 0, "dart"); // far from both ships
+    t.stepSim(); // warning → active (a body exists)
+    enc.E.enemies[enc.E.enemies.length - 1].hp = 0; // dies → cleared → deal
+    let rwDealSeen = false;
+    for (let i = 0; i < 300 && enc.E.wave < 2; i++) { t.stepSim(); rwDealSeen = enc.E.wave === 2; }
+    for (let i = 0; i < 5; i++) t.stepSim(); // rows PAST the boundary — a
+                                             // missing deal-tick row is only
+                                             // visible once later rows land
+    const rwTs = enc.poseLog.map((r) => r.t);
+    ok("the ring is tick-contiguous ACROSS a wave deal — the deal tick records its row",
+      rwDealSeen && rwTs.length > 2 &&
+      rwTs.every((v, i) => i === 0 || v === rwTs[i - 1] + 1),
+      JSON.stringify({ wave: enc.E.wave, ts: rwTs.slice(-6) }));
+
+    t.setInputMode(rwInputWas);
+    t.setPlayerCount(1);
+    enc.restart();
+  }
 
   // ---- restore the page for a human ----
   t.setFxInt(priorFx.FXINT);

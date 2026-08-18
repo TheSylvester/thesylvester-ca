@@ -153,7 +153,9 @@ const suiteExpr = (file, fn, arg) => `(async () => {
     capture: r.capture || null,
     captureTick: r.captureTick || null,
     tunables: window.__test.enc.tunables(),
-    flight: window.__test.flightTunables() };
+    flight: window.__test.flightTunables(),
+    viewport: { innerWidth: window.innerWidth, innerHeight: window.innerHeight,
+      dpr: window.devicePixelRatio || 1 } };
 })()`;
 
 async function runSuite(s) {
@@ -204,7 +206,11 @@ try {
       let prevTick = null;
       try { prevTick = JSON.parse(await readFile(join(ROOT, "tests", "fixtures", "golden.json"), "utf8")).tickMode || null; } catch { /* fresh file */ }
       const fixture = {
-        meta: { sha, capturedAt: new Date().toISOString(), tunables: r.tunables, flight: r.flight },
+        // viewport rides the meta: the fixtures bake the capture window's
+        // letterbox into hashed stored-aim state, so the parity suite and the
+        // browser suite both assert it and a runner drift fails by NAME
+        meta: { sha, capturedAt: new Date().toISOString(), tunables: r.tunables, flight: r.flight,
+          viewport: r.viewport },
         traces: r.capture.traces,
       };
       if (prevTick) fixture.tickMode = prevTick;
@@ -220,6 +226,7 @@ try {
       const fixture = JSON.parse(await readFile(path, "utf8")); // event traces stay byte-identical
       fixture.tickMode = {
         meta: { sha, capturedAt: new Date().toISOString(), tunables: r.tunables, flight: r.flight,
+          viewport: r.viewport,
           note: "captured PRE-RETUNE at the shipped constants — recapture with --capture-tick after the human retunes the tick path" },
         traces: r.captureTick.traces,
       };

@@ -1,7 +1,7 @@
 {
   "meta": {
-    "sha": "18d98f006eb67cdcb88121c4f246c767039da6df",
-    "capturedAt": "2026-08-16T02:30:58.606Z",
+    "sha": "bae28953b7044e7d5a7b880ef7e768d2f972e1c5",
+    "capturedAt": "2026-08-18T02:22:25.688Z",
     "tunables": {
       "BCOOL": 400,
       "BLIFE": 0.5,
@@ -13,7 +13,11 @@
       "BDMG": 1,
       "CONTACTCD": 62,
       "BLASTR": 18,
-      "BLASTGAIN": 8
+      "BLASTGAIN": 8,
+      "COMETDMG": 3,
+      "COMETCD": 62,
+      "PVPORBS": 3,
+      "PVPREWIND": 140
     },
     "flight": {
       "VMAX": 2,
@@ -22,7 +26,28 @@
       "FLICK": 0.01,
       "DAMP": 1,
       "KEYTHRUST": 16,
-      "WALLLOSS": 0.5
+      "WALLLOSS": 0.5,
+      "COMETACC": 3,
+      "COMETTURN": 3,
+      "COMETVMAX": 3,
+      "COMETDRAIN": 1,
+      "COMETHIT": 0,
+      "COMETTHR": 0,
+      "COMETAOE": 11,
+      "COMETAOEDMG": 0,
+      "COMETFURY": 0.5,
+      "ENMAX": 100,
+      "ENREGEN": 0.2,
+      "ENDELAY": 25,
+      "ENARM": 0.5,
+      "ENORB": 0,
+      "ENCELL": 0.4,
+      "ENRECH": 0.25
+    },
+    "viewport": {
+      "innerWidth": 780,
+      "innerHeight": 493,
+      "dpr": 1
     }
   },
   "traces": {
@@ -31,12 +56,11 @@
         {
           "tag": "mid-ramp",
           "tick": 10,
-          "hash": "805394e6",
+          "hash": "5f54fb82",
           "parts": {
-            "ship": "070a77f4",
+            "ship": "59129cab",
             "bullets": "4b95f515",
-            "cam": "22bcaa61",
-            "encounter": "f1936715",
+            "encounter": "167af698",
             "rng": "f1f0ab9a"
           },
           "ship": {
@@ -45,6 +69,14 @@
             "vx": 1.2959999999999996,
             "vy": 0
           },
+          "ships": [
+            {
+              "x": 1543.128,
+              "y": 1881,
+              "vx": 1.2959999999999996,
+              "vy": 0
+            }
+          ],
           "rng": 5351911,
           "st": {
             "state": "warning",
@@ -59,12 +91,11 @@
         {
           "tag": "at-the-clamp",
           "tick": 240,
-          "hash": "39675fd5",
+          "hash": "8fa051d4",
           "parts": {
-            "ship": "a8ebbb80",
+            "ship": "504ec987",
             "bullets": "4b95f515",
-            "cam": "5f8ba29d",
-            "encounter": "a390bfcb",
+            "encounter": "033392c6",
             "rng": "f1f0ab9a"
           },
           "ship": {
@@ -73,6 +104,14 @@
             "vx": 2,
             "vy": 0
           },
+          "ships": [
+            {
+              "x": 2001.552,
+              "y": 1881,
+              "vx": 2,
+              "vy": 0
+            }
+          ],
           "rng": 5351911,
           "st": {
             "state": "warning",
@@ -87,12 +126,11 @@
         {
           "tag": "coasting",
           "tick": 360,
-          "hash": "68644613",
+          "hash": "ee966d74",
           "parts": {
-            "ship": "c0faff51",
+            "ship": "6380e3ea",
             "bullets": "4b95f515",
-            "cam": "2c63e03c",
-            "encounter": "2ea3803f",
+            "encounter": "dab57aa6",
             "rng": "f1f0ab9a"
           },
           "ship": {
@@ -101,6 +139,14 @@
             "vx": 2,
             "vy": 0
           },
+          "ships": [
+            {
+              "x": 2241.5519999999997,
+              "y": 1881,
+              "vx": 2,
+              "vy": 0
+            }
+          ],
           "rng": 5351911,
           "st": {
             "state": "warning",
@@ -119,12 +165,11 @@
         {
           "tag": "at-speed",
           "tick": 120,
-          "hash": "10315f4a",
+          "hash": "40471ece",
           "parts": {
-            "ship": "b9538d9c",
+            "ship": "1adaf0c3",
             "bullets": "4b95f515",
-            "cam": "ea4a08c5",
-            "encounter": "c477ebdf",
+            "encounter": "2a9a1dfa",
             "rng": "f1f0ab9a"
           },
           "ship": {
@@ -133,6 +178,14 @@
             "vx": 2,
             "vy": 0
           },
+          "ships": [
+            {
+              "x": 1761.552,
+              "y": 1881,
+              "vx": 2,
+              "vy": 0
+            }
+          ],
           "rng": 5351911,
           "st": {
             "state": "warning",
@@ -147,12 +200,11 @@
         {
           "tag": "after-flick",
           "tick": 160,
-          "hash": "a92e8c13",
+          "hash": "b837b4dd",
           "parts": {
-            "ship": "136f68e6",
+            "ship": "18cb288d",
             "bullets": "4b95f515",
-            "cam": "2ee86476",
-            "encounter": "c38fc1f5",
+            "encounter": "c9a1e538",
             "rng": "f1f0ab9a"
           },
           "ship": {
@@ -161,6 +213,14 @@
             "vx": 1.2555722246476568e-9,
             "vy": 1.9999999999999998
           },
+          "ships": [
+            {
+              "x": 1765.7705067304723,
+              "y": 1959.7083079171603,
+              "vx": 1.2555722246476568e-9,
+              "vy": 1.9999999999999998
+            }
+          ],
           "rng": 5351911,
           "st": {
             "state": "warning",
@@ -175,12 +235,11 @@
         {
           "tag": "settled",
           "tick": 220,
-          "hash": "e1f2478b",
+          "hash": "f0c373a7",
           "parts": {
-            "ship": "f4be3eef",
+            "ship": "bbeb67cc",
             "bullets": "4b95f515",
-            "cam": "34d2ca19",
-            "encounter": "c1a769d5",
+            "encounter": "9bf3754c",
             "rng": "f1f0ab9a"
           },
           "ship": {
@@ -189,6 +248,14 @@
             "vx": 1.2555722246476568e-9,
             "vy": 1.9999999999999998
           },
+          "ships": [
+            {
+              "x": 1765.7705068058058,
+              "y": 2079.7083079171603,
+              "vx": 1.2555722246476568e-9,
+              "vy": 1.9999999999999998
+            }
+          ],
           "rng": 5351911,
           "st": {
             "state": "warning",
@@ -203,12 +270,11 @@
         {
           "tag": "diagonal",
           "tick": 260,
-          "hash": "15ea2b90",
+          "hash": "aada48ae",
           "parts": {
-            "ship": "b9073a9d",
+            "ship": "42b9c88a",
             "bullets": "4b95f515",
-            "cam": "af51424b",
-            "encounter": "85ffe404",
+            "encounter": "7bbbf3ad",
             "rng": "f1f0ab9a"
           },
           "ship": {
@@ -217,6 +283,14 @@
             "vx": 1.7036818300487824,
             "vy": 1.0476011750478482
           },
+          "ships": [
+            {
+              "x": 1818.2412947946405,
+              "y": 2136.2363568721903,
+              "vx": 1.7036818300487824,
+              "vy": 1.0476011750478482
+            }
+          ],
           "rng": 5351911,
           "st": {
             "state": "warning",
@@ -235,12 +309,11 @@
         {
           "tag": "left",
           "tick": 30,
-          "hash": "021e3491",
+          "hash": "809cbd77",
           "parts": {
-            "ship": "4edbf6d3",
+            "ship": "4d84aa34",
             "bullets": "4b95f515",
-            "cam": "895bef06",
-            "encounter": "21d6b32b",
+            "encounter": "ac35878e",
             "rng": "f1f0ab9a"
           },
           "ship": {
@@ -249,6 +322,14 @@
             "vx": 1,
             "vy": 0
           },
+          "ships": [
+            {
+              "x": 31,
+              "y": 1881,
+              "vx": 1,
+              "vy": 0
+            }
+          ],
           "rng": 5351911,
           "st": {
             "state": "warning",
@@ -263,12 +344,11 @@
         {
           "tag": "right",
           "tick": 60,
-          "hash": "abdd7714",
+          "hash": "b5813044",
           "parts": {
-            "ship": "ea2c0a0d",
+            "ship": "7c732916",
             "bullets": "4b95f515",
-            "cam": "73139245",
-            "encounter": "41ae81dd",
+            "encounter": "6e053a04",
             "rng": "f1f0ab9a"
           },
           "ship": {
@@ -277,6 +357,14 @@
             "vx": -1,
             "vy": 0
           },
+          "ships": [
+            {
+              "x": 3041,
+              "y": 1881,
+              "vx": -1,
+              "vy": 0
+            }
+          ],
           "rng": 5351911,
           "st": {
             "state": "warning",
@@ -291,12 +379,11 @@
         {
           "tag": "top",
           "tick": 90,
-          "hash": "0ca79fcc",
+          "hash": "21522d7c",
           "parts": {
-            "ship": "2f1d2e88",
+            "ship": "9cfa2e07",
             "bullets": "4b95f515",
-            "cam": "dcee6514",
-            "encounter": "70384740",
+            "encounter": "e130edf9",
             "rng": "f1f0ab9a"
           },
           "ship": {
@@ -305,6 +392,14 @@
             "vx": 0,
             "vy": 1
           },
+          "ships": [
+            {
+              "x": 1536,
+              "y": 31,
+              "vx": 0,
+              "vy": 1
+            }
+          ],
           "rng": 5351911,
           "st": {
             "state": "warning",
@@ -319,12 +414,11 @@
         {
           "tag": "bottom",
           "tick": 120,
-          "hash": "811d363a",
+          "hash": "484b8fdf",
           "parts": {
-            "ship": "688a1318",
+            "ship": "ef980f6b",
             "bullets": "4b95f515",
-            "cam": "ae0b42aa",
-            "encounter": "3dbf8b74",
+            "encounter": "05dfa641",
             "rng": "f1f0ab9a"
           },
           "ship": {
@@ -333,6 +427,14 @@
             "vx": 0,
             "vy": -1
           },
+          "ships": [
+            {
+              "x": 1536,
+              "y": 3731,
+              "vx": 0,
+              "vy": -1
+            }
+          ],
           "rng": 5351911,
           "st": {
             "state": "warning",
@@ -347,12 +449,11 @@
         {
           "tag": "corner",
           "tick": 150,
-          "hash": "87918dae",
+          "hash": "888322ed",
           "parts": {
-            "ship": "116a6d06",
+            "ship": "9d366851",
             "bullets": "4b95f515",
-            "cam": "ba20a9c8",
-            "encounter": "43fcecb5",
+            "encounter": "2d5ecdd8",
             "rng": "f1f0ab9a"
           },
           "ship": {
@@ -361,6 +462,14 @@
             "vx": 0.7071067811865475,
             "vy": 0.7071067811865475
           },
+          "ships": [
+            {
+              "x": 22.2842712474619,
+              "y": 22.2842712474619,
+              "vx": 0.7071067811865475,
+              "vy": 0.7071067811865475
+            }
+          ],
           "rng": 5351911,
           "st": {
             "state": "warning",
@@ -379,12 +488,11 @@
         {
           "tag": "tick-300",
           "tick": 300,
-          "hash": "79271ebe",
+          "hash": "5f9a4afd",
           "parts": {
-            "ship": "1ae06d9d",
-            "bullets": "27665998",
-            "cam": "96c98f66",
-            "encounter": "301f4167",
+            "ship": "85293534",
+            "bullets": "a1c74a82",
+            "encounter": "0280e10f",
             "rng": "e80357bb"
           },
           "ship": {
@@ -393,6 +501,14 @@
             "vx": 0,
             "vy": 0
           },
+          "ships": [
+            {
+              "x": 1536,
+              "y": 1881,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
           "rng": 1772976527,
           "st": {
             "state": "active",
@@ -407,12 +523,11 @@
         {
           "tag": "tick-900",
           "tick": 900,
-          "hash": "3d97f39d",
+          "hash": "174348c0",
           "parts": {
-            "ship": "1ae06d9d",
+            "ship": "85293534",
             "bullets": "38c8e4d7",
-            "cam": "04aaf723",
-            "encounter": "6bd8e84b",
+            "encounter": "7b053178",
             "rng": "bdf780ee"
           },
           "ship": {
@@ -421,6 +536,14 @@
             "vx": 0,
             "vy": 0
           },
+          "ships": [
+            {
+              "x": 1536,
+              "y": 1881,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
           "rng": 1077199660,
           "st": {
             "state": "active",
@@ -435,13 +558,12 @@
         {
           "tag": "tick-1800",
           "tick": 1800,
-          "hash": "e0d4233b",
+          "hash": "dd0c9402",
           "parts": {
-            "ship": "1ae06d9d",
-            "bullets": "4b95f515",
-            "cam": "04aaf723",
-            "encounter": "6de88ed3",
-            "rng": "65723fab"
+            "ship": "85293534",
+            "bullets": "908c98cb",
+            "encounter": "c858e6a1",
+            "rng": "1267fbf1"
           },
           "ship": {
             "x": 1536,
@@ -449,14 +571,22 @@
             "vx": 0,
             "vy": 0
           },
-          "rng": 445363990,
+          "ships": [
+            {
+              "x": 1536,
+              "y": 1881,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 1514738193,
           "st": {
-            "state": "shop",
-            "wave": 1,
+            "state": "active",
+            "wave": 2,
             "kills": 5,
             "xp": 5,
             "hull": 93,
-            "enemies": 0,
+            "enemies": 3,
             "orbs": 0
           }
         }
@@ -467,12 +597,11 @@
         {
           "tag": "spawned",
           "tick": 1,
-          "hash": "b12136e9",
+          "hash": "31417592",
           "parts": {
-            "ship": "1ae06d9d",
+            "ship": "85293534",
             "bullets": "4b95f515",
-            "cam": "15ec28bf",
-            "encounter": "50b69995",
+            "encounter": "7c64098f",
             "rng": "f1f0ab9a"
           },
           "ship": {
@@ -481,6 +610,14 @@
             "vx": 0,
             "vy": 0
           },
+          "ships": [
+            {
+              "x": 1536,
+              "y": 1881,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
           "rng": 5351911,
           "st": {
             "state": "warning",
@@ -495,12 +632,11 @@
         {
           "tag": "after-split",
           "tick": 73,
-          "hash": "0e616df9",
+          "hash": "5202edce",
           "parts": {
-            "ship": "1ae06d9d",
+            "ship": "85293534",
             "bullets": "4b95f515",
-            "cam": "0c1877ef",
-            "encounter": "2dec98e1",
+            "encounter": "c026ec7f",
             "rng": "c2a7a6b5"
           },
           "ship": {
@@ -509,6 +645,14 @@
             "vx": 0,
             "vy": 0
           },
+          "ships": [
+            {
+              "x": 1536,
+              "y": 1881,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
           "rng": 3668483537,
           "st": {
             "state": "active",
@@ -523,12 +667,11 @@
         {
           "tag": "aftermath",
           "tick": 193,
-          "hash": "32fc011c",
+          "hash": "20d3b2c2",
           "parts": {
-            "ship": "1ae06d9d",
+            "ship": "85293534",
             "bullets": "4b95f515",
-            "cam": "d0743dc5",
-            "encounter": "f84c42d4",
+            "encounter": "5a9673c2",
             "rng": "63d4bdec"
           },
           "ship": {
@@ -537,6 +680,14 @@
             "vx": 0,
             "vy": 0
           },
+          "ships": [
+            {
+              "x": 1536,
+              "y": 1881,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
           "rng": 3036647867,
           "st": {
             "state": "active",
@@ -1133,8 +1284,173 @@
           "gain": null
         },
         {
-          "tick": 1378,
-          "kind": "shop",
+          "tick": 1414,
+          "kind": "warn",
+          "gain": null
+        },
+        {
+          "tick": 1445,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1463,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1489,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1504,
+          "kind": "spawn",
+          "gain": null
+        },
+        {
+          "tick": 1504,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1526,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1535,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1546,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1565,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1590,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1597,
+          "kind": "charge",
+          "gain": null
+        },
+        {
+          "tick": 1601,
+          "kind": "charge",
+          "gain": null
+        },
+        {
+          "tick": 1606,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1612,
+          "kind": "charge",
+          "gain": null
+        },
+        {
+          "tick": 1629,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1636,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1642,
+          "kind": "zap",
+          "gain": null
+        },
+        {
+          "tick": 1643,
+          "kind": "hurt",
+          "gain": null
+        },
+        {
+          "tick": 1646,
+          "kind": "zap",
+          "gain": null
+        },
+        {
+          "tick": 1648,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1657,
+          "kind": "zap",
+          "gain": null
+        },
+        {
+          "tick": 1668,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1692,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1708,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1714,
+          "kind": "warn",
+          "gain": null
+        },
+        {
+          "tick": 1732,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1737,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1750,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1767,
+          "kind": "charge",
+          "gain": null
+        },
+        {
+          "tick": 1770,
+          "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1771,
+          "kind": "charge",
+          "gain": null
+        },
+        {
+          "tick": 1782,
+          "kind": "charge",
+          "gain": null
+        },
+        {
+          "tick": 1793,
+          "kind": "wall",
           "gain": null
         }
       ]
@@ -1147,12 +1463,1696 @@
           "gain": 0.35355339059327373
         }
       ]
+    },
+    "duo-flight": {
+      "checkpoints": [
+        {
+          "tag": "split-thrust",
+          "tick": 60,
+          "hash": "d56367bf",
+          "parts": {
+            "ship": "4deacdd7",
+            "bullets": "4b95f515",
+            "encounter": "f7a490d4",
+            "rng": "39bce82f"
+          },
+          "ship": {
+            "x": 1635.8188288082633,
+            "y": 1918.4320608030948,
+            "vx": 1.872658355138089,
+            "vy": 0.7022468831767833
+          },
+          "ships": [
+            {
+              "x": 1635.8188288082633,
+              "y": 1918.4320608030948,
+              "vx": 1.872658355138089,
+              "vy": 0.7022468831767833
+            },
+            {
+              "x": 1530.9473590525151,
+              "y": 1976.4947537054725,
+              "vx": -0.9712858623572643,
+              "vy": 1.7483145522430754
+            }
+          ],
+          "rng": 4242,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "crossfire",
+          "tick": 120,
+          "hash": "5947dcef",
+          "parts": {
+            "ship": "34e660aa",
+            "bullets": "3684b447",
+            "encounter": "502decc8",
+            "rng": "39bce82f"
+          },
+          "ship": {
+            "x": 1635.5607138109704,
+            "y": 2024.5940175679953,
+            "vx": -0.9681470500846048,
+            "vy": 1.7500546532644286
+          },
+          "ships": [
+            {
+              "x": 1635.5607138109704,
+              "y": 2024.5940175679953,
+              "vx": -0.9681470500846048,
+              "vy": 1.7500546532644286
+            },
+            {
+              "x": 1612.0417025297506,
+              "y": 2012.9147442104365,
+              "vx": 1.970730175015929,
+              "vy": -0.3409143254274986
+            }
+          ],
+          "rng": 4242,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "coast",
+          "tick": 180,
+          "hash": "735abda2",
+          "parts": {
+            "ship": "dfb41d29",
+            "bullets": "4b95f515",
+            "encounter": "8baf4827",
+            "rng": "39bce82f"
+          },
+          "ship": {
+            "x": 1577.4718908058971,
+            "y": 2129.5972967638513,
+            "vx": -0.9681470500846048,
+            "vy": 1.7500546532644286
+          },
+          "ships": [
+            {
+              "x": 1577.4718908058971,
+              "y": 2129.5972967638513,
+              "vx": -0.9681470500846048,
+              "vy": 1.7500546532644286
+            },
+            {
+              "x": 1730.285513030704,
+              "y": 1992.4598846847837,
+              "vx": 1.970730175015929,
+              "vy": -0.3409143254274986
+            }
+          ],
+          "rng": 4242,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        }
+      ]
+    },
+    "duo-aggro": {
+      "checkpoints": [
+        {
+          "tag": "mid-telegraph",
+          "tick": 80,
+          "hash": "0746483f",
+          "parts": {
+            "ship": "c77cebf2",
+            "bullets": "4b95f515",
+            "encounter": "61c7c0bd",
+            "rng": "6a986479"
+          },
+          "ship": {
+            "x": 1000,
+            "y": 1094.464,
+            "vx": 0,
+            "vy": 2
+          },
+          "ships": [
+            {
+              "x": 1000,
+              "y": 1094.464,
+              "vx": 0,
+              "vy": 2
+            },
+            {
+              "x": 1400,
+              "y": 1000,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 777,
+          "st": {
+            "state": "active",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 99,
+            "enemies": 1,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "committed",
+          "tick": 250,
+          "hash": "4b791929",
+          "parts": {
+            "ship": "662cfc08",
+            "bullets": "4b95f515",
+            "encounter": "cbb8001e",
+            "rng": "6a986479"
+          },
+          "ship": {
+            "x": 1000,
+            "y": 1434.464,
+            "vx": 0,
+            "vy": 2
+          },
+          "ships": [
+            {
+              "x": 1000,
+              "y": 1434.464,
+              "vx": 0,
+              "vy": 2
+            },
+            {
+              "x": 1400,
+              "y": 1000,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 777,
+          "st": {
+            "state": "active",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 99,
+            "enemies": 1,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "end",
+          "tick": 400,
+          "hash": "02dab38c",
+          "parts": {
+            "ship": "76501d10",
+            "bullets": "4b95f515",
+            "encounter": "3c37a5ae",
+            "rng": "6a986479"
+          },
+          "ship": {
+            "x": 1000,
+            "y": 1734.464,
+            "vx": 0,
+            "vy": 2
+          },
+          "ships": [
+            {
+              "x": 1000,
+              "y": 1734.464,
+              "vx": 0,
+              "vy": 2
+            },
+            {
+              "x": 1400,
+              "y": 1000,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 777,
+          "st": {
+            "state": "active",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 99,
+            "enemies": 1,
+            "orbs": 0
+          }
+        }
+      ]
+    },
+    "duo-wave": {
+      "checkpoints": [
+        {
+          "tag": "first-packs",
+          "tick": 130,
+          "hash": "82fe140c",
+          "parts": {
+            "ship": "0745659c",
+            "bullets": "4b95f515",
+            "encounter": "7b81a395",
+            "rng": "95c8c5ca"
+          },
+          "ship": {
+            "x": 2800,
+            "y": 3400,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 2800,
+              "y": 3400,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1470,
+              "y": 2060,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 2908765473,
+          "st": {
+            "state": "active",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 99,
+            "enemies": 6,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "lock-held",
+          "tick": 240,
+          "hash": "f3015865",
+          "parts": {
+            "ship": "0745659c",
+            "bullets": "4b95f515",
+            "encounter": "adeb4c0d",
+            "rng": "95c8c5ca"
+          },
+          "ship": {
+            "x": 2800,
+            "y": 3400,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 2800,
+              "y": 3400,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1470,
+              "y": 2060,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 2908765473,
+          "st": {
+            "state": "active",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 99,
+            "enemies": 6,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "switched",
+          "tick": 252,
+          "hash": "46be5ff1",
+          "parts": {
+            "ship": "0745659c",
+            "bullets": "4b95f515",
+            "encounter": "b749e04d",
+            "rng": "95c8c5ca"
+          },
+          "ship": {
+            "x": 2800,
+            "y": 3400,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 2800,
+              "y": 3400,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1470,
+              "y": 2060,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 2908765473,
+          "st": {
+            "state": "active",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 99,
+            "enemies": 6,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "end",
+          "tick": 340,
+          "hash": "b315a688",
+          "parts": {
+            "ship": "0745659c",
+            "bullets": "4b95f515",
+            "encounter": "c9f64257",
+            "rng": "95c8c5ca"
+          },
+          "ship": {
+            "x": 2800,
+            "y": 3400,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 2800,
+              "y": 3400,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1470,
+              "y": 2060,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 2908765473,
+          "st": {
+            "state": "active",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 99,
+            "enemies": 6,
+            "orbs": 0
+          }
+        }
+      ]
+    },
+    "comet-run": {
+      "checkpoints": [
+        {
+          "tag": "comet-ramp",
+          "tick": 40,
+          "hash": "c0438702",
+          "parts": {
+            "ship": "80e19552",
+            "bullets": "4b95f515",
+            "encounter": "3615f51a",
+            "rng": "03a4af9a"
+          },
+          "ship": {
+            "x": 1167.6800436284557,
+            "y": 1095.8171677876899,
+            "vx": 5.209458852746756,
+            "vy": 2.976833630141003
+          },
+          "ships": [
+            {
+              "x": 1167.6800436284557,
+              "y": 1095.8171677876899,
+              "vx": 5.209458852746756,
+              "vy": 2.976833630141003
+            },
+            {
+              "x": 2257.0280015825037,
+              "y": 1032.587429475718,
+              "vx": 1.7364862842489186,
+              "vy": 0.992277876713668
+            }
+          ],
+          "rng": 1831566722,
+          "st": {
+            "state": "cleared",
+            "wave": 1,
+            "kills": 1,
+            "xp": 1,
+            "hull": 99,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "starved",
+          "tick": 70,
+          "hash": "3a7ed01b",
+          "parts": {
+            "ship": "89c3ee7a",
+            "bullets": "4b95f515",
+            "encounter": "6999cfeb",
+            "rng": "03a4af9a"
+          },
+          "ship": {
+            "x": 1323.9638092108603,
+            "y": 1185.122176691922,
+            "vx": 5.209458852746756,
+            "vy": 2.976833630141003
+          },
+          "ships": [
+            {
+              "x": 1323.9638092108603,
+              "y": 1185.122176691922,
+              "vx": 5.209458852746756,
+              "vy": 2.976833630141003
+            },
+            {
+              "x": 2309.122590109965,
+              "y": 1062.3557657771264,
+              "vx": 1.7364862842489186,
+              "vy": 0.992277876713668
+            }
+          ],
+          "rng": 1831566722,
+          "st": {
+            "state": "cleared",
+            "wave": 1,
+            "kills": 1,
+            "xp": 1,
+            "hull": 99,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "held",
+          "tick": 90,
+          "hash": "227024bf",
+          "parts": {
+            "ship": "1c73f8c1",
+            "bullets": "4b95f515",
+            "encounter": "8df6434c",
+            "rng": "03a4af9a"
+          },
+          "ship": {
+            "x": 1428.1529862657967,
+            "y": 1244.6588492947435,
+            "vx": 5.209458852746756,
+            "vy": 2.976833630141003
+          },
+          "ships": [
+            {
+              "x": 1428.1529862657967,
+              "y": 1244.6588492947435,
+              "vx": 5.209458852746756,
+              "vy": 2.976833630141003
+            },
+            {
+              "x": 2343.8523157949394,
+              "y": 1082.2013233113987,
+              "vx": 1.7364862842489186,
+              "vy": 0.992277876713668
+            }
+          ],
+          "rng": 1831566722,
+          "st": {
+            "state": "cleared",
+            "wave": 1,
+            "kills": 1,
+            "xp": 1,
+            "hull": 99,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "released",
+          "tick": 240,
+          "hash": "1a1d389f",
+          "parts": {
+            "ship": "6c0669a2",
+            "bullets": "4b95f515",
+            "encounter": "384595cc",
+            "rng": "a2b8f955"
+          },
+          "ship": {
+            "x": 1688.6259289031377,
+            "y": 1393.5005308017858,
+            "vx": 1.7364862842489186,
+            "vy": 0.9922778767136677
+          },
+          "ships": [
+            {
+              "x": 1688.6259289031377,
+              "y": 1393.5005308017858,
+              "vx": 1.7364862842489186,
+              "vy": 0.9922778767136677
+            },
+            {
+              "x": 2604.3252584322463,
+              "y": 1231.043004818441,
+              "vx": 1.7364862842489186,
+              "vy": 0.992277876713668
+            }
+          ],
+          "rng": 1010784917,
+          "st": {
+            "state": "warning",
+            "wave": 2,
+            "kills": 1,
+            "xp": 1,
+            "hull": 99,
+            "enemies": 0,
+            "orbs": 0
+          }
+        }
+      ]
+    },
+    "duo-shop": {
+      "checkpoints": [
+        {
+          "tag": "stock-flight",
+          "tick": 60,
+          "hash": "3303b501",
+          "parts": {
+            "ship": "c4256b17",
+            "bullets": "4b95f515",
+            "encounter": "a272960c",
+            "rng": "98785938"
+          },
+          "ship": {
+            "x": 1091.7577272674878,
+            "y": 1052.4329870099903,
+            "vx": 1.7364862842489186,
+            "vy": 0.992277876713668
+          },
+          "ships": [
+            {
+              "x": 1091.7577272674878,
+              "y": 1052.4329870099903,
+              "vx": 1.7364862842489186,
+              "vy": 0.992277876713668
+            },
+            {
+              "x": 2291.757727267478,
+              "y": 2252.4329870099905,
+              "vx": 1.7364862842489186,
+              "vy": 0.992277876713668
+            }
+          ],
+          "rng": 3131,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 100,
+            "hull": 99,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "after-buys",
+          "tick": 120,
+          "hash": "eb3fafc6",
+          "parts": {
+            "ship": "6a7ba098",
+            "bullets": "4b95f515",
+            "encounter": "718e8bdf",
+            "rng": "98785938"
+          },
+          "ship": {
+            "x": 1195.9469043224242,
+            "y": 1111.9696596128072,
+            "vx": 1.7364862842489186,
+            "vy": 0.992277876713668
+          },
+          "ships": [
+            {
+              "x": 1195.9469043224242,
+              "y": 1111.9696596128072,
+              "vx": 1.7364862842489186,
+              "vy": 0.992277876713668
+            },
+            {
+              "x": 2445.140821232817,
+              "y": 2340.080469275902,
+              "vx": 2.6047294263733773,
+              "vy": 1.4884168150705017
+            }
+          ],
+          "rng": 3131,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 100,
+            "hull": 99,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "regen",
+          "tick": 185,
+          "hash": "c2df5823",
+          "parts": {
+            "ship": "06a919bc",
+            "bullets": "4b95f515",
+            "encounter": "c4e53230",
+            "rng": "98785938"
+          },
+          "ship": {
+            "x": 1308.8185127986053,
+            "y": 1176.4677215991921,
+            "vx": 1.7364862842489186,
+            "vy": 0.992277876713668
+          },
+          "ships": [
+            {
+              "x": 1308.8185127986053,
+              "y": 1176.4677215991921,
+              "vx": 1.7364862842489186,
+              "vy": 0.992277876713668
+            },
+            {
+              "x": 2614.448233947096,
+              "y": 2436.8275622554943,
+              "vx": 2.6047294263733773,
+              "vy": 1.4884168150705017
+            }
+          ],
+          "rng": 3131,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 100,
+            "hull": 99,
+            "enemies": 0,
+            "orbs": 0
+          }
+        }
+      ]
+    },
+    "pvp-duel": {
+      "checkpoints": [
+        {
+          "tag": "under-fire",
+          "tick": 61,
+          "hash": "6ee00724",
+          "parts": {
+            "ship": "ba4c3620",
+            "bullets": "4b95f515",
+            "encounter": "3807da9d",
+            "rng": "1388d0fa"
+          },
+          "ship": {
+            "x": 1500,
+            "y": 1800,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 1500,
+              "y": 1800,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1500,
+              "y": 1620,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 1414,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 48,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "killed",
+          "tick": 228,
+          "hash": "01bc822e",
+          "parts": {
+            "ship": "3ec11e76",
+            "bullets": "75e59648",
+            "encounter": "e945a194",
+            "rng": "4c5959b8"
+          },
+          "ship": {
+            "x": 1500,
+            "y": 1800,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 1500,
+              "y": 1800,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1500,
+              "y": 1620,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 1199731557,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 0,
+            "enemies": 0,
+            "orbs": 3
+          }
+        },
+        {
+          "tag": "respawned",
+          "tick": 341,
+          "hash": "88cdc4bb",
+          "parts": {
+            "ship": "7d516e34",
+            "bullets": "2a994bbc",
+            "encounter": "2efd1426",
+            "rng": "4c5959b8"
+          },
+          "ship": {
+            "x": 1500,
+            "y": 1800,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 1500,
+              "y": 1800,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1500,
+              "y": 1620,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 1199731557,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 0,
+            "enemies": 0,
+            "orbs": 3
+          }
+        },
+        {
+          "tag": "end",
+          "tick": 400,
+          "hash": "dc2d735a",
+          "parts": {
+            "ship": "d34e4c4e",
+            "bullets": "8a09a46f",
+            "encounter": "3516f6aa",
+            "rng": "4c5959b8"
+          },
+          "ship": {
+            "x": 1500,
+            "y": 1800,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 1500,
+              "y": 1800,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1500,
+              "y": 1620,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 1199731557,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 0,
+            "enemies": 0,
+            "orbs": 3
+          }
+        }
+      ]
+    },
+    "pvp-ram": {
+      "checkpoints": [
+        {
+          "tag": "first-bite",
+          "tick": 21,
+          "hash": "3b527b3c",
+          "parts": {
+            "ship": "e69bedd5",
+            "bullets": "4b95f515",
+            "encounter": "022058a5",
+            "rng": "1488d28d"
+          },
+          "ship": {
+            "x": 1500,
+            "y": 1800,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 1500,
+              "y": 1800,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1506,
+              "y": 1800,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 1415,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "window-held",
+          "tick": 51,
+          "hash": "45f1fb0b",
+          "parts": {
+            "ship": "f497ec3c",
+            "bullets": "4b95f515",
+            "encounter": "f89afdac",
+            "rng": "1488d28d"
+          },
+          "ship": {
+            "x": 1500,
+            "y": 1800,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 1500,
+              "y": 1800,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1506,
+              "y": 1800,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 1415,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "ram-kill",
+          "tick": 63,
+          "hash": "4f3e9972",
+          "parts": {
+            "ship": "de93f95a",
+            "bullets": "4b95f515",
+            "encounter": "2ec3ce50",
+            "rng": "4f595e71"
+          },
+          "ship": {
+            "x": 1500,
+            "y": 1800,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 1500,
+              "y": 1800,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1506,
+              "y": 1800,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 1199731558,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 3,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "respawned",
+          "tick": 241,
+          "hash": "1d19f2b4",
+          "parts": {
+            "ship": "da142939",
+            "bullets": "4b95f515",
+            "encounter": "9f3472e7",
+            "rng": "4f595e71"
+          },
+          "ship": {
+            "x": 1500,
+            "y": 1800,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 1500,
+              "y": 1800,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1506,
+              "y": 1800,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 1199731558,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 3,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "end",
+          "tick": 260,
+          "hash": "80be2205",
+          "parts": {
+            "ship": "8d5f59b9",
+            "bullets": "4b95f515",
+            "encounter": "09a12f66",
+            "rng": "ef0878d8"
+          },
+          "ship": {
+            "x": 1500,
+            "y": 1800,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 1500,
+              "y": 1800,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1196,
+              "y": 1879.0692036012188,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 567895888,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 3,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        }
+      ]
+    },
+    "pvp-clash": {
+      "checkpoints": [
+        {
+          "tag": "clash",
+          "tick": 5,
+          "hash": "162b338b",
+          "parts": {
+            "ship": "bcec7617",
+            "bullets": "4b95f515",
+            "encounter": "63dd12fc",
+            "rng": "0588baf0"
+          },
+          "ship": {
+            "x": 1500,
+            "y": 1800,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 1500,
+              "y": 1800,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1506,
+              "y": 1800,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 1416,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "dry",
+          "tick": 131,
+          "hash": "ba61ca66",
+          "parts": {
+            "ship": "ac7ecdcf",
+            "bullets": "4b95f515",
+            "encounter": "ea70c486",
+            "rng": "0588baf0"
+          },
+          "ship": {
+            "x": 1500,
+            "y": 1800,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 1500,
+              "y": 1800,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1506,
+              "y": 1800,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 1416,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "end",
+          "tick": 160,
+          "hash": "f8076d81",
+          "parts": {
+            "ship": "8223bff7",
+            "bullets": "4b95f515",
+            "encounter": "3937fe02",
+            "rng": "0588baf0"
+          },
+          "ship": {
+            "x": 1500,
+            "y": 1800,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 1500,
+              "y": 1800,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1506,
+              "y": 1800,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 1416,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 3,
+            "enemies": 0,
+            "orbs": 0
+          }
+        }
+      ]
+    },
+    "rebate-kill": {
+      "checkpoints": [
+        {
+          "tag": "history-built",
+          "tick": 12,
+          "hash": "5ec22c33",
+          "parts": {
+            "ship": "c5c3a3bd",
+            "bullets": "4b95f515",
+            "encounter": "16c8c5a3",
+            "rng": "f3889e9a"
+          },
+          "ship": {
+            "x": 2600,
+            "y": 2600,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 2600,
+              "y": 2600,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1190,
+              "y": 1000,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 1510,
+          "st": {
+            "state": "active",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 99,
+            "enemies": 1,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "rebate-kill",
+          "tick": 13,
+          "hash": "80269fbe",
+          "parts": {
+            "ship": "8bef59e8",
+            "bullets": "4b95f515",
+            "encounter": "e0a17723",
+            "rng": "023aa4a8"
+          },
+          "ship": {
+            "x": 2600,
+            "y": 2600,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 2600,
+              "y": 2600,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1190,
+              "y": 1000,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 3663133136,
+          "st": {
+            "state": "cleared",
+            "wave": 1,
+            "kills": 1,
+            "xp": 0,
+            "hull": 99,
+            "enemies": 0,
+            "orbs": 2
+          }
+        },
+        {
+          "tag": "end",
+          "tick": 33,
+          "hash": "3018baa2",
+          "parts": {
+            "ship": "2b4dcba5",
+            "bullets": "4b95f515",
+            "encounter": "a67f4f10",
+            "rng": "023aa4a8"
+          },
+          "ship": {
+            "x": 2600,
+            "y": 2600,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 2600,
+              "y": 2600,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1190,
+              "y": 1000,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 3663133136,
+          "st": {
+            "state": "cleared",
+            "wave": 1,
+            "kills": 1,
+            "xp": 0,
+            "hull": 99,
+            "enemies": 0,
+            "orbs": 2
+          }
+        }
+      ]
+    },
+    "pvp-rewind": {
+      "checkpoints": [
+        {
+          "tag": "staged",
+          "tick": 30,
+          "hash": "eb9a509c",
+          "parts": {
+            "ship": "5a5befeb",
+            "bullets": "4b95f515",
+            "encounter": "0ffc4e68",
+            "rng": "f488a02d"
+          },
+          "ship": {
+            "x": 1400,
+            "y": 1600,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 1400,
+              "y": 1600,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 2600,
+              "y": 2600,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 1511,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 99,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "beyond-cap-missed",
+          "tick": 47,
+          "hash": "ed17302e",
+          "parts": {
+            "ship": "74f6336b",
+            "bullets": "43766b21",
+            "encounter": "dbafa8d2",
+            "rng": "f488a02d"
+          },
+          "ship": {
+            "x": 1400,
+            "y": 1600,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 1400,
+              "y": 1600,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1293,
+              "y": 1000,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 1511,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 99,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "within-cap-landed",
+          "tick": 85,
+          "hash": "ed8c8f91",
+          "parts": {
+            "ship": "9047e6d7",
+            "bullets": "4b95f515",
+            "encounter": "e04d973f",
+            "rng": "f488a02d"
+          },
+          "ship": {
+            "x": 1400,
+            "y": 1600,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 1400,
+              "y": 1600,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1342,
+              "y": 1000,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 1511,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 98,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "end",
+          "tick": 105,
+          "hash": "e6f4f8ba",
+          "parts": {
+            "ship": "35f7a9de",
+            "bullets": "4b95f515",
+            "encounter": "1dc247a9",
+            "rng": "f488a02d"
+          },
+          "ship": {
+            "x": 1400,
+            "y": 1600,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 1400,
+              "y": 1600,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1342,
+              "y": 1000,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 1511,
+          "st": {
+            "state": "warning",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 98,
+            "enemies": 0,
+            "orbs": 0
+          }
+        }
+      ]
+    },
+    "vt-clamp": {
+      "checkpoints": [
+        {
+          "tag": "ring-full",
+          "tick": 26,
+          "hash": "e58a50c0",
+          "parts": {
+            "ship": "ad0e698f",
+            "bullets": "4b95f515",
+            "encounter": "0cd2afbb",
+            "rng": "e5888890"
+          },
+          "ship": {
+            "x": 2600,
+            "y": 2600,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 2600,
+              "y": 2600,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1000,
+              "y": 1000,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 1512,
+          "st": {
+            "state": "active",
+            "wave": 1,
+            "kills": 0,
+            "xp": 0,
+            "hull": 99,
+            "enemies": 1,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "ancient-clamped",
+          "tick": 27,
+          "hash": "ea7c8894",
+          "parts": {
+            "ship": "db8101be",
+            "bullets": "4b95f515",
+            "encounter": "08275133",
+            "rng": "043aa7ce"
+          },
+          "ship": {
+            "x": 2600,
+            "y": 2600,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 2600,
+              "y": 2600,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1000,
+              "y": 1000,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 3663133138,
+          "st": {
+            "state": "cleared",
+            "wave": 1,
+            "kills": 1,
+            "xp": 0,
+            "hull": 99,
+            "enemies": 0,
+            "orbs": 2
+          }
+        },
+        {
+          "tag": "future-zeroed",
+          "tick": 58,
+          "hash": "476e6e69",
+          "parts": {
+            "ship": "db8101be",
+            "bullets": "2781a97f",
+            "encounter": "1fb70a8e",
+            "rng": "043aa7ce"
+          },
+          "ship": {
+            "x": 2600,
+            "y": 2600,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 2600,
+              "y": 2600,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1000,
+              "y": 1000,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 3663133138,
+          "st": {
+            "state": "cleared",
+            "wave": 1,
+            "kills": 1,
+            "xp": 0,
+            "hull": 99,
+            "enemies": 0,
+            "orbs": 0
+          }
+        },
+        {
+          "tag": "end",
+          "tick": 78,
+          "hash": "afa58fa8",
+          "parts": {
+            "ship": "0e3a50f7",
+            "bullets": "ef73c932",
+            "encounter": "25803a8c",
+            "rng": "043aa7ce"
+          },
+          "ship": {
+            "x": 2600,
+            "y": 2600,
+            "vx": 0,
+            "vy": 0
+          },
+          "ships": [
+            {
+              "x": 2600,
+              "y": 2600,
+              "vx": 0,
+              "vy": 0
+            },
+            {
+              "x": 1000,
+              "y": 1000,
+              "vx": 0,
+              "vy": 0
+            }
+          ],
+          "rng": 3663133138,
+          "st": {
+            "state": "cleared",
+            "wave": 1,
+            "kills": 1,
+            "xp": 0,
+            "hull": 99,
+            "enemies": 0,
+            "orbs": 0
+          }
+        }
+      ]
     }
   },
   "tickMode": {
     "meta": {
-      "sha": "e3f7942ae22fcc432f4e0a8aa262151ba19b176e",
-      "capturedAt": "2026-08-16T01:16:13.127Z",
+      "sha": "bae28953b7044e7d5a7b880ef7e768d2f972e1c5",
+      "capturedAt": "2026-08-18T02:22:39.588Z",
       "tunables": {
         "BCOOL": 400,
         "BLIFE": 0.5,
@@ -1164,7 +3164,11 @@
         "BDMG": 1,
         "CONTACTCD": 62,
         "BLASTR": 18,
-        "BLASTGAIN": 8
+        "BLASTGAIN": 8,
+        "COMETDMG": 3,
+        "COMETCD": 62,
+        "PVPORBS": 3,
+        "PVPREWIND": 140
       },
       "flight": {
         "VMAX": 2,
@@ -1173,7 +3177,28 @@
         "FLICK": 0.01,
         "DAMP": 1,
         "KEYTHRUST": 16,
-        "WALLLOSS": 0.5
+        "WALLLOSS": 0.5,
+        "COMETACC": 3,
+        "COMETTURN": 3,
+        "COMETVMAX": 3,
+        "COMETDRAIN": 1,
+        "COMETHIT": 0,
+        "COMETTHR": 0,
+        "COMETAOE": 11,
+        "COMETAOEDMG": 0,
+        "COMETFURY": 0.5,
+        "ENMAX": 100,
+        "ENREGEN": 0.2,
+        "ENDELAY": 25,
+        "ENARM": 0.5,
+        "ENORB": 0,
+        "ENCELL": 0.4,
+        "ENRECH": 0.25
+      },
+      "viewport": {
+        "innerWidth": 780,
+        "innerHeight": 493,
+        "dpr": 1
       },
       "note": "captured PRE-RETUNE at the shipped constants — recapture with --capture-tick after the human retunes the tick path"
     },
@@ -1183,12 +3208,11 @@
           {
             "tag": "mid-ramp",
             "tick": 10,
-            "hash": "a23aad79",
+            "hash": "5f54fb82",
             "parts": {
-              "ship": "76b20150",
+              "ship": "59129cab",
               "bullets": "4b95f515",
-              "cam": "65530ed2",
-              "encounter": "f1936715",
+              "encounter": "167af698",
               "rng": "f1f0ab9a"
             },
             "ship": {
@@ -1197,6 +3221,14 @@
               "vx": 1.2959999999999996,
               "vy": 0
             },
+            "ships": [
+              {
+                "x": 1543.128,
+                "y": 1881,
+                "vx": 1.2959999999999996,
+                "vy": 0
+              }
+            ],
             "rng": 5351911,
             "st": {
               "state": "warning",
@@ -1211,12 +3243,11 @@
           {
             "tag": "at-the-clamp",
             "tick": 240,
-            "hash": "b20afcd3",
+            "hash": "8fa051d4",
             "parts": {
-              "ship": "1d86bd24",
+              "ship": "504ec987",
               "bullets": "4b95f515",
-              "cam": "5697a10a",
-              "encounter": "a390bfcb",
+              "encounter": "033392c6",
               "rng": "f1f0ab9a"
             },
             "ship": {
@@ -1225,6 +3256,14 @@
               "vx": 2,
               "vy": 0
             },
+            "ships": [
+              {
+                "x": 2001.552,
+                "y": 1881,
+                "vx": 2,
+                "vy": 0
+              }
+            ],
             "rng": 5351911,
             "st": {
               "state": "warning",
@@ -1239,12 +3278,11 @@
           {
             "tag": "coasting",
             "tick": 360,
-            "hash": "e802b77b",
+            "hash": "ee966d74",
             "parts": {
-              "ship": "9cd38a25",
+              "ship": "6380e3ea",
               "bullets": "4b95f515",
-              "cam": "08b3b753",
-              "encounter": "2ea3803f",
+              "encounter": "dab57aa6",
               "rng": "f1f0ab9a"
             },
             "ship": {
@@ -1253,6 +3291,14 @@
               "vx": 2,
               "vy": 0
             },
+            "ships": [
+              {
+                "x": 2241.5519999999997,
+                "y": 1881,
+                "vx": 2,
+                "vy": 0
+              }
+            ],
             "rng": 5351911,
             "st": {
               "state": "warning",
@@ -1271,12 +3317,11 @@
           {
             "tag": "at-speed",
             "tick": 120,
-            "hash": "6226bc37",
+            "hash": "40471ece",
             "parts": {
-              "ship": "76101eb0",
+              "ship": "1adaf0c3",
               "bullets": "4b95f515",
-              "cam": "d0f5dc3b",
-              "encounter": "c477ebdf",
+              "encounter": "2a9a1dfa",
               "rng": "f1f0ab9a"
             },
             "ship": {
@@ -1285,6 +3330,14 @@
               "vx": 2,
               "vy": 0
             },
+            "ships": [
+              {
+                "x": 1761.552,
+                "y": 1881,
+                "vx": 2,
+                "vy": 0
+              }
+            ],
             "rng": 5351911,
             "st": {
               "state": "warning",
@@ -1299,12 +3352,11 @@
           {
             "tag": "after-flick",
             "tick": 160,
-            "hash": "0ce6b866",
+            "hash": "b837b4dd",
             "parts": {
-              "ship": "25a9cdf2",
+              "ship": "18cb288d",
               "bullets": "4b95f515",
-              "cam": "24b9dc74",
-              "encounter": "c38fc1f5",
+              "encounter": "c9a1e538",
               "rng": "f1f0ab9a"
             },
             "ship": {
@@ -1313,6 +3365,14 @@
               "vx": 1.2555722246476568e-9,
               "vy": 1.9999999999999998
             },
+            "ships": [
+              {
+                "x": 1765.7705067304723,
+                "y": 1959.7083079171603,
+                "vx": 1.2555722246476568e-9,
+                "vy": 1.9999999999999998
+              }
+            ],
             "rng": 5351911,
             "st": {
               "state": "warning",
@@ -1327,12 +3387,11 @@
           {
             "tag": "settled",
             "tick": 220,
-            "hash": "7b702c19",
+            "hash": "f0c373a7",
             "parts": {
-              "ship": "ee1f4a8f",
+              "ship": "bbeb67cc",
               "bullets": "4b95f515",
-              "cam": "dd709f41",
-              "encounter": "c1a769d5",
+              "encounter": "9bf3754c",
               "rng": "f1f0ab9a"
             },
             "ship": {
@@ -1341,6 +3400,14 @@
               "vx": 1.2555722246476568e-9,
               "vy": 1.9999999999999998
             },
+            "ships": [
+              {
+                "x": 1765.7705068058058,
+                "y": 2079.7083079171603,
+                "vx": 1.2555722246476568e-9,
+                "vy": 1.9999999999999998
+              }
+            ],
             "rng": 5351911,
             "st": {
               "state": "warning",
@@ -1355,12 +3422,11 @@
           {
             "tag": "diagonal",
             "tick": 260,
-            "hash": "9eb9bf16",
+            "hash": "aada48ae",
             "parts": {
-              "ship": "10f38df1",
+              "ship": "42b9c88a",
               "bullets": "4b95f515",
-              "cam": "a01aafb9",
-              "encounter": "85ffe404",
+              "encounter": "7bbbf3ad",
               "rng": "f1f0ab9a"
             },
             "ship": {
@@ -1369,6 +3435,14 @@
               "vx": 1.7036818300487824,
               "vy": 1.0476011750478482
             },
+            "ships": [
+              {
+                "x": 1818.2412947946405,
+                "y": 2136.2363568721903,
+                "vx": 1.7036818300487824,
+                "vy": 1.0476011750478482
+              }
+            ],
             "rng": 5351911,
             "st": {
               "state": "warning",
@@ -1387,12 +3461,11 @@
           {
             "tag": "left",
             "tick": 30,
-            "hash": "55e70d05",
+            "hash": "809cbd77",
             "parts": {
-              "ship": "d26510a7",
+              "ship": "4d84aa34",
               "bullets": "4b95f515",
-              "cam": "6e346843",
-              "encounter": "21d6b32b",
+              "encounter": "ac35878e",
               "rng": "f1f0ab9a"
             },
             "ship": {
@@ -1401,6 +3474,14 @@
               "vx": 1,
               "vy": 0
             },
+            "ships": [
+              {
+                "x": 31,
+                "y": 1881,
+                "vx": 1,
+                "vy": 0
+              }
+            ],
             "rng": 5351911,
             "st": {
               "state": "warning",
@@ -1415,12 +3496,11 @@
           {
             "tag": "right",
             "tick": 60,
-            "hash": "6b7f6650",
+            "hash": "b5813044",
             "parts": {
-              "ship": "387c304d",
+              "ship": "7c732916",
               "bullets": "4b95f515",
-              "cam": "ec9f0da0",
-              "encounter": "41ae81dd",
+              "encounter": "6e053a04",
               "rng": "f1f0ab9a"
             },
             "ship": {
@@ -1429,6 +3509,14 @@
               "vx": -1,
               "vy": 0
             },
+            "ships": [
+              {
+                "x": 3041,
+                "y": 1881,
+                "vx": -1,
+                "vy": 0
+              }
+            ],
             "rng": 5351911,
             "st": {
               "state": "warning",
@@ -1443,12 +3531,11 @@
           {
             "tag": "top",
             "tick": 90,
-            "hash": "ed2b3108",
+            "hash": "21522d7c",
             "parts": {
-              "ship": "3ef2fa94",
+              "ship": "9cfa2e07",
               "bullets": "4b95f515",
-              "cam": "f2216200",
-              "encounter": "70384740",
+              "encounter": "e130edf9",
               "rng": "f1f0ab9a"
             },
             "ship": {
@@ -1457,6 +3544,14 @@
               "vx": 0,
               "vy": 1
             },
+            "ships": [
+              {
+                "x": 1536,
+                "y": 31,
+                "vx": 0,
+                "vy": 1
+              }
+            ],
             "rng": 5351911,
             "st": {
               "state": "warning",
@@ -1471,12 +3566,11 @@
           {
             "tag": "bottom",
             "tick": 120,
-            "hash": "6c6bb86b",
+            "hash": "484b8fdf",
             "parts": {
-              "ship": "532392c4",
+              "ship": "ef980f6b",
               "bullets": "4b95f515",
-              "cam": "439f8356",
-              "encounter": "3dbf8b74",
+              "encounter": "05dfa641",
               "rng": "f1f0ab9a"
             },
             "ship": {
@@ -1485,6 +3579,14 @@
               "vx": 0,
               "vy": -1
             },
+            "ships": [
+              {
+                "x": 1536,
+                "y": 3731,
+                "vx": 0,
+                "vy": -1
+              }
+            ],
             "rng": 5351911,
             "st": {
               "state": "warning",
@@ -1499,12 +3601,11 @@
           {
             "tag": "corner",
             "tick": 150,
-            "hash": "2c6ddae5",
+            "hash": "888322ed",
             "parts": {
-              "ship": "b3b5520e",
+              "ship": "9d366851",
               "bullets": "4b95f515",
-              "cam": "8c516302",
-              "encounter": "43fcecb5",
+              "encounter": "2d5ecdd8",
               "rng": "f1f0ab9a"
             },
             "ship": {
@@ -1513,6 +3614,14 @@
               "vx": 0.7071067811865475,
               "vy": 0.7071067811865475
             },
+            "ships": [
+              {
+                "x": 22.2842712474619,
+                "y": 22.2842712474619,
+                "vx": 0.7071067811865475,
+                "vy": 0.7071067811865475
+              }
+            ],
             "rng": 5351911,
             "st": {
               "state": "warning",

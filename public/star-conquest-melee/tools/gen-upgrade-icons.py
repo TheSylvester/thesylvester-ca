@@ -108,6 +108,26 @@ def outlined_square(
     image.alpha_composite(layer)
 
 
+def outlined_rect(
+    image: Image.Image,
+    box: tuple[float, float, float, float],
+    width: float,
+    color: tuple[int, int, int, int],
+) -> None:
+    """Draw a rectangular outline without introducing a background color."""
+
+    left, top, right, bottom = box
+    layer = Image.new("RGBA", image.size, TRANSPARENT)
+    draw = ImageDraw.Draw(layer)
+    rectangle(draw, (left, top, right, bottom), color)
+    rectangle(
+        draw,
+        (left + width, top + width, right - width, bottom - width),
+        TRANSPARENT,
+    )
+    image.alpha_composite(layer)
+
+
 def ring(
     image: Image.Image,
     center: tuple[float, float],
@@ -355,7 +375,7 @@ def arrow_triangle(
     polygon(draw, [base_a, tip, base_b], CLAY)
 
 
-def thrust_ring() -> Image.Image:
+def wsad_engine_controls() -> Image.Image:
     image = new_icon()
     centers = (40, 96, 152)
     for center_y in centers:
@@ -405,13 +425,75 @@ def blast_charge() -> Image.Image:
     return image
 
 
+def energy_cell() -> Image.Image:
+    image = new_icon()
+    draw = ImageDraw.Draw(image)
+
+    rectangle(draw, (82, 14, 110, 28), SLATE)
+    outlined_rect(image, (46, 28, 146, 178), 6, SLATE)
+
+    # The three banked slots read from the bottom up; the empty top slot carries
+    # the same plus that max-hull.png uses for the pip a rank would buy.
+    draw = ImageDraw.Draw(image)
+    for slot_top in (142, 106, 70):
+        rectangle(draw, (58, slot_top, 134, slot_top + 30), CLAY)
+    plus_sign(draw, (96, 49), 26, 8, CLAY)
+    return image
+
+
+def recharger() -> Image.Image:
+    image = new_icon()
+    draw = ImageDraw.Draw(image)
+
+    # The bolt's lower tip stops at y=132, not the authored y=142: 10 px of
+    # clearance let the two masses crowd at 44 px, 20 px keeps them apart.
+    polygon(
+        draw,
+        [(116, 12), (58, 82), (90, 82), (72, 132), (134, 70), (102, 70)],
+        CLAY,
+    )
+    # DIM, not RULE. RULE is only 4% brighter than the card the shop draws
+    # under it, so the outline vanished and the bar read as a lone dash. The
+    # HUD's own ENERGY bar strokes with C.dim, so DIM also quotes the
+    # instrument this row buys.
+    outlined_rect(image, (22, 152, 170, 176), 4, DIM)
+
+    # The leading triangle says the bar is still filling, not merely full.
+    draw = ImageDraw.Draw(image)
+    rectangle(draw, (26, 156, 126, 172), CLAY)
+    polygon(draw, [(126, 156), (146, 164), (126, 172)], CLAY)
+    return image
+
+
+def overload() -> Image.Image:
+    image = new_icon()
+
+    outlined_rect(image, (20, 26, 66, 174), 5, SLATE)
+    draw = ImageDraw.Draw(image)
+    rectangle(draw, (25, 141, 61, 169), CLAY)
+    polygon(draw, [(32, 110), (54, 110), (43, 128)], DIM)
+
+    polygon(draw, [(134, 22), (180, 86), (88, 86)], CLAY)
+    rectangle(draw, (116, 86, 152, 172), CLAY)
+    # The authored white head is 48 wide and the clay shaft only 36, so at the
+    # authored base of y=96 its corners hung over the shaft onto transparency.
+    # The head keeps its size and rides 14 px higher, into the clay head, where
+    # the clay is wide enough to contain it — the flame's outer/inner idiom.
+    polygon(draw, [(134, 44), (158, 82), (110, 82)], WARM_WHITE)
+    rectangle(draw, (126, 82, 142, 150), WARM_WHITE)
+    return image
+
+
 GENERATORS = (
     ("rapid-loader.png", rapid_loader),
     ("afterburner.png", afterburner),
     ("hull-patch.png", hull_patch),
     ("max-hull.png", max_hull),
-    ("thrust-ring.png", thrust_ring),
+    ("wsad-engine-controls.png", wsad_engine_controls),
     ("blast-charge.png", blast_charge),
+    ("energy-cell.png", energy_cell),
+    ("recharger.png", recharger),
+    ("overload.png", overload),
 )
 
 

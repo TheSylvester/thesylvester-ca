@@ -13,7 +13,7 @@
 // G.started, puts every control it drove back where it found it, and resets
 // the encounter; like the wave suite it leaves G.mouse wherever its one
 // synthetic field click put it.
-window.runPauseUiChecks = function () {
+window.runPauseUiChecks = async function () {
   const t = window.__test;
   const ui = t.ui;
   const enc = t.enc;
@@ -30,11 +30,28 @@ window.runPauseUiChecks = function () {
   // the order the markup lays it out
   const TABS = {
     flight: ["vmax", "accel", "turn", "keythrust", "wallloss", "inputmode", "inputlag"],
-    aim: ["aimmode", "aimsens", "aimdist", "invert"],
+    aim: ["aimmode", "aimdist", "invert"], // push sens left with push mode's menu option
     weapons: ["cool", "autofire", "bspeed", "bfactor", "bmax", "blife", "bounce", "fxint", "fxdur", "blastr", "blastgain"],
     camera: ["cammode", "camease", "cambox", "camlead", "leadsrc", "aimlead", "leadblend", "leaddz", "edgemargin"],
     world: ["stardens", "reseed", "minimap", "edgearrows"],
-    combat: ["contactcd"],
+    combat: ["contactcd",
+             "pvp-rewind"], // phase 15's player-target rewind cap, in ms — a
+                            // COMBAT pacing knob, not a comet one. Net-locked
+                            // like every sim-affecting row: the server's value
+                            // moves only via the dev ui:"tune" route
+    comet: ["comet-acc", "comet-turn", "comet-vmax", "comet-dmg",
+            "comet-drain", "comet-hit", "comet-thr", "comet-aoe", "comet-aoedmg", "comet-fury",
+            "comet-cd", // the comet's OWN contact pacing — deliberately not the combat
+                        // tab's contactcd, which paces a normal ram alone
+            "pvp-orbs"], // the phase-14 PvP bounty. It sits on the COMET tab because the
+                         // comet ram is what most often collects it, and because a PvP
+                         // knob does not deserve a tab of its own yet — the morning may
+                         // move it. Net-locked like every sim-affecting row here
+    // the ENERGY pool's own tab: the pool is a general resource, so its numbers
+    // sit apart from the comet's — the comet tab prices a consumer, this one
+    // describes what every consumer spends from
+    energy: ["energy-max", "energy-regen", "energy-delay", "energy-arm",
+             "energy-orb", "energy-cell", "energy-rech"],
     audio: ["sfxvol", "sfxmute", "sfxshot", "sfxfoe", "sfxui", "sfxeng", "sfxtest"],
     // generated at first open from Encounter.tuning, so no ids can be listed
     // here: empty until the tab is opened, enemy-<row.id> sliders after
@@ -120,7 +137,7 @@ window.runPauseUiChecks = function () {
   ok("an unknown tab name is ignored", ui.UI.tab === "camera", "tab=" + ui.UI.tab);
 
   // ---- D. the control-id contract the move had to preserve ----
-  ok("the 28 split controls plus 2 fx, 2 blast, 1 combat, 1 world, 7 audio and 2 input-path controls are all present", ALL.length === 43, "n=" + ALL.length);
+  ok("the 27 split controls plus 2 fx, 2 blast, 2 combat, 11 comet, 1 pvp, 7 energy, 1 world, 7 audio and 2 input-path controls are all present", ALL.length === 62, "n=" + ALL.length);
   let idErr = "";
   for (const id of ALL) {
     const n = document.querySelectorAll("#" + id).length;
@@ -132,7 +149,7 @@ window.runPauseUiChecks = function () {
     const live = !!document.getElementById(id + "-out");
     if (live === (STATIC[id] !== undefined)) outErr += id + " ";
   }
-  ok("38 controls carry a live readout and 5 carry none", !outErr, outErr);
+  ok("55 controls carry a live readout and 5 carry none", !outErr, outErr);
   let proseErr = "";
   for (const id of Object.keys(STATIC)) {
     const o = document.querySelector('#devpanel output[for="' + id + '"]');
@@ -332,11 +349,9 @@ window.runPauseUiChecks = function () {
   // control change retires it rather than teaching a contract the page is not in
   t.setAimMode("push");
   const pushElig = t.guideState().eligible;
-  // The foil for the stand-in copy below: a wording that DOES name the ring
-  // keys, proving the card screen's silence about them is a choice and not the
-  // only string pauseLines() has. That wording is now conditional — key thrust
-  // is the THRUST RING purchase — and a first-run page has bought nothing, so
-  // the foil is read with the unlock staged and the flag put straight back.
+  // The foil for the stand-in copy below: push mode still has its own wording.
+  // Key thrust ships stock now (the flag defaults true), so the staging is
+  // belt-and-braces against a page a human re-locked by hand.
   const ringWas = enc.mods.keyThrust;
   enc.mods.keyThrust = true;
   const pushLines = t.pauseLines();
@@ -345,10 +360,10 @@ window.runPauseUiChecks = function () {
   ok("push mode retires the card instead of teaching the wrong controls",
     pushElig === false && t.guideState().eligible === true, "push=" + pushElig);
   // ...and the SHIPPED default earns the card rather than losing it: locked
-  // mode's roles are the card's roles — a cursor aims, hold right flies, left
-  // fires — and only the cursor's provenance differs, which the art never
-  // names. Its in-session copy is read with the session flag up, because the
-  // card screen's own stand-in owns the idle one.
+  // mode's roles are the card's roles — cursor aim, stock key flight, left
+  // fire and right-hold comet — and only the cursor's provenance differs,
+  // which the art never names. Its in-session copy is read with the session
+  // flag up, because the card screen's own stand-in owns the idle one.
   t.setAimMode("locked");
   const lockedElig = t.guideState().eligible;
   t.G.started = true;
@@ -362,15 +377,20 @@ window.runPauseUiChecks = function () {
     "eligible=" + lockedElig + " " + JSON.stringify(lockedLines));
   // The text stand-in: what the card's own screen prints before the bitmap
   // arrives, or if it never does. It has to teach the SAME contract the art
-  // does — mouse only, no ring, no key names — while every other screen keeps
-  // the copy that describes the mode it is actually in.
+  // does — including stock key flight and energy-powered comet mode — while
+  // every other screen keeps the copy that describes the mode it is in.
   const cardLines = t.pauseLines();
-  ok("the first-run stand-in copy teaches the card's mouse-only contract",
-    cardLines.length === 2 && cardLines.every((l) => !/key|qwe|asdzxc/i.test(l)) &&
+  const cardAria = canvasEl.getAttribute("aria-label");
+  ok("the first-run stand-in and accessible copy teach the new card contract",
+    cardLines.length === 2 &&
     /cursor/i.test(cardLines[0]) && /fire/i.test(cardLines[0]) &&
-    /right/i.test(cardLines[1]) && /fly/i.test(cardLines[1]) &&
+    /wsad/i.test(cardLines[0]) && /qezc/i.test(cardLines[0]) &&
+    /right/i.test(cardLines[1]) && /comet/i.test(cardLines[1]) &&
+    /energy/i.test(cardLines[1]) && /invulnerable/i.test(cardLines[1]) && /ram/i.test(cardLines[1]) &&
+    /W A S D/i.test(cardAria) && /Q E Z C/i.test(cardAria) &&
+    /comet/i.test(cardAria) && /energy/i.test(cardAria) && /invulnerable/i.test(cardAria) && /ram/i.test(cardAria) &&
     pushLines.some((l) => /qwe/i.test(l)),
-    JSON.stringify(cardLines) + " push=" + JSON.stringify(pushLines));
+    JSON.stringify(cardLines) + " aria=" + cardAria + " push=" + JSON.stringify(pushLines));
   setInv(false);
   const invOff = t.guideState().eligible;
   setInv(true); // back on for the rest of the section — the contract the card draws
@@ -467,6 +487,21 @@ window.runPauseUiChecks = function () {
   ui.closeDev();
   ok("the card never replaces the dev panel once play has begun",
     afterDev.panel && !afterDev.menu && t.guideState().shown === false);
+
+  // ---- I. net client regressions ------------------------------------------
+  // The normal page intentionally has no ?server= URL. Load the focused
+  // helper here; it temporarily activates the real net script with a fake
+  // socket, then restores this local page before the pause suite cleans up.
+  try {
+    const netChecks = await fetch("tests/net-checks.js?t=" + Date.now()).then((res) => res.text());
+    (0, eval)(netChecks);
+    const netResult = await window.runNetChecks();
+    for (const result of netResult.results) {
+      ok("net: " + result.name, result.pass, result.info);
+    }
+  } catch (error) {
+    ok("net: focused regression suite completes", false, error && (error.stack || error.message || error));
+  }
 
   // ---- restore the page for a human ----
   if (t.G.running) esc();

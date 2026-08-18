@@ -2,8 +2,8 @@
 
 // Synthesized sfx — every sound is generated at run time; nothing is loaded,
 // no request leaves the page. This whole layer is a strict OBSERVER of the
-// simulation: it reads G, the tuner lets and the encounter's live state,
-// writes none of it, and never touches the seeded rand() stream that makes a
+// simulation: it reads localPlayer() (the local seat's ship), G, the tuner lets and the encounter's
+// live state, writes none of it, and never touches the seeded rand() stream that makes a
 // wave replay identically. Delete this file and the page behaves
 // byte-identically to the one that never had audio — every call site out
 // there is the same lazy, permissively guarded read (if (window.Sfx) ...)
@@ -14,7 +14,7 @@
 // cue arrives after the event it describes, and a queue is a bank of voices
 // waiting to fire all at once the moment a suspended context wakes — one
 // rule covers every failure mode. THE HUM IS THE FLAME: the engine voice
-// reads G.flame through drawFlame's own curve and its own 1.5 px visibility
+// reads the local seat's flame through drawFlame's own curve and its own 1.5 px visibility
 // floor, so the engine is audible on exactly the frames the flame is drawn
 // and the ear and the eye cannot disagree about how hard the ship is
 // burning. THE ARMED GATE IS USER ACTIVATION, NOT CONTEXT STATE: headless
@@ -68,7 +68,7 @@
   const NEAR = 260;  // px — full volume; about half a viewport
   const FAR = 1100;  // px — silent; past this a body is barely on the corner map
   function att(at) {
-    const d = Math.hypot(at.x - G.ship.x, at.y - G.ship.y);
+    const d = Math.hypot(at.x - localPlayer().ship.x, at.y - localPlayer().ship.y);
     if (d <= NEAR) return 1;
     if (d >= FAR) return 0;
     const k = 1 - (d - NEAR) / (FAR - NEAR);
@@ -586,12 +586,14 @@
       if (now < engHold) return; // an audition owns the engine ramp — do not stomp it
       const on = armed && G.running && !SFXMUTE
               && !(window.Encounter && Encounter.frozen());
-      const m = Math.hypot(G.flame.x, G.flame.y);       // the SAME vector drawFlame reads
+      const m = Math.hypot(localPlayer().flame.x, localPlayer().flame.y); // the SAME vector drawFlame reads
       const len = Math.min(m * FLAME_GAIN, FLAME_MAX);  // ...through drawFlame's own curve
       const drive = len < 1.5 ? 0 : len / FLAME_MAX;    // ...and its own visibility gate
       engDyn.gain.setTargetAtTime(on ? ENG_GAIN * drive * SFXENG : 0, now, 0.05);
-      const cap = VMAX + (window.Encounter ? Encounter.mods.speed : 0);
-      const sp = Math.min(1, Math.hypot(G.vel.x, G.vel.y) / Math.max(0.001, cap));
+      // the LOCAL seat's own cap (seat 0 — the same ship whose flame and
+      // velocity feed this hum), through the one term derivation
+      const cap = VMAX + (window.Encounter ? Encounter.termsFor(localSeat()).speed : 0);
+      const sp = Math.min(1, Math.hypot(localPlayer().vel.x, localPlayer().vel.y) / Math.max(0.001, cap));
       engOsc.frequency.setTargetAtTime(ENG_F0 + ENG_F1 * sp, now, 0.08);
     } catch {}
   }
@@ -650,11 +652,11 @@
         try {
           const on = armed && G.running && !SFXMUTE
                   && !(window.Encounter && Encounter.frozen());
-          const m = Math.hypot(G.flame.x, G.flame.y);
+          const m = Math.hypot(localPlayer().flame.x, localPlayer().flame.y);
           const len = Math.min(m * FLAME_GAIN, FLAME_MAX);
           const drive = len < 1.5 ? 0 : len / FLAME_MAX;
-          const cap = VMAX + (window.Encounter ? Encounter.mods.speed : 0);
-          const sp = Math.min(1, Math.hypot(G.vel.x, G.vel.y) / Math.max(0.001, cap));
+          const cap = VMAX + (window.Encounter ? Encounter.termsFor(localSeat()).speed : 0); // the local seat, as frame() reads it
+          const sp = Math.min(1, Math.hypot(localPlayer().vel.x, localPlayer().vel.y) / Math.max(0.001, cap));
           return { on, drive, freq: ENG_F0 + ENG_F1 * sp };
         } catch {
           return { on: false, drive: 0, freq: ENG_F0 };
