@@ -1,7 +1,7 @@
 {
   "meta": {
-    "sha": "bae28953b7044e7d5a7b880ef7e768d2f972e1c5",
-    "capturedAt": "2026-08-18T02:22:25.688Z",
+    "sha": "bba1a9d2cd9359fe9f0e6f107e41e4c7bfc847ce",
+    "capturedAt": "2026-08-18T18:01:26.169Z",
     "tunables": {
       "BCOOL": 400,
       "BLIFE": 0.5,
@@ -2227,11 +2227,11 @@
         {
           "tag": "killed",
           "tick": 228,
-          "hash": "01bc822e",
+          "hash": "583c2cfb",
           "parts": {
             "ship": "3ec11e76",
             "bullets": "75e59648",
-            "encounter": "e945a194",
+            "encounter": "7ed073a0",
             "rng": "4c5959b8"
           },
           "ship": {
@@ -2267,24 +2267,24 @@
         },
         {
           "tag": "respawned",
-          "tick": 341,
-          "hash": "88cdc4bb",
+          "tick": 827,
+          "hash": "1e335e6d",
           "parts": {
-            "ship": "7d516e34",
-            "bullets": "2a994bbc",
-            "encounter": "2efd1426",
-            "rng": "4c5959b8"
+            "ship": "cef533c6",
+            "bullets": "49cc1ecd",
+            "encounter": "e0aee5f1",
+            "rng": "fe089075"
           },
           "ship": {
-            "x": 1500,
-            "y": 1800,
+            "x": 1196,
+            "y": 1698.628668653313,
             "vx": 0,
             "vy": 0
           },
           "ships": [
             {
-              "x": 1500,
-              "y": 1800,
+              "x": 1196,
+              "y": 1698.628668653313,
               "vx": 0,
               "vy": 0
             },
@@ -2295,37 +2295,37 @@
               "vy": 0
             }
           ],
-          "rng": 1199731557,
+          "rng": 567895887,
           "st": {
             "state": "warning",
             "wave": 1,
             "kills": 0,
             "xp": 0,
-            "hull": 0,
+            "hull": 3,
             "enemies": 0,
             "orbs": 3
           }
         },
         {
           "tag": "end",
-          "tick": 400,
-          "hash": "dc2d735a",
+          "tick": 900,
+          "hash": "82c9b71c",
           "parts": {
-            "ship": "d34e4c4e",
-            "bullets": "8a09a46f",
-            "encounter": "3516f6aa",
-            "rng": "4c5959b8"
+            "ship": "8db35b1c",
+            "bullets": "bc8cde0b",
+            "encounter": "6d9bf058",
+            "rng": "fe089075"
           },
           "ship": {
-            "x": 1500,
-            "y": 1800,
+            "x": 1196,
+            "y": 1698.628668653313,
             "vx": 0,
             "vy": 0
           },
           "ships": [
             {
-              "x": 1500,
-              "y": 1800,
+              "x": 1196,
+              "y": 1698.628668653313,
               "vx": 0,
               "vy": 0
             },
@@ -2336,13 +2336,13 @@
               "vy": 0
             }
           ],
-          "rng": 1199731557,
+          "rng": 567895887,
           "st": {
             "state": "warning",
             "wave": 1,
             "kills": 0,
             "xp": 0,
-            "hull": 0,
+            "hull": 3,
             "enemies": 0,
             "orbs": 3
           }
@@ -2436,11 +2436,11 @@
         {
           "tag": "ram-kill",
           "tick": 63,
-          "hash": "4f3e9972",
+          "hash": "68efb50d",
           "parts": {
             "ship": "de93f95a",
             "bullets": "4b95f515",
-            "encounter": "2ec3ce50",
+            "encounter": "7c3a7804",
             "rng": "4f595e71"
           },
           "ship": {
@@ -2476,13 +2476,13 @@
         },
         {
           "tag": "respawned",
-          "tick": 241,
-          "hash": "1d19f2b4",
+          "tick": 662,
+          "hash": "2bbcd997",
           "parts": {
-            "ship": "da142939",
+            "ship": "6afdb246",
             "bullets": "4b95f515",
-            "encounter": "9f3472e7",
-            "rng": "4f595e71"
+            "encounter": "7dc68cd1",
+            "rng": "ef0878d8"
           },
           "ship": {
             "x": 1500,
@@ -2498,13 +2498,13 @@
               "vy": 0
             },
             {
-              "x": 1506,
-              "y": 1800,
+              "x": 1196,
+              "y": 1879.0692036012188,
               "vx": 0,
               "vy": 0
             }
           ],
-          "rng": 1199731558,
+          "rng": 567895888,
           "st": {
             "state": "warning",
             "wave": 1,
@@ -2517,12 +2517,12 @@
         },
         {
           "tag": "end",
-          "tick": 260,
-          "hash": "80be2205",
+          "tick": 800,
+          "hash": "f3a78818",
           "parts": {
-            "ship": "8d5f59b9",
+            "ship": "42a480a6",
             "bullets": "4b95f515",
-            "encounter": "09a12f66",
+            "encounter": "7669b9d7",
             "rng": "ef0878d8"
           },
           "ship": {

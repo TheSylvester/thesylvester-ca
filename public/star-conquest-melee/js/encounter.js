@@ -197,7 +197,7 @@
       sepR: 22, engage: 0, orbDrop: 1,
     },
     player: { hull: 3, invuln: 62, // ≈ one second of post-hit grace
-              respawn: 180,        // ticks a downed seat waits before it re-enters — 3 s
+              respawn: 600,        // ticks a downed seat waits before it re-enters — 10 s
               stock: 3 },          // the quarter rule's life stock — consumed ONLY while
                                    // lobby waiters exist (E.lobbyWaiters, the phase-09
                                    // hook); with no one waiting, deaths never deplete it

@@ -686,13 +686,20 @@ if (tickSet) {
   enc.buy(duRow("MAX HULL"), 0);
   const q6 = [];
   let duDeathSeen = false;
-  for (let k = 0; k < 400; k++) {
+  let duRespawnSeen = false;
+  // The loop outruns the respawn timer on purpose. `respawn` is a tunable the
+  // owner moves by feel (180 → 600 ticks on 2026-08-18), so the respawn
+  // checkpoint LOCATES ITSELF on the tick the seat comes back rather than
+  // sitting on a hand-counted tick that a later retune silently walks past.
+  for (let k = 0; k < 900; k++) {
     pushInputFrame(0, F({ cx: 1500, cy: 1400 }));
     pushInputFrame(1, F({ cx: 1500, cy: 1800, fh: true }));
     stepTick();
     if (!duDeathSeen && enc.E.seats[0].hull <= 0) { duDeathSeen = true; q6.push(cp("killed")); }
+    if (duDeathSeen && !duRespawnSeen && enc.E.seats[0].hull > 0) {
+      duRespawnSeen = true; q6.push(cp("respawned"));
+    }
     if (k === 60) q6.push(cp("under-fire"));
-    if (k === 340) q6.push(cp("respawned"));
   }
   q6.push(cp("end"));
   judge("pvp-duel", q6, fx.traces, "event");
@@ -713,14 +720,17 @@ if (tickSet) {
   enc.buy(enc.shopInfo().findIndex((r) => r.name === "AFTERBURNER"), 1);
   const q7 = [];
   let rmDeathSeen = false;
-  for (let k = 0; k < 260; k++) {
+  let rmRespawnSeen = false;
+  for (let k = 0; k < 800; k++) {   // outruns the respawn timer — see Q6's note
     pushInputFrame(0, F({ cx: 1506, cy: 1800, rh: 1 }));
     pushInputFrame(1, F({ cx: 1500, cy: 1800 }));
     stepTick();
     if (!rmDeathSeen && enc.E.seats[1].hull <= 0) { rmDeathSeen = true; q7.push(cp("ram-kill")); }
+    if (rmDeathSeen && !rmRespawnSeen && enc.E.seats[1].hull > 0) {
+      rmRespawnSeen = true; q7.push(cp("respawned"));
+    }
     if (k === 20) q7.push(cp("first-bite"));
     if (k === 50) q7.push(cp("window-held"));
-    if (k === 240) q7.push(cp("respawned"));
   }
   q7.push(cp("end"));
   judge("pvp-ram", q7, fx.traces, "event");

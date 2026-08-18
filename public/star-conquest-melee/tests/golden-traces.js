@@ -1470,7 +1470,12 @@ window.runGoldenTraces = async function (opts) {
     const q6 = [];
     let duDeathTick = -1;
     let duAtDeath = null;
-    for (let k = 0; k < 400; k++) {
+    let duRespawnSeen = false;
+    // The loop outruns the respawn timer on purpose. `respawn` is a tunable the
+    // owner moves by feel (180 → 600 ticks on 2026-08-18), so the respawn
+    // checkpoint LOCATES ITSELF on the tick the seat comes back rather than
+    // sitting on a hand-counted tick that a later retune silently walks past.
+    for (let k = 0; k < 900; k++) {
       t.pushInputFrame(0, F({ cx: 1500, cy: 1400 }));            // parked, aiming away, never firing
       t.pushInputFrame(1, F({ cx: 1500, cy: 1800, fh: true }));  // held on seat 0
       duoStep();
@@ -1481,8 +1486,10 @@ window.runGoldenTraces = async function (opts) {
                       orbs: enc.E.orbs.length - duOrbsBefore };
         q6.push(cp("killed"));
       }
+      if (duDeathTick >= 0 && !duRespawnSeen && enc.E.seats[0].hull > 0) {
+        duRespawnSeen = true; q6.push(cp("respawned"));
+      }
       if (k === 60) q6.push(cp("under-fire"));
-      if (k === 340) q6.push(cp("respawned"));
     }
     q6.push(cp("end"));
     ok("pvp-duel: the victim's purchases were REAL before the kill — the reset has teeth",
@@ -1535,7 +1542,8 @@ window.runGoldenTraces = async function (opts) {
     let rmHullWas = enc.E.seats[1].hull;
     let rmKillerGain = 0;
     let rmKillerScoreWas = enc.E.seats[0].score;
-    for (let k = 0; k < 260; k++) {
+    let rmRespawnSeen = false;
+    for (let k = 0; k < 800; k++) {   // outruns the respawn timer — see Q6's note
       t.pushInputFrame(0, F({ cx: 1506, cy: 1800, rh: 1 })); // the comet, held, parked
       t.pushInputFrame(1, F({ cx: 1500, cy: 1800 }));        // the victim, still, never firing
       duoStep();
@@ -1557,10 +1565,12 @@ window.runGoldenTraces = async function (opts) {
                       orbs: enc.E.orbs.length - rmOrbsBefore, gain: rmKillerGain };
         q7.push(cp("ram-kill"));
       }
+      if (rmDeathTick >= 0 && !rmRespawnSeen && enc.E.seats[1].hull > 0) {
+        rmRespawnSeen = true; q7.push(cp("respawned"));
+      }
       rmKillerScoreWas = enc.E.seats[0].score;
       if (k === 20) q7.push(cp("first-bite"));
       if (k === 50) q7.push(cp("window-held"));
-      if (k === 240) q7.push(cp("respawned"));
     }
     q7.push(cp("end"));
     ok("pvp-ram: the ram bit exactly twice, one COMETCD window apart — the pair pacing holds",
