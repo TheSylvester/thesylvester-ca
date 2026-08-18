@@ -1554,6 +1554,7 @@ function step() {
     } else if (G.leftHeld) fire(0);
   }
   stepImpacts(); // visual bursts age on the sim clock — pause and frozen freeze them too
+  stepShipFx();  // ...and the ship blasts with them, on the same clock for the same reason
   for (let i = G.bullets.length - 1; i >= 0; i--) {
     const b = G.bullets[i];
     if (b.dead || b.spent) { G.bullets.splice(i, 1); continue; } // consumed by a hit, or expired after its final sweep
@@ -1731,8 +1732,74 @@ function drawCometGlow(P, pool) {
   ctx.restore();
 }
 
-function drawShip(x, y) {
-  ctx.fillStyle = C.bright;
+// ---- the ship, and everything it has been through --------------------------
+// A hull used to be a position and nothing else: every seat drew the same
+// pristine disc whether it was untouched, on its last hull point, or ten
+// seconds into a respawn wait with its wreck still parked on the field. The
+// three states below are all read from ONE place — Encounter.seatHealth(seat)
+// — and every field it hands back is written from that seat's OWN wire record
+// on a net client, so a REMOTE ship shows its damage on this screen exactly as
+// it does on the screen of the player flying it. That is the whole point: a
+// fix that only reached the local seat would not be a fix.
+//
+// Two rules the whole file below obeys, for the same reasons drawImpacts()
+// obeys them:
+//   * NO rand(). The seeded stream is hashed, and a draw that spent from it
+//     would desync every replay. Wound placement comes from hash32(), the
+//     same escape spawnImpactFx() takes.
+//   * NO wall clock. Every animated thing here clocks off sim state — the
+//     seat's own hitFlash, its respawn countdown, the encounter's waveTick —
+//     so two render() calls inside one tick paint identical bytes, which four
+//     committed pixel probes assume outright.
+const HULL_SEED = 0x3C7B91A5; // the wound-placement salt — a seat's wounds sit
+                              // in the same places on every client, every run
+// One seat's presented survival state, or null when nothing can answer (the
+// headless hosts have no encounter, and a seat can be drawn one frame before
+// its record is dealt).
+function seatHealth(s) {
+  if (!window.Encounter || !Encounter.seatHealth) return null;
+  return Encounter.seatHealth(s);
+}
+// The chewed silhouette. `bites` notches are pulled out of a circle of radius
+// r, each one `depth` px deep at its centre and tapering to nothing at its
+// edges, and the whole thing is left on the context as a path for the caller
+// to fill, stroke or clip with. The b-th notch always sits at the same bearing
+// for a given seat, so a hull that loses a second point KEEPS its first wound
+// and gains a second rather than rearranging itself every time it is hit.
+function hullPath(x, y, r, bites, seat, depth) {
+  const N = 28; // enough segments that the intact arcs still read as round
+  ctx.beginPath();
+  for (let i = 0; i <= N; i++) {
+    const a = (i / N) * Math.PI * 2;
+    let rr = r;
+    for (let b = 0; b < bites; b++) {
+      const h = hash32(seat, b, 7, HULL_SEED);
+      const ba = ((h >>> 8) / 0x1000000) * Math.PI * 2; // this wound's bearing
+      const bw = 0.42 + ((h & 0xff) / 255) * 0.34;      // ...and its angular half-width
+      let d = Math.abs(a - ba);
+      if (d > Math.PI) d = Math.PI * 2 - d;             // the short way round
+      if (d < bw) rr -= depth * (1 - d / bw);
+    }
+    const px = x + Math.cos(a) * rr;
+    const py = y + Math.sin(a) * rr;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+}
+// Where the b-th wound sits, in world px — the burn marks and the critical
+// ember both hang off the same bearings the notches were cut at.
+function woundAt(x, y, seat, b, k) {
+  const a = ((hash32(seat, b, 7, HULL_SEED) >>> 8) / 0x1000000) * Math.PI * 2;
+  return { x: x + Math.cos(a) * SHIP_R * k, y: y + Math.sin(a) * SHIP_R * k };
+}
+// The pristine hull: the exact three-step draw this function has always been.
+// It is kept whole and separate on purpose — a seat at full hull with no live
+// hit takes this path and only this path, so an undamaged ship paints the
+// bytes it has always painted and nothing that probes one can see any of the
+// work above.
+function drawHull(x, y, tint) {
+  ctx.fillStyle = tint || C.bright;
   ctx.beginPath();
   ctx.arc(x, y, SHIP_R, 0, Math.PI * 2);
   ctx.fill();
@@ -1746,6 +1813,176 @@ function drawShip(x, y) {
   ctx.beginPath();
   ctx.arc(x, y, 1.4, 0, Math.PI * 2);
   ctx.fill();
+}
+// The plate's colour as it burns down. Fixed steps rather than a lerp: the
+// game draws in flat pixel tones everywhere else, and a ramp of computed greys
+// would read as an anti-aliased gradient instead of battle damage. A full hull
+// returns the untouched white by construction, so the pristine draw and the
+// flashing-but-unhurt draw agree about what an intact plate looks like.
+function hullTint(frac) {
+  if (frac >= 1) return C.bright;
+  if (frac > 0.5) return "#b6bbc7";
+  if (frac > 0.25) return "#949aa8";
+  return "#7b8290"; // a hull this far gone has nothing bright left on it
+}
+// A damaged, living hull: a chewed rim charred along its whole edge, a rosette
+// whose sockets go dark as the hull points go, and — on the last quarter — an
+// ember still burning in the first wound.
+function drawDamagedHull(x, y, H, seat, tint) {
+  const frac = Math.max(0, Math.min(1, H.hull / Math.max(1, H.hullMax)));
+  const lost = Math.min(6, Math.max(1, H.hullMax - H.hull)); // six notches is
+                              // already a wreck of a silhouette; past that the
+                              // rosette carries the count on its own
+  hullPath(x, y, SHIP_R, lost, seat, 2.6);
+  ctx.fillStyle = tint;
+  ctx.fill();
+  // the char, stroked along the SAME path: it darkens the whole rim and it
+  // deepens every notch, which is what makes a single missing hull point
+  // legible at 1:1 on a 14 px ship. (An earlier pass filled a round burn under
+  // each notch instead; clipped to the plate it left a crescent that read as a
+  // stray ring, and unclipped it spilled off the hull. The rim is the honest
+  // place for a burn anyway — it is where the damage came in.)
+  ctx.strokeStyle = C.wall;
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+  ctx.lineWidth = 1;
+  // the rosette as a hull gauge: a live socket is the full clay dot it always
+  // was, a dead one is a small dark pit. Two different marks, not one mark in
+  // two colours — at this size a colour swap alone does not survive the scale.
+  const lit = Math.max(1, Math.round(8 * frac));
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const live = i < lit;
+    ctx.fillStyle = live ? C.clay : C.wall;
+    ctx.beginPath();
+    ctx.arc(x + Math.cos(a) * 4.4, y + Math.sin(a) * 4.4, live ? 1.2 : 0.85, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = C.clay; // the core holds until the hull is actually gone
+  ctx.beginPath();
+  ctx.arc(x, y, 1.4, 0, Math.PI * 2);
+  ctx.fill();
+  // CRITICAL — one hull point from dead. An ember burns in the first wound,
+  // blinking on the encounter's own presented clock (the same `wt % 8 < 5`
+  // idiom the graced-ship ring uses), so a ship about to die announces it.
+  if (frac <= 0.34 && H.wt % 8 < 5) {
+    const w = woundAt(x, y, seat, 0, 0.62);
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = C.clay;
+    ctx.beginPath();
+    ctx.arc(w.x, w.y, 2.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = C.bright;
+    ctx.fillRect(w.x - 0.7, w.y - 0.7, 1.4, 1.4);
+  }
+}
+// The husk a downed seat leaves parked where it died, and the countdown that
+// says when it flies again. A seat is down for 600 ticks now: ten seconds of
+// plain absence tells the other players nothing about whether the ship is
+// coming back, so the wreck stays on the field and wears the wait.
+function drawWreck(x, y, H, seat) {
+  ctx.save();
+  hullPath(x, y, SHIP_R, 3, seat, 2.8); // deeper than a living hull ever shows,
+                                        // but still a DISC: shred it further and
+                                        // it stops reading as a ship at all
+  ctx.fillStyle = C.wall;
+  ctx.fill();
+  ctx.clip();
+  ctx.fillStyle = C.fieldBg; // the split — one gash, open to the field
+  ctx.fillRect(x - SHIP_R, y - 1.1, SHIP_R * 2, 2.2);
+  ctx.restore();
+  ctx.strokeStyle = C.dim; // a cold outline, so the husk holds its shape over
+  ctx.lineWidth = 1;       // a lit background as well as a dark one
+  hullPath(x, y, SHIP_R, 3, seat, 2.8);
+  ctx.stroke();
+  ctx.globalAlpha = 0.55; // the rosette, every dot cold
+  ctx.fillStyle = C.dim;
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.arc(x + Math.cos(a) * 4.4, y + Math.sin(a) * 4.4, 1, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  if (H.wt % 12 < 7) { // two embers still burning in the wreckage
+    ctx.fillStyle = C.clay;
+    for (let b = 0; b < 2; b++) {
+      const w = woundAt(x, y, seat, b + 1, 0.5);
+      ctx.fillRect(w.x - 0.8, w.y - 0.8, 1.6, 1.6);
+    }
+  }
+  if (H.rsp <= 0 || H.rspMax <= 0) return; // parked for good — no promise to make
+  // THE WAIT, drawn honestly: a track that closes as the countdown runs out,
+  // and the seconds left written under it. Both are pure functions of `rsp`,
+  // which is on the wire, so every client counts the same seat down together.
+  const done = 1 - Math.max(0, Math.min(1, H.rsp / H.rspMax));
+  ctx.strokeStyle = C.dim;
+  ctx.globalAlpha = 0.5;
+  ctx.beginPath();
+  ctx.arc(x, y, SHIP_R + 5, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = C.clay;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(x, y, SHIP_R + 5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * done);
+  ctx.stroke();
+  ctx.lineWidth = 1;
+  ctx.save();
+  ctx.fillStyle = C.clay;
+  ctx.font = "700 9px " + FONT;
+  ctx.textAlign = "center";
+  ctx.fillText(String(Math.ceil(H.rsp / 60)), x, y + SHIP_R + 18);
+  ctx.restore();
+}
+// The 20-tick hit reaction, spent on two cues that together read as "that
+// landed": the plate goes white-hot for the first third, and a shock ring
+// opens off the rim across the whole flash. The SHUDDER that goes with them
+// is applied by the caller, because it has to move the hull and the rosette
+// as one body. Nothing here is random: `flash` is sim state on every client
+// (the wire carries it as `fl`), so the reaction plays the same everywhere.
+function drawHitShock(x, y, flash) {
+  const p = (20 - Math.min(20, flash)) / 20;
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = C.clay;
+  ctx.globalAlpha = 0.8 * (1 - p);
+  ctx.beginPath();
+  ctx.arc(x, y, SHIP_R + 2 + 13 * p, 0, Math.PI * 2);
+  ctx.stroke();
+  if (p < 0.4) { // a second, tighter ring while the hit is fresh
+    ctx.strokeStyle = C.bright;
+    ctx.globalAlpha = 0.7 * (1 - p / 0.4);
+    ctx.beginPath();
+    ctx.arc(x, y, SHIP_R + 1 + 6 * p, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+// THE ENTRY POINT the render loop calls, once per seat. Four states, in the
+// order they matter: down, hit, damaged, pristine.
+function drawShip(x, y, seat) {
+  const H = seatHealth(seat);
+  // no record to read, or an untouched hull: the original draw, untouched
+  if (!H || (H.hull >= H.hullMax && H.flash <= 0)) { drawHull(x, y); return; }
+  if (H.hull <= 0) { drawWreck(x, y, H, seat); return; }
+  let hx = x;
+  let hy = y;
+  if (H.flash > 0) {
+    if (H.flash > 13) {
+      // the kick. A fixed hash offset off the seat and the flash tick, so the
+      // shudder is identical on every screen and across two renders of one
+      // tick — a Math.random() jitter would break the pixel probes outright.
+      const k = hash32(seat, H.flash, 3, HULL_SEED);
+      hx += ((k & 3) - 1.5);
+      hy += (((k >>> 2) & 3) - 1.5);
+    }
+    drawHitShock(x, y, H.flash); // the ring stays on the TRUE position — it is
+                                 // the impact point, not the ship
+  }
+  const tint = H.flash > 13 ? C.bright : hullTint(H.hull / Math.max(1, H.hullMax));
+  if (H.hull >= H.hullMax) drawHull(hx, hy, tint); // flashing, but not yet hurt
+  else drawDamagedHull(hx, hy, H, seat, tint);
 }
 
 function drawAim() {
@@ -1972,7 +2209,88 @@ function spawnImpactFx(x, y, dx, dy, kind, r) {
     r: r === undefined ? 0 : r, // stamped like the lifetime: a slider moved mid-burst never resizes it
     seed: hash32(Math.round(x), Math.round(y), fx.count, FX_SEED) });
 }
-function resetImpactFx() { fx.bursts.length = 0; fx.count = 0; fxWall.length = 0; }
+function resetImpactFx() { fx.bursts.length = 0; fx.count = 0; fxWall.length = 0; resetShipFx(); }
+
+// ---- ship destruction fx ---------------------------------------------------
+// A seat's death, drawn. This is a SEPARATE ring from fx.bursts on purpose.
+// The impact bursts are the encounter's: sized, capped and LIFETIMED for a
+// stream of bullet hits, and several committed checks count them exactly
+// (`t.fx.bursts.length === 1` after one staged hit). A hull going up is a
+// different event on a different scale — bigger, longer, one per seat — so it
+// gets its own list, its own cap and its own lifetime, and no burst-counting
+// check can see it.
+//
+// It obeys the same two rules the bursts obey, for the same reasons: NO
+// rand() (each blast carries a hash32 seed and re-derives every shard from
+// (seed, age), exactly as drawImpacts does), and no wall clock — it ages in
+// stepShipFx() off the sim tick locally and the PRESENTED tick on a net
+// client, so a pause freezes it mid-blast like everything else.
+const SHIPFX_MAX = 8;       // live blasts — one per seat is the real peak; 8 is slack
+const SHIPFX_LIFE = 48;     // ticks, 0.8 s at 60 Hz — a hull burns longer than a bullet
+const SHIPFX_SEED = 0x5A17C0DE;
+const shipFx = { blasts: [], count: 0 };
+// Spawned from the presentation-side drains and nowhere else: game.js's
+// drainCues() in local play, js/net.js's fireEvents() on a net client — the
+// same two places the cue for this event already reaches. Both are fed by the
+// `death` event the sim emits with the dying seat's position, so EVERY client
+// blows up EVERY seat, not just the one it happens to be flying.
+function spawnShipBlast(x, y, seat) {
+  if (FXINT <= 0) return; // the same off switch spawnImpactFx answers to
+  shipFx.count = (shipFx.count + 1) >>> 0;
+  if (shipFx.blasts.length >= SHIPFX_MAX) shipFx.blasts.shift(); // oldest out, like FX_MAX
+  shipFx.blasts.push({ x, y, seat: seat | 0, age: 0, life: SHIPFX_LIFE,
+    n: Math.max(4, Math.round(20 * FXINT)), // stamped at spawn, like the bursts:
+    scale: FXINT,                           // a slider moved mid-blast never resizes it
+    seed: hash32(Math.round(x), Math.round(y), shipFx.count, SHIPFX_SEED) });
+}
+function resetShipFx() { shipFx.blasts.length = 0; shipFx.count = 0; }
+function stepShipFx() {
+  for (let i = shipFx.blasts.length - 1; i >= 0; i--) {
+    if (++shipFx.blasts[i].age >= shipFx.blasts[i].life) shipFx.blasts.splice(i, 1);
+  }
+}
+function drawShipBlasts() { // draw-only — reads blast state, never mutates it
+  for (const B of shipFx.blasts) {
+    const p = B.age / B.life;
+    const fade = 1 - p;
+    let h = B.seed;
+    const rnd = () => { h = (Math.imul(h, 1664525) + 1013904223) >>> 0; return h / 0x100000000; };
+    // the scorch first, under everything: the mark the hull leaves on the field
+    ctx.globalAlpha = 0.4 * fade;
+    ctx.fillStyle = C.wall;
+    ctx.beginPath();
+    ctx.arc(B.x, B.y, SHIP_R * 1.5, 0, Math.PI * 2);
+    ctx.fill();
+    if (B.age < 3) { // three ticks of white before anything else is legible
+      ctx.globalAlpha = 1 - B.age / 3;
+      ctx.fillStyle = C.bright;
+      ctx.beginPath();
+      ctx.arc(B.x, B.y, SHIP_R * 2.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.lineWidth = 1; // two rings out of the wreck — bright leads, clay trails
+    ctx.globalAlpha = 0.85 * fade;
+    ctx.strokeStyle = C.bright;
+    ctx.beginPath();
+    ctx.arc(B.x, B.y, SHIP_R + 34 * Math.min(1, p * 1.6), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 0.5 * fade;
+    ctx.strokeStyle = C.clay;
+    ctx.beginPath();
+    ctx.arc(B.x, B.y, SHIP_R + 48 * p, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = fade; // the shards: three LCG draws each, as drawImpacts spends them
+    for (let i = 0; i < B.n; i++) {
+      const a = rnd() * Math.PI * 2;
+      const sp = 0.55 + rnd() * 1.9;
+      const sz = (1 + rnd() * 1.7) * Math.min(1.6, 0.6 + 0.5 * B.scale);
+      const d = sp * B.age * (1 - 0.55 * p); // decelerating, like the burst spray
+      ctx.fillStyle = i % 3 === 0 ? C.bright : i % 3 === 1 ? C.clay : "#9aa3b2";
+      ctx.fillRect(B.x + Math.cos(a) * d - sz / 2, B.y + Math.sin(a) * d - sz / 2, sz, sz);
+    }
+    ctx.globalAlpha = 1;
+  }
+}
 // Wall sparks are QUEUED, never spawned inline: the encounter sweep runs after
 // the bullet loop and still tests this tick's px→x segment, so a bullet can be
 // eaten by a body short of the wall it was heading for. Only the bullets that
@@ -2138,7 +2456,9 @@ function render() {
     // answers the predictor's arm rule there and the plain struct elsewhere
     const pool = presentedPool(P.id);
     if (pool.comet) drawCometGlow(P, pool);
-    drawShip(P.ship.x, P.ship.y);
+    drawShip(P.ship.x, P.ship.y, P.id); // ...and its damage, its hit reaction, or
+                                        // its wreck — see drawShip; the seat id is
+                                        // what lets it read THIS seat's wire record
   }
   ctx.fillStyle = C.bright; // CQ pixel bullets
   for (const b of G.bullets) {
@@ -2153,6 +2473,8 @@ function render() {
   // bullet takes over (js/net.js owns the hand-off) or the cue fades unmet
   if (window.Net && Net.active() && Net.tracers) drawTracers(Net.tracers());
   drawImpacts(); // world pass — under the camera, over the bullets that made them
+  drawShipBlasts(); // ...and the ship deaths OVER those: a hull going up is the
+                    // loudest thing on the field for the second it lasts
   if (G.running) drawAim();
   // UI PASS — the letterbox transform without the camera
   ctx.setTransform(scale, 0, 0, scale, ox, oy);
@@ -2235,6 +2557,12 @@ function drainCues() {
     // termChange is a marker for the wire/predictor, never a cue — the same
     // skip the encounter's own headless drain keeps
     if (ev.kind !== "termChange" && window.Sfx) Sfx.cue(ev.kind, ev.at, ev.gain);
+    // ...and the one VISUAL the drain owes: a seat's hull going up. It rides
+    // here rather than inside the sim because it is decoration — the same
+    // reason js/net.js spawns its bursts in fireEvents() instead of pretending
+    // the wire carried them. `at` is the dying ship's position, `seat` the
+    // seat that paid, both already on the event and both already on the wire.
+    if (ev.kind === "death" && ev.at) spawnShipBlast(ev.at.x, ev.at.y, ev.seat | 0);
   }
 }
 let raf = 0;
@@ -3010,6 +3338,15 @@ window.__test = { G, players, cam, step: clientStep, setCamMode, render, WW, WH,
   // encounter calls, and the slider reach the checks need
   fx, spawnImpactFx, resetImpactFx,
   fxState: () => ({ FXINT, FXDUR, bursts: fx.bursts.length, count: fx.count }),
+  // the SHIP-DEATH blasts: their own list, their own spawn, their own age
+  // step and their own reset — separate from the bursts above precisely so
+  // the burst-counting checks cannot see them, and reachable here so the
+  // damage checks can stage one without killing a seat for real
+  shipFx, spawnShipBlast, stepShipFx, resetShipFx,
+  shipFxState: () => ({ blasts: shipFx.blasts.length, count: shipFx.count,
+    max: SHIPFX_MAX, life: SHIPFX_LIFE }),
+  seatHealth, // the one read the ship draw makes — published so a check can
+              // assert the draw and the record agree about a seat
   setFxInt: (v) => { FXINT = v; },
   setFxDur: (v) => { FXDUR = v; },
   // the corner map: its toggle, its live geometry, and field→backing-store

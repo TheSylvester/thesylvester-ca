@@ -43,7 +43,8 @@
 // Classic script, like encounter.js: it reads game.js's top-level bindings
 // (players — seat 0's input bank included, in0, bankTickInput,
 // refreshPointerWorld, INPUTMODE, setInputMode, stepImpacts, spawnImpactFx,
-// BLASTR, BLASTGAIN) through the shared global lexical scope, and the
+// stepShipFx, spawnShipBlast, BLASTR, BLASTGAIN) through the shared global
+// lexical scope, and the
 // encounter's internals through the __test.enc surface exactly as
 // server/sim-host.mjs does.
 (() => {
@@ -866,6 +867,7 @@
       }
     }
     stepImpacts(); // fx bursts age on the presented clock — the sim never steps here
+    stepShipFx();  // ...and the ship blasts with them, on that same clock
     present();
     predPresentTick(); // the offset decays and the tracers age per presented tick
     if (predOn && mySeat !== null) {
@@ -1416,6 +1418,12 @@
       if (e.k === "hit" || e.k === "boom") spawnImpactFx(at.x, at.y, 0, -1, "enemy");
       else if (e.k === "clang" || e.k === "wall") spawnImpactFx(at.x, at.y, 0, -1, "wall");
       else if (e.k === "blast") spawnImpactFx(at.x, at.y, 0, -1, "blast", blastRadiusNow());
+      // a SEAT dying — the event carries the seat that paid, so this client
+      // blows up every hull that goes, not only the one it happens to fly.
+      // Landing it here means it lands on the frame that SHOWS the death,
+      // like every other cue on this queue, and never the moment the packet
+      // arrived. The wreck and its countdown are the ship draw's half.
+      else if (e.k === "death") spawnShipBlast(at.x, at.y, e.seat | 0);
     }
   }
 

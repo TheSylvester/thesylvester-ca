@@ -4205,6 +4205,24 @@
     // the seeded stream is untouched. restart() REPLACES E.enemies/E.orbs, so
     // callers read through this accessor every frame instead of caching it.
     mapState: () => ({ enemies: E.enemies, orbs: E.orbs }),
+    // ...and, on the same read-only footing, one seat's PRESENTED survival
+    // state: what game.js's ship draw needs to paint a hull that has been
+    // shot at. Everything here already exists — hull/hullMax are the damage,
+    // hitFlash is the 20-tick hit reaction, respawnT the downed countdown —
+    // and every field of it is written from that seat's OWN wire record on a
+    // net client (js/net.js's apply), so a REMOTE ship reads exactly as hurt
+    // on this screen as it does on its own. `rspMax` rides along because the
+    // countdown ring needs a denominator and ECFG never crosses into game.js.
+    // A fresh plain object per call, like mapState's wrapper: render-path
+    // only, nothing here is hashed, and NOTHING here is ever written back.
+    seatHealth: (s) => {
+      const S = E.seats[s];
+      if (!S) return null;
+      return { hull: S.hull, hullMax: S.hullMax, flash: S.hitFlash,
+               inv: S.invuln, rsp: S.respawnT, rspMax: ECFG.player.respawn,
+               wt: E.waveTick }; // the encounter's own presented clock — the
+                                 // one the graced-ship ring already blinks on
+    },
     // (ringCardShown/hudSuppressed are gone. game.js's UI pass used to ask this
     // file one suppression question before drawing the corner map; the layer
     // that needed the answer — a row's opaque explainer bitmap — has had no

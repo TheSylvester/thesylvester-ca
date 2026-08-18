@@ -5398,6 +5398,207 @@ window.runWave1Checks = function () {
     enc.restart();
   }
 
+  // ---- S. ship damage: the hull's condition, the hit reaction, the wreck
+  //         and the death blast ----------------------------------------------
+  // ALL PIXELS, because none of it exists anywhere else: drawShip's four
+  // states leave no state behind, so the only honest assertion is real canvas
+  // ink. Every probe is a square readback through a scratch surface (section
+  // M's corner-map idiom), and every leg is a DIFFERENCE between two renders
+  // of one staged scene with exactly one field moved between them — a leg that
+  // cannot fail would not have been worth writing.
+  //
+  // The scene sits in the lower-left of the field and the encounter stays
+  // IDLE, so encDraw/encDrawHud return early: no enemies, no HUD column, no
+  // SHIP DOWN card, and nothing in the frame but the stars, the two ships and
+  // whatever this section stages on them.
+  {
+    const sdRunWas = t.G.running;
+    const sdFxWas = t.fxState().FXINT;
+    t.setPlayerCount(2);
+    enc.reset();          // ...ONCE, and AFTER the seat count: restart() sizes
+                          // E.seats to players[] and re-centres every ship, so
+                          // the staging below has to follow it, not precede it
+    t.setFxInt(1);
+    t.G.running = true;
+    // The two staging points are derived from the LIVE letterbox transform,
+    // never hardcoded: the runner's window crops the field (the visible field
+    // is narrower and shorter than FW x FH once the gutters are taken), so a
+    // field coordinate picked by hand lands off the canvas and every probe
+    // below reads the same nothing. Pick two CANVAS points a comfortable
+    // margin inside the backing store, invert the transform to field space,
+    // and add the live camera to reach world space. Nothing here writes cam.
+    const sdK = t.fieldToCanvas(1, 0).x - t.fieldToCanvas(0, 0).x; // canvas px per field px
+    const sdO = t.fieldToCanvas(0, 0);
+    const atCanvas = (cx, cy) => ({ x: (cx - sdO.x) / sdK + t.cam.x,
+                                    y: (cy - sdO.y) / sdK + t.cam.y });
+    const A = atCanvas(canvasEl.width * 0.30, canvasEl.height * 0.62);
+    const B = atCanvas(canvasEl.width * 0.62, canvasEl.height * 0.62);
+    t.players[0].ship.x = A.x; t.players[0].ship.y = A.y;
+    t.players[1].ship.x = B.x; t.players[1].ship.y = B.y;
+    for (const P of t.players) {
+      P.vel.x = 0; P.vel.y = 0; P.comet = false;
+      P.flame.x = 0; P.flame.y = 0; // drawFlame is the one draw in the game that
+                                    // spends Math.random(); a live flame would
+                                    // make the determinism leg below vacuous
+    }
+    const sdPad = document.createElement("canvas");
+    const sdCtx = sdPad.getContext("2d", { willReadFrequently: true });
+    const HALF = 30; // backing-store px each way — the hull, both shock rings
+                     // and the countdown arc all fall inside this
+    const patch = (w) => { // the real canvas around a world point, as bytes
+      const p = t.fieldToCanvas(w.x - t.cam.x, w.y - t.cam.y);
+      sdPad.width = sdPad.height = HALF * 2;
+      sdCtx.clearRect(0, 0, HALF * 2, HALF * 2);
+      sdCtx.drawImage(canvasEl, Math.round(p.x) - HALF, Math.round(p.y) - HALF,
+        HALF * 2, HALF * 2, 0, 0, HALF * 2, HALF * 2);
+      return JSON.stringify(Array.from(sdCtx.getImageData(0, 0, HALF * 2, HALF * 2).data));
+    };
+    const rec = (s) => enc.E.seats[s];
+    const sdClear = () => { // every seat back to untouched, and the blasts with it
+      for (let s = 0; s < 2; s++) {
+        const S = rec(s);
+        S.hull = S.hullMax;
+        S.hitFlash = 0;
+        S.invuln = 0;
+        S.respawnT = 0;
+      }
+      t.resetShipFx();
+    };
+
+    sdClear();
+    t.render();
+    const sdFullA = patch(A);
+    const sdFullB = patch(B);
+    // ...and the guard that keeps every leg below from being vacuous. If the
+    // probe ever stops landing on a hull — a runner window that crops the
+    // field differently would do it — every pixel leg would compare two
+    // patches of empty space and every one of them would pass. So COUNT the
+    // white plate in the patch: a pristine hull is a disc of C.bright a couple
+    // of hundred pixels across at any sane scale, and empty field with a star
+    // or two in it is nowhere near. (Moving the ship out of the patch and
+    // diffing is NOT enough on its own: the aim marker rides the local ship
+    // and moves with it, so that diff stays true even with no hull drawn at
+    // all — which is exactly the failure this guard exists to catch.)
+    const sdPlate = (() => {
+      const a = JSON.parse(sdFullA);
+      let n = 0;
+      for (let i = 0; i < a.length; i += 4) if (a[i] > 200 && a[i + 1] > 200 && a[i + 2] > 200) n++;
+      return n;
+    })();
+    ok("the damage probe is looking at an actual hull, not empty field",
+      sdPlate > 60, "brightPx=" + sdPlate);
+
+    // (1) the standing damage state — a hull point lost has to be visible on
+    //     the ship that lost it, and on nothing else
+    rec(0).hull = 2;
+    t.render();
+    const sdHurtA = patch(A);
+    ok("a hull point lost changes the ship that lost it", sdHurtA !== sdFullA);
+    ok("...and leaves every other ship exactly as it was", patch(B) === sdFullB);
+    rec(0).hull = 1;
+    t.render();
+    const sdCritA = patch(A);
+    ok("a ship one point from dead reads differently again",
+      sdCritA !== sdHurtA && sdCritA !== sdFullA);
+    // ...and the repair reverses it EXACTLY: the pristine draw is the original
+    // three-step ship, and a hull that has been shot at and patched must land
+    // back on it byte for byte
+    sdClear();
+    t.render();
+    ok("a fully repaired hull draws exactly the pristine ship again", patch(A) === sdFullA);
+
+    // (2) the hit reaction — ink while hitFlash runs, and ink that MOVES as it
+    //     counts down (a static overlay would pass the first leg alone)
+    rec(0).hitFlash = 18;
+    t.render();
+    const sdHit18 = patch(A);
+    ok("a registered hit paints a reaction on the ship that took it", sdHit18 !== sdFullA);
+    rec(0).hitFlash = 6;
+    t.render();
+    ok("...and the reaction moves as the flash counts down", patch(A) !== sdHit18);
+    sdClear();
+
+    // (3) THE MULTIPLAYER LEG. Every seat's damage is read from ITS OWN
+    //     record — this is the one that fails if the ship draw ever goes back
+    //     to asking localSeat() what to paint.
+    rec(1).hull = 1;
+    t.render();
+    ok("a REMOTE seat's damage draws on the remote ship", patch(B) !== sdFullB);
+    ok("...and never on the local one", patch(A) === sdFullA);
+    sdClear();
+
+    // (4) the wreck and the ten-second wait
+    rec(0).hull = 0;
+    rec(0).respawnT = 550;
+    t.render();
+    const sdWreck = patch(A);
+    ok("a downed seat draws a wreck, not a ship", sdWreck !== sdFullA);
+    rec(0).respawnT = 90;
+    t.render();
+    const sdWreckLate = patch(A);
+    ok("the respawn countdown closes as the seat's timer runs out", sdWreckLate !== sdWreck);
+    rec(0).respawnT = 0;
+    t.render();
+    ok("a seat parked for good draws the husk with no countdown on it",
+      patch(A) !== sdWreckLate && patch(A) !== sdFullA);
+    sdClear();
+
+    // (5) the death blast: its own ring, its own cap, its own off switch — and
+    //     it must be INVISIBLE to the impact-burst list the checks above count
+    const sdBurstsWas = t.fxState().bursts;
+    ok("the ship-blast ring starts empty", t.shipFxState().blasts === 0,
+      "blasts=" + t.shipFxState().blasts);
+    t.spawnShipBlast(A.x, A.y, 0);
+    ok("a death spawns exactly one blast, and no impact burst with it",
+      t.shipFxState().blasts === 1 && t.fxState().bursts === sdBurstsWas,
+      "blasts=" + t.shipFxState().blasts + " bursts=" + t.fxState().bursts);
+    const sdCap = t.shipFxState().max;
+    for (let i = 0; i < sdCap + 4; i++) t.spawnShipBlast(A.x, A.y, 0);
+    ok("the blast ring is capped, oldest evicted first",
+      t.shipFxState().blasts === sdCap, "blasts=" + t.shipFxState().blasts + " max=" + sdCap);
+    t.resetShipFx();
+    t.setFxInt(0);
+    t.spawnShipBlast(A.x, A.y, 0);
+    ok("FXINT 0 spawns no ship blast at all — the off switch is the off switch",
+      t.shipFxState().blasts === 0, "blasts=" + t.shipFxState().blasts);
+    t.setFxInt(1);
+    t.spawnShipBlast(A.x, A.y, 0);
+    for (let i = 0; i < 10; i++) t.stepShipFx();
+    t.render();
+    ok("a live blast paints over the ship that died", patch(A) !== sdFullA);
+    for (let i = 0; i < t.shipFxState().life; i++) t.stepShipFx();
+    ok("a blast expires at its stamped lifetime", t.shipFxState().blasts === 0,
+      "blasts=" + t.shipFxState().blasts);
+    t.render();
+    ok("...and leaves nothing on the field when it does", patch(A) === sdFullA);
+
+    // (6) THE CONTRACT the pixel probes in this file and pause-ui depend on:
+    //     with damage, a live hit, a wreck and a blast all on screen at once,
+    //     two renders of one tick must paint identical bytes — and the whole
+    //     thing must spend nothing from the seeded stream, which is hashed.
+    rec(1).hull = 1;
+    rec(1).hitFlash = 17;
+    rec(0).hull = 0;
+    rec(0).respawnT = 275;
+    t.spawnShipBlast(A.x, A.y, 0);
+    for (let i = 0; i < 5; i++) t.stepShipFx();
+    const sdRngWas = enc.rngState();
+    t.render();
+    const sdD1 = patch(A) + patch(B);
+    t.render();
+    const sdD2 = patch(A) + patch(B);
+    ok("two renders of one tick paint identical bytes with every damage state live",
+      sdD1 === sdD2);
+    ok("the damage draw spends nothing from the seeded stream",
+      enc.rngState() === sdRngWas, "before=" + sdRngWas + " after=" + enc.rngState());
+
+    sdClear();
+    t.setFxInt(sdFxWas);
+    t.G.running = sdRunWas;
+    t.setPlayerCount(1);
+    enc.restart();
+  }
+
   // ---- restore the page for a human ----
   t.setFxInt(priorFx.FXINT);
   t.setFxDur(priorFx.FXDUR);
