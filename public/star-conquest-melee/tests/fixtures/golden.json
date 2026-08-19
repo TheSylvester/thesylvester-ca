@@ -1,7 +1,7 @@
 {
   "meta": {
-    "sha": "bba1a9d2cd9359fe9f0e6f107e41e4c7bfc847ce",
-    "capturedAt": "2026-08-18T18:01:26.169Z",
+    "sha": "fe7291911d6a1ce5bb2e8bae568636bce6305fa3",
+    "capturedAt": "2026-08-19T03:15:27.084Z",
     "tunables": {
       "BCOOL": 400,
       "BLIFE": 0.5,
@@ -488,11 +488,11 @@
         {
           "tag": "tick-300",
           "tick": 300,
-          "hash": "5f9a4afd",
+          "hash": "c9c22020",
           "parts": {
             "ship": "85293534",
-            "bullets": "a1c74a82",
-            "encounter": "0280e10f",
+            "bullets": "3b1060ec",
+            "encounter": "9e112714",
             "rng": "e80357bb"
           },
           "ship": {
@@ -523,11 +523,11 @@
         {
           "tag": "tick-900",
           "tick": 900,
-          "hash": "174348c0",
+          "hash": "43e03ef5",
           "parts": {
             "ship": "85293534",
             "bullets": "38c8e4d7",
-            "encounter": "7b053178",
+            "encounter": "0cd3db08",
             "rng": "bdf780ee"
           },
           "ship": {
@@ -558,11 +558,11 @@
         {
           "tag": "tick-1800",
           "tick": 1800,
-          "hash": "dd0c9402",
+          "hash": "33497fba",
           "parts": {
             "ship": "85293534",
-            "bullets": "908c98cb",
-            "encounter": "c858e6a1",
+            "bullets": "0e433db6",
+            "encounter": "72a9389a",
             "rng": "1267fbf1"
           },
           "ship": {
@@ -754,13 +754,18 @@
           "gain": null
         },
         {
-          "tick": 181,
+          "tick": 180,
           "kind": "charge",
           "gain": null
         },
         {
           "tick": 185,
           "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 196,
+          "kind": "charge",
           "gain": null
         },
         {
@@ -779,22 +784,17 @@
           "gain": null
         },
         {
-          "tick": 205,
-          "kind": "charge",
-          "gain": null
-        },
-        {
           "tick": 215,
           "kind": "wall",
           "gain": null
         },
         {
-          "tick": 226,
+          "tick": 225,
           "kind": "zap",
           "gain": null
         },
         {
-          "tick": 227,
+          "tick": 226,
           "kind": "hurt",
           "gain": null
         },
@@ -804,12 +804,12 @@
           "gain": null
         },
         {
-          "tick": 249,
+          "tick": 241,
           "kind": "zap",
           "gain": null
         },
         {
-          "tick": 250,
+          "tick": 249,
           "kind": "zap",
           "gain": null
         },
@@ -834,8 +834,23 @@
           "gain": null
         },
         {
+          "tick": 297,
+          "kind": "hit",
+          "gain": null
+        },
+        {
           "tick": 298,
           "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 315,
+          "kind": "hit",
+          "gain": null
+        },
+        {
+          "tick": 315,
+          "kind": "kill",
           "gain": null
         },
         {
@@ -849,7 +864,7 @@
           "gain": null
         },
         {
-          "tick": 357,
+          "tick": 356,
           "kind": "charge",
           "gain": null
         },
@@ -859,12 +874,7 @@
           "gain": null
         },
         {
-          "tick": 380,
-          "kind": "charge",
-          "gain": null
-        },
-        {
-          "tick": 381,
+          "tick": 372,
           "kind": "charge",
           "gain": null
         },
@@ -879,38 +889,28 @@
           "gain": null
         },
         {
-          "tick": 399,
-          "kind": "hit",
-          "gain": null
-        },
-        {
-          "tick": 399,
-          "kind": "kill",
-          "gain": null
-        },
-        {
           "tick": 400,
           "kind": "wall",
           "gain": null
         },
         {
-          "tick": 402,
+          "tick": 401,
           "kind": "zap",
           "gain": null
         },
         {
-          "tick": 403,
+          "tick": 402,
           "kind": "hurt",
+          "gain": null
+        },
+        {
+          "tick": 417,
+          "kind": "zap",
           "gain": null
         },
         {
           "tick": 421,
           "kind": "wall",
-          "gain": null
-        },
-        {
-          "tick": 426,
-          "kind": "zap",
           "gain": null
         },
         {
@@ -944,7 +944,7 @@
           "gain": null
         },
         {
-          "tick": 533,
+          "tick": 532,
           "kind": "charge",
           "gain": null
         },
@@ -954,7 +954,7 @@
           "gain": null
         },
         {
-          "tick": 557,
+          "tick": 548,
           "kind": "charge",
           "gain": null
         },
@@ -964,18 +964,13 @@
           "gain": null
         },
         {
-          "tick": 567,
-          "kind": "hit",
+          "tick": 577,
+          "kind": "zap",
           "gain": null
         },
         {
-          "tick": 567,
-          "kind": "kill",
-          "gain": null
-        },
-        {
-          "tick": 589,
-          "kind": "pickup",
+          "tick": 578,
+          "kind": "hurt",
           "gain": null
         },
         {
@@ -984,13 +979,8 @@
           "gain": null
         },
         {
-          "tick": 602,
+          "tick": 593,
           "kind": "zap",
-          "gain": null
-        },
-        {
-          "tick": 603,
-          "kind": "hurt",
           "gain": null
         },
         {
@@ -1019,8 +1009,18 @@
           "gain": null
         },
         {
-          "tick": 688,
+          "tick": 669,
           "kind": "hit",
+          "gain": null
+        },
+        {
+          "tick": 669,
+          "kind": "kill",
+          "gain": null
+        },
+        {
+          "tick": 686,
+          "kind": "pickup",
           "gain": null
         },
         {
@@ -1034,13 +1034,13 @@
           "gain": null
         },
         {
-          "tick": 729,
-          "kind": "wall",
+          "tick": 724,
+          "kind": "charge",
           "gain": null
         },
         {
-          "tick": 733,
-          "kind": "charge",
+          "tick": 729,
+          "kind": "wall",
           "gain": null
         },
         {
@@ -1059,12 +1059,12 @@
           "gain": null
         },
         {
-          "tick": 778,
+          "tick": 769,
           "kind": "zap",
           "gain": null
         },
         {
-          "tick": 779,
+          "tick": 770,
           "kind": "hurt",
           "gain": null
         },
@@ -1144,7 +1144,7 @@
           "gain": null
         },
         {
-          "tick": 972,
+          "tick": 964,
           "kind": "charge",
           "gain": null
         },
@@ -1154,7 +1154,7 @@
           "gain": null
         },
         {
-          "tick": 985,
+          "tick": 976,
           "kind": "charge",
           "gain": null
         },
@@ -1164,22 +1164,22 @@
           "gain": null
         },
         {
+          "tick": 1009,
+          "kind": "zap",
+          "gain": null
+        },
+        {
+          "tick": 1010,
+          "kind": "hurt",
+          "gain": null
+        },
+        {
           "tick": 1013,
           "kind": "wall",
           "gain": null
         },
         {
-          "tick": 1017,
-          "kind": "zap",
-          "gain": null
-        },
-        {
-          "tick": 1018,
-          "kind": "hurt",
-          "gain": null
-        },
-        {
-          "tick": 1030,
+          "tick": 1021,
           "kind": "zap",
           "gain": null
         },
@@ -1215,12 +1215,12 @@
         },
         {
           "tick": 1140,
-          "kind": "wall",
+          "kind": "charge",
           "gain": null
         },
         {
-          "tick": 1148,
-          "kind": "charge",
+          "tick": 1140,
+          "kind": "wall",
           "gain": null
         },
         {
@@ -1239,6 +1239,11 @@
           "gain": null
         },
         {
+          "tick": 1166,
+          "kind": "pickup",
+          "gain": null
+        },
+        {
           "tick": 1167,
           "kind": "hit",
           "gain": null
@@ -1254,7 +1259,7 @@
           "gain": null
         },
         {
-          "tick": 1175,
+          "tick": 1174,
           "kind": "pickup",
           "gain": null
         },
@@ -1265,11 +1270,6 @@
         },
         {
           "tick": 1176,
-          "kind": "pickup",
-          "gain": null
-        },
-        {
-          "tick": 1177,
           "kind": "pickup",
           "gain": null
         },
@@ -1334,17 +1334,22 @@
           "gain": null
         },
         {
+          "tick": 1589,
+          "kind": "charge",
+          "gain": null
+        },
+        {
           "tick": 1590,
           "kind": "wall",
           "gain": null
         },
         {
-          "tick": 1597,
+          "tick": 1593,
           "kind": "charge",
           "gain": null
         },
         {
-          "tick": 1601,
+          "tick": 1604,
           "kind": "charge",
           "gain": null
         },
@@ -1354,13 +1359,18 @@
           "gain": null
         },
         {
-          "tick": 1612,
-          "kind": "charge",
+          "tick": 1629,
+          "kind": "wall",
           "gain": null
         },
         {
-          "tick": 1629,
-          "kind": "wall",
+          "tick": 1634,
+          "kind": "zap",
+          "gain": null
+        },
+        {
+          "tick": 1635,
+          "kind": "hurt",
           "gain": null
         },
         {
@@ -1369,17 +1379,7 @@
           "gain": null
         },
         {
-          "tick": 1642,
-          "kind": "zap",
-          "gain": null
-        },
-        {
-          "tick": 1643,
-          "kind": "hurt",
-          "gain": null
-        },
-        {
-          "tick": 1646,
+          "tick": 1638,
           "kind": "zap",
           "gain": null
         },
@@ -1389,7 +1389,7 @@
           "gain": null
         },
         {
-          "tick": 1657,
+          "tick": 1649,
           "kind": "zap",
           "gain": null
         },
@@ -1429,7 +1429,12 @@
           "gain": null
         },
         {
-          "tick": 1767,
+          "tick": 1759,
+          "kind": "charge",
+          "gain": null
+        },
+        {
+          "tick": 1763,
           "kind": "charge",
           "gain": null
         },
@@ -1439,18 +1444,18 @@
           "gain": null
         },
         {
-          "tick": 1771,
-          "kind": "charge",
-          "gain": null
-        },
-        {
-          "tick": 1782,
+          "tick": 1774,
           "kind": "charge",
           "gain": null
         },
         {
           "tick": 1793,
           "kind": "wall",
+          "gain": null
+        },
+        {
+          "tick": 1797,
+          "kind": "hit",
           "gain": null
         }
       ]
@@ -1846,11 +1851,11 @@
         {
           "tag": "end",
           "tick": 340,
-          "hash": "b315a688",
+          "hash": "6b5ab0fa",
           "parts": {
             "ship": "0745659c",
             "bullets": "4b95f515",
-            "encounter": "c9f64257",
+            "encounter": "fb96d4c0",
             "rng": "95c8c5ca"
           },
           "ship": {
@@ -3151,8 +3156,8 @@
   },
   "tickMode": {
     "meta": {
-      "sha": "bae28953b7044e7d5a7b880ef7e768d2f972e1c5",
-      "capturedAt": "2026-08-18T02:22:39.588Z",
+      "sha": "fe7291911d6a1ce5bb2e8bae568636bce6305fa3",
+      "capturedAt": "2026-08-19T03:15:32.430Z",
       "tunables": {
         "BCOOL": 400,
         "BLIFE": 0.5,

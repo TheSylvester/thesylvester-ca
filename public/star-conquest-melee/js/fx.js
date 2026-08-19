@@ -145,9 +145,19 @@
     death:      { hue: "clay",   big: true,  flash: 1,    ring: 1,   parts: 0 },
     hit:        { hue: "clay",   big: false, flash: 0.35, ring: 0,   parts: 0.25 },
     clang:      { hue: "steel",  big: false, flash: 0.3,  ring: 0,   parts: 0.2 },
-    zap:        { hue: "radar",  big: false, flash: 0.5,  ring: 0.4, parts: 0.3 },
+    // THE TWO ENEMY-FIRE CUES, deliberately the quietest lit rows in the table.
+    // They used to carry a kill-sized burst: `zap` at parts 0.3 sprayed 16
+    // particles and opened a ring to 76 px around a 7 px dart, over 34 ticks —
+    // more than three times the 10-tick beam it was announcing — and the 1.4x
+    // bloom then widened all of it. A wave of five darts fired that every two
+    // seconds, and it read as an explosion rather than a shot. An ENEMY firing
+    // is the most frequent event in the game and it already has two honest
+    // tells of its own (the telegraph line, then the beam itself), so the light
+    // layer only has to say "now" — no particles at all, and a flash small
+    // enough that the drawn beam stays the thing you look at.
+    zap:        { hue: "radar",  big: false, flash: 0.2,  ring: 0.12, parts: 0 },
     dash:       { hue: "clay",   big: false, flash: 0.4,  ring: 0.5, parts: 0 },
-    launch:     { hue: "clay",   big: false, flash: 0.4,  ring: 0,   parts: 0.2 },
+    launch:     { hue: "clay",   big: false, flash: 0.2,  ring: 0,   parts: 0 },
     pickup:     { hue: "bright", big: false, flash: 0.35, ring: 0.3, parts: 0 },
     spawn:      { hue: "clay",   big: false, flash: 0.5,  ring: 0.5, parts: 0 },
     spawnheavy: { hue: "clay",   big: true,  flash: 0.6,  ring: 0.6, parts: 0 },

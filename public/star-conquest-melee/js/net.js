@@ -1298,8 +1298,8 @@
       P.energy = pr.en || 0;
       P.energyMax = pr.em || ENMAX;
       // EVERY seat's own record is written from ITS OWN wire record — hull,
-      // wallet, score, flash, the respawn countdown and the PERSONAL rank
-      // vector v2 moved onto the player records. Nothing here is seat-0
+      // wallet, score, the high-water standing, flash, the respawn countdown
+      // and the PERSONAL rank vector v2 moved onto the player records. Nothing here is seat-0
       // special any more: the HUD reads whichever seat localSeat() names, and
       // the scoreboard reads all of them. Guarded, because E.seats grows only
       // through restart() and a not-yet-dealt seat has no record to write.
@@ -1311,6 +1311,12 @@
         S.hitFlash = pr.fl;
         S.xp = pr.xp;
         S.score = pr.score;
+        S.best = pr.bst || 0;     // the seat's STANDING — what drawBoard ranks and
+                                  // crowns by. A client cannot derive it: the credits
+                                  // that built a remote seat's peak happened on the
+                                  // server, and this seat's own `score` is only the
+                                  // current run. Folded like rsp, so a record without
+                                  // the key reads 0 rather than undefined
         S.respawnT = pr.rsp || 0; // the SHIP DOWN countdown card renders from
                                   // the wire, like the rest
         if (Array.isArray(pr.ow)) S.owned = pr.ow.slice();

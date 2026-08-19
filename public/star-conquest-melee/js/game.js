@@ -146,13 +146,16 @@ let COMETCD = 62;       // ticks before one body can take a COMET touch again �
                         // with it. encounter.js reads it, the way it reads CONTACTCD and
                         // COMETDMG (slider, comet tab)
 // ---- the PvP knob (phase 14) ---------------------------------------------
-let PVPORBS = 3;        // XP orbs a seat drops at the point a PLAYER killed it. The bounty is
-                        // the whole PvP economy: a PvP death zeroes the victim's score and its
-                        // ranks, and these orbs are what the fight actually paid out. They are
-                        // STANDARD 1-XP orbs, so any living seat may bank them — the killer, a
-                        // bystander, and the victim itself once it re-enters. encounter.js reads
-                        // this the way it reads COMETDMG; a PvE death is untouched by it
-                        // (enemy drops stay e.orbDrop) (slider, comet tab)
+let PVPORBS = 3;        // XP orbs a seat drops at the point it DIED. The name is phase 14's
+                        // and the rule outgrew it: the drop used to fire for a player's kill
+                        // alone, and it now fires for every death, because every death zeroes
+                        // the seat's score and ranks and the orbs are what the run paid out.
+                        // They are STANDARD 1-XP orbs, so any living seat may bank them — a
+                        // killer, a bystander, and the victim itself once it re-enters, which
+                        // is a corpse run: respawnSeat deals the seat off-screen from its own
+                        // wreck, so 3 XP against a whole run is not a refund. encounter.js
+                        // reads this the way it reads COMETDMG; enemy drops stay e.orbDrop
+                        // (slider, comet tab)
 let PVPREWIND = 140;    // ms of PLAYER-target rewind a lag-compensated shot may claim
                         // (phase 15). Converted to ticks (floor(ms / 16.67)) at the one
                         // consumer, encounter.js's rebate — 140 → 8 ticks. It caps only
@@ -1977,6 +1980,14 @@ function drawHitShock(x, y, flash) {
   }
   ctx.globalAlpha = 1;
 }
+// THE DAMAGED-HULL LOOK, PARKED. The chewed silhouette and its burnt-down
+// plate read wrong in play, so a LIVING seat draws the pristine plate at every
+// hull value for now. Nothing above is deleted: seatHealth still reports the
+// hull, drawDamagedHull and hullTint are untouched, and the wreck, the hit
+// reaction and the death blast all still draw. Flipping this one flag back to
+// true restores the whole look, and __test.setHullDamage flips it so the pixel
+// legs in wave1-checks section S can still prove the parked draw works.
+let SHOW_HULL_DAMAGE = false;
 // THE ENTRY POINT the render loop calls, once per seat. Four states, in the
 // order they matter: down, hit, damaged, pristine.
 function drawShip(x, y, seat) {
@@ -1998,8 +2009,12 @@ function drawShip(x, y, seat) {
     drawHitShock(x, y, H.flash); // the ring stays on the TRUE position — it is
                                  // the impact point, not the ship
   }
-  const tint = H.flash > 13 ? C.bright : hullTint(H.hull / Math.max(1, H.hullMax));
-  if (H.hull >= H.hullMax) drawHull(hx, hy, tint); // flashing, but not yet hurt
+  // With the look parked the tint stays the untouched white, so a hurt hull
+  // paints the SAME bytes the pristine draw paints — that is the whole ask.
+  const tint = H.flash > 13 || !SHOW_HULL_DAMAGE
+    ? C.bright
+    : hullTint(H.hull / Math.max(1, H.hullMax));
+  if (!SHOW_HULL_DAMAGE || H.hull >= H.hullMax) drawHull(hx, hy, tint); // flashing, but not yet hurt
   else drawDamagedHull(hx, hy, H, seat, tint);
 }
 
@@ -3412,8 +3427,8 @@ function showTuner() {
     : "+" + COMETAOEDMG + " px of damage reach at a full pool");
   out("comet-fury-out", "+" + Math.round(COMETFURY * 100) + "% comet damage per OVERLOAD rank at an empty pool");
   out("comet-cd-out", COMETCD + " ticks · " + (COMETCD * TICK / 1000).toFixed(2) + " s between COMET touches on one body");
-  out("pvp-orbs-out", PVPORBS === 0 ? "0 — a PvP kill pays no bounty" :
-    PVPORBS + " orb" + (PVPORBS === 1 ? "" : "s") + " dropped where a PLAYER kill lands · " +
+  out("pvp-orbs-out", PVPORBS === 0 ? "0 — a death pays no bounty" :
+    PVPORBS + " orb" + (PVPORBS === 1 ? "" : "s") + " dropped where a seat dies · " +
     PVPORBS + " XP to whoever banks them");
   // the energy tab — the pool itself, which the comet is only the first to spend
   out("energy-max-out", ENMAX + " base pool · " + Math.round(ENMAX * (1 + ENCELL * 4)) + " with four ENERGY CELLs");
@@ -3714,6 +3729,11 @@ window.__test = { G, players, cam, step: clientStep, setCamMode, render, WW, WH,
     max: SHIPFX_MAX, life: SHIPFX_LIFE }),
   seatHealth, // the one read the ship draw makes — published so a check can
               // assert the draw and the record agree about a seat
+  // the damaged-hull look's park switch. Published so section S can prove BOTH
+  // halves: that the shipped build draws a hurt seat as the pristine ship, and
+  // that the parked draw still works when it is switched back on.
+  hullDamageShown: () => SHOW_HULL_DAMAGE,
+  setHullDamage: (v) => { SHOW_HULL_DAMAGE = !!v; },
   setFxInt: (v) => { FXINT = v; },
   setFxDur: (v) => { FXDUR = v; },
   // the LIGHT LAYER's two seams: its suppression lever and its counters. Both
@@ -3983,7 +4003,7 @@ Object.assign(window.__test, {
     if (!Number.isFinite(+v)) return false;
     // CLAMPED to the same 0..10 integer range the server tunable coerces to.
     // Unclamped, one dev call could ask a death for a million orbs and the
-    // next PvP kill would allocate them; and a seam that accepted values the
+    // next death would allocate them; and a seam that accepted values the
     // wire route rejects would not be the same lever it claims to be.
     if (k === "PVPORBS") { PVPORBS = Math.max(0, Math.min(10, Math.round(+v))); return true; }
     // phase 15's rewind cap, same deal: clamped to the exact 0..200 ms integer

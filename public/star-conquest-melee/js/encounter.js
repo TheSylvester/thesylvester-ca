@@ -27,12 +27,20 @@
 // left screen gutter (game.js owns the gutter; this file owns every rect in
 // the panel's fixed logical space): a click on a card buys it whenever the
 // wallet can pay, mid-flight included. A downed seat waits out a respawn
-// timer and re-enters with brief invulnerability; its unspent wallet is
-// forfeit. Its SCORE survives a PvE death, a restart and every purchase —
-// the charter's rule — and is taken away by exactly one thing: being killed
-// by another PLAYER, which also resets that seat's ranks to stock and pays
-// the run out as PVPORBS orbs on the floor where it fell. All tuning here is a local starting point for
-// this experiment, not a claim of Nova Drift-exact behavior.
+// timer and re-enters with brief invulnerability, and DYING COSTS THE WHOLE
+// RUN: the unspent wallet, the score, the ranks and the bought hull cap all
+// go, and the run is paid back out as PVPORBS orbs on the floor where the
+// seat fell. THIS REVERSES THE OLD CHARTER, which is why it is spelled out
+// here: until now a score survived a PvE death, a restart and every
+// purchase, and exactly one thing took it — being killed by another PLAYER.
+// That asymmetry made dying to a player the only real defeat and dying to
+// the waves free, and the user overrode it. There is no PvE/PvP distinction
+// left in the toll; deathToll is the single cost of dying, whatever killed
+// you. What SURVIVES a death is `best`, the seat's high-water score: the
+// leaderboard ranks and crowns by it, so the board reads a match's PEAK
+// rather than a live counter every death sends back to zero. A restart
+// clears best with the rest of the run. All tuning here is a local starting
+// point for this experiment, not a claim of Nova Drift-exact behavior.
 //
 // Classic scripts share one global lexical environment, so this file
 // reads game.js state (G, cam, ctx, C, FONT, FW/FH/WW/WH, SHIP_R, clientStep,
@@ -57,8 +65,20 @@
       jitter: 26,            // group spread around the shared spawn anchor, px
     },
     lance: {
-      engage: 110,           // start the telegraph inside this player distance
-      len: 118,              // beam length, px
+      // THE TWO HALVES OF "FIRING RANGE", and they are not the same number.
+      // `engage` is where the dart STOPS AND PLANTS; `len` is how far the beam
+      // it then fires actually reaches. Between the two sits a 45-tick
+      // telegraph in which the dart is a statue — so a player who runs gains
+      // ground on a body that has already committed, and the reach has to
+      // cover the plant distance PLUS whatever the runner banks in those 45
+      // ticks. At the old 110/118 a stock 2.0 px/tick ship fleeing straight
+      // was 189.6 px out when the beam lit and the beam reached 127.5: wave 1
+      // could not land a single lance on anyone simply holding top speed.
+      // Both numbers now sit well outside that, so a dart is a standoff
+      // threat rather than a body you walk away from. The dodge is unchanged
+      // and is what it always was — leave the LINE, do not outrun it.
+      engage: 130,           // start the telegraph inside this player distance
+      len: 180,              // beam length, px
       halfWidth: 2.5,        // beam half-width, px
       telegraph: 45,         // 0.75 s of readable warning
       pulse: 10,             // beam live time, ticks
@@ -93,7 +113,7 @@
       band: 30,
       backSpeed: 1.6,        // ...and it backs off FASTER than it closes
       sepR: 46,
-      engage: 270,           // dart 110, charger 260, harrier 270 — still the
+      engage: 270,           // dart 130, charger 260, harrier 270 — still the
                              // roster's range king, but only just: it was 320,
                              // which opened locks from off screen, and play
                              // testing read that as cheap. 270 keeps the lock
@@ -658,10 +678,18 @@
   // ---- encounter state ---------------------------------------------------
   // One seat's survival-and-wallet record. hull/hullMax/invuln/hitFlash are
   // the fields that used to live directly on E; xp is the seat's spendable
-  // wallet and score its cumulative-XP-gained scoreboard — credited exactly
-  // where XP is credited (addXp), and decremented by exactly one thing: a
-  // PvP death, which zeroes it (pvpDeathToll). Spending, a PvE death and a
-  // restart all leave it standing. A seat is DEAD while hull is 0: excluded from targeting,
+  // wallet and score its RUN scoreboard — credited exactly where XP is
+  // credited (addXp), and zeroed by exactly one thing: DYING, whatever
+  // killed you (deathToll). Spending still leaves it standing; a death and a
+  // restart do not. That is the reversal — the old record's score survived a
+  // PvE death and only a PvP kill took it.
+  // `best` is the seat's HIGH-WATER score, the standing the board ranks and
+  // crowns by. It is maintained in addXp beside score, so it always includes
+  // the live run, and it survives the death that zeroes score — without it
+  // every seat would sit near 0 and the crown would flicker on every kill.
+  // UNHASHED and match-scoped: it is draw-only (see hashEncounter's charter
+  // block, and termSeq's precedent) and restart() clears it with the run.
+  // A seat is DEAD while hull is 0: excluded from targeting,
   // collisions and input, its respawnT counting down toward re-entry.
   // `stock` is the quarter rule's per-seat life count — it depletes only
   // while lobby waiters exist (E.lobbyWaiters), so open play respawns
@@ -674,7 +702,7 @@
   // the termChange event).
   function makeSeat() {
     return { hull: ECFG.player.hull, hullMax: ECFG.player.hull,
-             xp: 0, score: 0, invuln: 0, hitFlash: 0,
+             xp: 0, score: 0, best: 0, invuln: 0, hitFlash: 0,
              respawnT: 0, stock: ECFG.player.stock,
              owned: SHOP.map(() => 0), termSeq: 0 };
   }
@@ -1094,14 +1122,17 @@
   }
 
   // ---- combat ------------------------------------------------------------
-  // `src` is the DAMAGE SOURCE: a seat NUMBER when another player dealt it,
-  // absent for every PvE path (the lance, a missile, a ram, a dev lever). It
-  // is READ in the death branch and never STORED — no hashed field carries
-  // it, and nothing on the wire says why a seat died. It exists for exactly
-  // one rule: a PvP KILL, and only a PvP kill, takes the victim's score and
-  // its purchases away and pays the bounty out as orbs. Every pre-existing
-  // caller passes nothing and keeps its exact old behavior.
-  function hitPlayer(seat, dmg, src) {
+  // hitPlayer takes NO damage source any more. It used to: a seat NUMBER
+  // meant another player dealt the blow, and the death branch read it to
+  // decide whether the victim paid the toll — a PvP kill took the score and
+  // the purchases, a PvE death took neither. The user reversed that rule, so
+  // the toll is unconditional and the parameter had exactly zero readers
+  // left; it is deleted rather than kept as a lie the doc block would have
+  // to explain. `src` still travels where it is still READ — blastAt's splash
+  // attribution and an enemy's `lastAtk` (the rebate queue carries it for
+  // both) — and nothing on the wire has ever said why a seat died, which is
+  // what lets the client draw one neutral down card for every death.
+  function hitPlayer(seat, dmg) {
     const S = E.seats[seat];
     if (!S || S.hull <= 0) return false; // a dead seat cannot be hit again — respawn revives it
     // COMET MODE negates ALL incoming damage: no hull loss, no i-frame
@@ -1119,21 +1150,23 @@
     if (S.hull <= 0) {
       S.hull = 0;
       // the seat is down: its ship parks where it died and leaves the fight
-      // (targeting, sweeps, input and pickup all skip dead seats), and its
-      // UNSPENT wallet is forfeit — the roguelite reset, per seat now.
-      // Score, the cumulative-XP counter, is untouched HERE by design — a
-      // PvE death never takes points away. The PvP block just below is the
-      // one path that does, and it reaches nothing else.
+      // (targeting, sweeps, input and pickup all skip dead seats), and the
+      // WHOLE RUN is forfeit — wallet, score, ranks, bought hull cap and the
+      // bounty on the floor, all of it inside deathToll.
+      // The call is UNCONDITIONAL now. It used to hang off
+      // `typeof src === "number" && src >= 0`, so only a player's killing
+      // blow collected; the waves killed you for free. The user's rule is
+      // that nobody keeps their upgrades, their hull cap or their score
+      // through a death, so the gate is gone rather than widened — a gate
+      // that is always true is a gate that lies about having a condition.
+      // The bounty rides every death too, deliberately: a solo player can
+      // fly back for the PVPORBS orbs, but respawnSeat deals the seat
+      // OFF-SCREEN from its own wreck, so recovering ~3 XP against a whole
+      // run is a corpse run, not a refund. The user was told that and chose
+      // it.
       players[seat].vel.x = 0;
       players[seat].vel.y = 0;
-      S.xp = 0;
-      // ...and the PvP EXCEPTION, the one place in this file that lowers a
-      // score. A player killed you: the scoreboard resets to 0, the ranks go
-      // back to stock, the bought hull cap with them, and the run you had
-      // built is paid out on the floor as orbs for whoever can reach them.
-      // A PvE death reaches none of this — `src` is undefined on every other
-      // path, which is what keeps the solo game byte-identical.
-      if (typeof src === "number" && src >= 0) pvpDeathToll(seat);
+      deathToll(seat);
       // The respawn deal: the seat waits out the timer and re-enters —
       // unless the quarter rule is in force. With lobby waiters standing,
       // each death consumes one life from the seat's stock, and an
@@ -1170,12 +1203,18 @@
     return true;
   }
 
-  // The whole cost of dying to another player, and nothing else's cost.
-  // Called from hitPlayer's death branch alone, only when the killing blow
-  // carried a seat source. Four parts, in order:
-  //   score  — reset to 0. THE one sanctioned decrement in this file; every
-  //            other rule (spending, a PvE death, a restart) still leaves the
-  //            scoreboard exactly where it stood.
+  // THE COST OF DYING — every death, whatever killed you. This was
+  // pvpDeathToll and it fired for a player's killing blow alone; the rename
+  // is the rule change, because there is nothing PvP-specific left in it.
+  // Called from hitPlayer's death branch alone, unconditionally. Five parts,
+  // in order:
+  //   wallet — the unspent XP, forfeit. It used to be zeroed by hitPlayer
+  //            itself, one line above the old gated call; it lives HERE now
+  //            so the cost of dying is stated in exactly one place and no
+  //            reader has to check two. The order is unchanged.
+  //   score  — reset to 0. Spending is still not un-scoring (buy() never
+  //            touches it) — dying is the only thing that lowers a score,
+  //            and now every death does, not just a PvP one.
   //   ranks  — resetSeatUpgrades: back to stock, termSeq++, and the
   //            termChange marker rides the SAME drained stream the death
   //            marker below it does. hitPlayer does not clear EVENTS (unlike
@@ -1190,8 +1229,12 @@
   //            point is world-CLAMPED first, unlike the enemy drop: a seat
   //            can die pinned against a wall, and an unclamped drop would
   //            leave the bounty outside the world where nothing can reach it.
-  function pvpDeathToll(seat) {
+  // `best` is deliberately NOT here: the high-water score is what a death is
+  // supposed to leave standing, and clearing it would take the leaderboard
+  // down with the run.
+  function deathToll(seat) {
     const S = E.seats[seat];
+    S.xp = 0;
     S.score = 0;
     resetSeatUpgrades(seat);
     S.hullMax = ECFG.player.hull;
@@ -1346,7 +1389,7 @@
       e.vx += (tx - e.vx) * P.steer;
       e.vy += (ty - e.vy) * P.steer;
       if (e.cd > 0) e.cd--;
-      // the range comes off the body's own stats — dart 110, charger 260,
+      // the range comes off the body's own stats — dart 130, charger 260,
       // harrier 270 — and a type whose engage is 0 (the anvil, the husk, the
       // shards) has no attack mode to enter at any distance
       else if (tgt && P.engage > 0 && dist <= P.engage) {
@@ -1713,7 +1756,7 @@
         // the enemy side's exact OVERLOAD formula, computed HERE: hitPlayer
         // stays a dumb primitive that applies the number it is handed
         const fury = 1 + COMETFURY * termsFor(a).fury * (1 - energyFrac(a)); // the RAMMING seat's own rank
-        if (hitPlayer(v, COMETDMG * fury, a)) {
+        if (hitPlayer(v, COMETDMG * fury)) {
           energySpend(a, COMETHIT); // the ram half of the knob, mirroring contactEvent
           if (COMETCD > 0) cd[key] = COMETCD;
         } else if (cometActive(v)) {
@@ -1774,7 +1817,7 @@
         const ix = b.px + (b.x - b.px) * bestT;
         const iy = b.py + (b.y - b.py) * bestT;
         b.dead = true;
-        if (hitPlayer(vs, b.dmg, shooter)) E.hitsDealt++;
+        if (hitPlayer(vs, b.dmg)) E.hitsDealt++;
         spawnImpactFx(ix, iy, b.vx / bm, b.vy / bm, "enemy");
         continue;
       }
@@ -1855,7 +1898,7 @@
   // PvP kill silenced the victim's SAME-TICK shot (fire()'s seatAlive gate),
   // making ascending seat order the tiebreaker for every simultaneous trade
   // — phase 14's pinned mutual-trade semantics require both rounds to fly;
-  // (2) a drain-time kill reached pvpDeathToll/reapDead consequences from
+  // (2) a drain-time kill reached deathToll/reapDead consequences from
   // inside the drain. The rebate itself draws no rand(); its APPLIED kills
   // draw at the resolve phase exactly like live kills. (Enemy kills also
   // moved: they used to land pre-stepEnemy, silently changing that tick's
@@ -2025,8 +2068,11 @@
       // a SHIP: hitPlayer's own gates decide at the resolve phase — a
       // mutual lethal trade lands BOTH tolls, because both shots were
       // already spawned and consumed during the drain while both seats
-      // still lived; hitsDealt counts only a registered hit.
-      if (hitPlayer(h.seat, h.dmg, h.src)) E.hitsDealt++;
+      // still lived; hitsDealt counts only a registered hit. `h.src` is not
+      // passed: hitPlayer stopped reading a damage source when the toll went
+      // unconditional. The queue still CARRIES src — the enemy and missile
+      // branches above hand it to blastAt and to `lastAtk`.
+      if (hitPlayer(h.seat, h.dmg)) E.hitsDealt++;
       spawnImpactFx(h.ix, h.iy, h.dx, h.dy, "enemy");
     }
     rebateQueue.length = 0;
@@ -2143,10 +2189,10 @@
     }
   }
 
-  // The ONE credit site, now per seat: the collecting seat's wallet and its
-  // scoreboard rise together. Nothing HERE ever lowers score — spending keeps
-  // it, a PvE death keeps it, a restart keeps it — and exactly one site
-  // anywhere does: pvpDeathToll, when another player lands the killing blow. The seat defaults to 0 so every
+  // The ONE credit site, now per seat: the collecting seat's wallet, its
+  // scoreboard and its high-water mark all rise together. Nothing HERE ever
+  // lowers score — spending keeps it — and exactly one site anywhere does:
+  // deathToll, on every death. The seat defaults to 0 so every
   // existing single-seat caller (the suites' enc.addXp(n)) still credits the
   // local seat unchanged.
   function addXp(n, seat = 0) {
@@ -2154,7 +2200,14 @@
     if (!S) return;
     S.xp += n; // an uncapped wallet — no threshold, no level; the shop is the only drain
     S.score += n; // the scoreboard rides EVERY wallet credit; the only thing that
-                  // takes it back down is a PvP death (pvpDeathToll)
+                  // takes it back down is dying (deathToll)
+    // ...and the STANDING, maintained continuously rather than stamped at
+    // the death that takes the score. Continuous is what makes the board
+    // honest DURING a run: a seat climbing past its old peak is already
+    // leading on the board, instead of only counting once it dies. Since
+    // score only ever rises here, best === score for a living, climbing seat
+    // and holds above it after a death — the board's own line reads that gap.
+    if (S.score > S.best) S.best = S.score;
   }
 
   function stepOrbs() {
@@ -2248,11 +2301,11 @@
     return true;
   }
 
-  // Reset ONE seat's ranks to stock — the per-seat primitive phase 14's PvP
-  // death will call; today restart() (which resets all seats) is its only
-  // caller. The epoch INCREMENTS — never rewinds — because a reset changes
-  // the seat's effective terms exactly as a purchase does, and the marker
-  // rides the stream for the same predictor.
+  // Reset ONE seat's ranks to stock. TWO callers: deathToll (every death now,
+  // not just a PvP kill — the note here used to say "phase 14's PvP death")
+  // and restart(), which walks every seat. The epoch INCREMENTS — never
+  // rewinds — because a reset changes the seat's effective terms exactly as a
+  // purchase does, and the marker rides the stream for the same predictor.
   function resetSeatUpgrades(seat) {
     const S = E.seats[seat];
     if (!S) return;
@@ -2334,8 +2387,8 @@
   // touches no tuner value, so every slider survives
   function restart(seed) {
     syncSeats(); // seats[] tracks players[] — BEFORE the wave deal reads the count
-    // every seat's ranks die with the run, through the same primitive a
-    // PvP death will use — each epoch still INCREMENTS. Deliberately BEFORE
+    // every seat's ranks die with the run, through the same primitive every
+    // DEATH uses — each epoch still INCREMENTS. Deliberately BEFORE
     // the EVENTS clear below: a restart is a GLOBAL discontinuity every
     // client resynchronizes across anyway, so its termChange markers die
     // with the queue like every other stale cue.
@@ -2364,11 +2417,17 @@
       S.hullMax = ECFG.player.hull; // MAX HULL purchases die with the run
       S.hull = S.hullMax;
       S.xp = 0;                    // the wallet resets on death — owner decision, the roguelite reset
-                                   // S.score deliberately does NOT reset: the scoreboard counts
-                                   // XP gained for the seat's whole session, and a restart or a
-                                   // PvE death never takes points away — the charter's rule.
-                                   // A PvP KILL does (pvpDeathToll), and only there: a restart
-                                   // is not a defeat by anyone, so it stays on this side
+      S.score = 0;                 // ...and the scoreboard with it. This line is NEW: the old
+                                   // charter had the score count XP for a seat's whole session
+                                   // and survive a restart, because only a PvP kill could take
+                                   // it. Now every death takes it (deathToll), so a score that
+                                   // outlived a whole new run would be the last inconsistency
+                                   // left standing.
+      S.best = 0;                  // the standing is MATCH-scoped this pass: a restart is a new
+                                   // match, so the board opens empty and crowns nobody until
+                                   // the first point. A persistent 7-day board is server
+                                   // business (see the BOARDUI note), not a field that quietly
+                                   // survives restart() here
       S.invuln = 0;
       S.hitFlash = 0;
       S.respawnT = 0;                // no pending re-entry survives a restart
@@ -3815,28 +3874,70 @@
     ctx.restore();
   }
 
-  // The leaderboard's fixed logical space, right gutter. Score is cumulative
-  // XP gained. Spending never reduces it, a PvE death never reduces it and a
-  // restart never reduces it — the charter's rule — with exactly ONE
-  // exception since phase 14: being killed by another PLAYER resets it to 0,
-  // which is what makes the crown a live contest rather than a session total.
-  // (The 7-day board arrives with server persistence in phase 09.)
+  // The leaderboard's fixed logical space, right gutter. It ranks and crowns
+  // by `best`, the seat's HIGH-WATER score, not by the live one — and that
+  // swap is forced by the death rule, not a taste call. Score is XP gained on
+  // the CURRENT run now: every death sends it to 0, so a board ranked by it
+  // would sit near zero for everyone and hand the crown around on every
+  // death. `best` is the standing the King of the Hill contest is actually
+  // about — the user's words: "the only score we're supposed to keep is the
+  // highest score." The live run stays legible on the same line (see
+  // boardScoreLine); it just does not decide the order.
+  // Match-scoped: restart() clears best with the run. (The 7-day board
+  // arrives with server persistence in phase 09.)
   const BOARDUI = { w: 170, h: 320 };
 
   // The SHIP DOWN card's second line, as a string rather than an inline
   // literal — the copy is a CLAIM about the rules, so it has to be pinnable.
-  // It is NEUTRAL on the score by construction: nothing on the wire says why
-  // a seat died, so the client cannot tell a PvE death (score stands) from a
-  // PvP one (score reset), and a line that named either would be a lie half
-  // the time. The wallet clause went the same way on the user's call: it was
-  // TRUE in both worlds, but it is not what a downed player needs to read, so
-  // the line is the countdown and nothing else now.
+  // It is NEUTRAL on the score, and the reason CHANGED under it. It used to
+  // be neutral because it had to be: nothing on the wire said why a seat
+  // died, so the client could not tell a PvE death (score stood) from a PvP
+  // one (score reset), and a line naming either would be a lie half the time.
+  // Both deaths cost the same run now, so a "you lost your run" line would
+  // finally be TRUE — it stays out anyway, on the same call that removed the
+  // wallet clause: a downed player reads the countdown, not the accounting.
+  // The board, one gutter over, is where the numbers live.
   const downCardLine = (S) =>
     "respawn in " + Math.ceil(S.respawnT / 60);
 
+  // The board's SCORE LINE, extracted for the same reason downCardLine was:
+  // it is a claim about the rules, so it has to be pinnable rather than an
+  // inline literal. It carries TWO numbers on one line, because the board
+  // must answer two questions at once now — what a seat's standing is (best,
+  // which the order and the crown read) and how the seat's CURRENT run is
+  // going (score, which its next death will take). A third stacked line was
+  // the obvious alternative and was rejected: the panel's height is split
+  // evenly across the seats and the two existing lines are already sized to
+  // the air that leaves, so a third row would shrink all of them at four
+  // seats to buy a number that is 0 most of the time.
+  // The parenthesis appears ONLY while the run is behind the standing.
+  // While a seat is alive and climbing, score IS best (addXp raises them
+  // together), and printing "120 (120)" would be noise on the panel's widest
+  // line — the one fit() has the least room for. After a death it reads
+  // "120 (0)": the standing held, the run did not.
+  const boardScoreLine = (S) =>
+    S.score >= S.best ? String(S.best) : S.best + " (" + S.score + ")";
+
+  // THE BOARD'S ORDER, extracted from drawBoard for the same reason the two
+  // copy strings above were: it is a rules CLAIM — "the leaderboard ranks by
+  // the standing" is the user's actual ask — and inside the draw it was
+  // unpinnable. It shipped that way for one commit and a mutation sweep
+  // caught it: swapping `best` back to `score` here passed the ENTIRE gate,
+  // because every board leg staged the two together and the two orders never
+  // disagreed. A comparator can only be pinned by a case where they do, and
+  // that case needs the order itself, not the fields it read.
+  // Returns drawBoard's own {s, S} pairs, seat-ascending on a tie — the rows
+  // in the order they are drawn, top first. Draw-only, like everything else
+  // on this side of the file: no sim state, no rand().
+  const boardRanking = () => E.seats.map((S, s) => ({ s, S }))
+    .sort((a, b) => b.S.best - a.S.best || a.s - b.s);
+
   // The scoreboard, reworked to the user's spec: per seat, TWO STACKED LINES
   // — the name line ("Player1".."PlayerN" by seat id; no name data exists
-  // yet) over the raw score — drawn as big as the panel allows. The panel
+  // yet) over the score line (boardScoreLine: the standing, and the live run
+  // beside it while the two disagree) — drawn as big as the panel allows.
+  // The line used to be `String(r.S.score)` and nothing else; it grew when
+  // score stopped surviving a death. The panel
   // height splits evenly across the seats (the score line takes the larger
   // share of each block); each line then fits to the panel width through ONE
   // measureText read — canvas text width scales linearly with font size, so
@@ -3845,12 +3946,14 @@
   // the clay/bright palette with the LOCAL seat brightest, the dead go dim —
   // so the one marker below never carries survival information.
   // ONE marker, added in phase 14: a crown over the leading row. It is drawn
-  // for ranked[0] and only when that seat's score is above 0, so a board at
+  // for ranked[0] and only when that seat's BEST is above 0, so a board at
   // the start of a match — every seat on 0 — crowns nobody rather than
   // crowning seat 0 by the tie-break, which would read as a bug. It is drawn
   // in C.clay inside the row's own geometry, so no rect moves. No sections,
-  // no header, no footnote otherwise. Sort is score-descending with the
-  // seat-id tie-break — the committed comparator, and the crown rides it. Still the same 170×320
+  // no header, no footnote otherwise. Sort is BEST-descending with the
+  // seat-id tie-break — the same comparator shape, reading the standing
+  // instead of the live score, so the crown no longer falls off the leader
+  // the instant it dies. Still the same 170×320
   // logical space (BOARDUI), so panelPlace, panelAt and suite geometry hold;
   // `compact` only shrinks the padding. Draw-only: no sim state, no rand().
   function drawBoard(compact) {
@@ -3863,8 +3966,9 @@
     ctx.strokeRect(0.5, 0.5, B.w - 1, B.h - 1);
     const pad = compact ? 6 : 10;
     const innerW = B.w - pad * 2;
-    const ranked = E.seats.map((S, s) => ({ s, S }))
-      .sort((a, b) => b.S.score - a.S.score || a.s - b.s);
+    const ranked = boardRanking(); // the comparator lives above, where a check
+                                   // can reach it — the rows below are drawn in
+                                   // exactly the order it returns
     const n = Math.max(1, ranked.length);
     const cellH = (B.h - pad * 2) / n;
     const nameH = cellH * 0.34;  // the name line...
@@ -3881,13 +3985,16 @@
     };
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    // the crowned row: the leader, and only while it has actually scored
-    const king = ranked.length && ranked[0].S.score > 0 ? ranked[0].s : -1;
+    // the crowned row: the leader by STANDING, and only while it has
+    // actually scored. Reading best rather than the live score is what keeps
+    // the crown on a leader who just died — under the new death rule the
+    // score half of that test would be 0 for the whole respawn timer.
+    const king = ranked.length && ranked[0].S.best > 0 ? ranked[0].s : -1;
     ranked.forEach((r, i) => {
       const top = pad + i * cellH;
       const alive = seatAlive(r.s);
       const name = "Player" + (r.s + 1);
-      const score = String(r.S.score);
+      const score = boardScoreLine(r.S);
       ctx.font = "700 " + fit(name, nameH) + "px " + FONT;
       // the LOCAL seat is the bright one — a client granted seat 1 must see
       // its own row highlighted, exactly as the HUD reads its own seat, and
@@ -4044,10 +4151,10 @@
       ctx.fillText("SHIP DOWN", FW / 2, FH / 2 - 8);
       ctx.font = "400 10px " + FONT;
       ctx.fillStyle = C.dim;
-      // NEUTRAL on the score: nothing on the wire says WHY this seat died, so
-      // the client genuinely cannot tell a PvE death (score stands) from a
-      // PvP one (score reset). The wallet clause is true in both worlds; the
-      // score clause was true in only one, so it is gone rather than guessed
+      // NEUTRAL on the score, still — every death costs the same run now, so
+      // the old reason (the client cannot tell WHY a seat died) is spent, but
+      // the call stands: a downed player reads the countdown, not the bill.
+      // See downCardLine's own block.
       ctx.fillText(downCardLine(LS), FW / 2, FH / 2 + 12);
     } else if (E.state === "dead") {
       ctx.fillStyle = "rgba(14, 17, 25, 0.78)";
@@ -4389,9 +4496,14 @@
       hull: E.hull,
       hullMax: E.hullMax,
       xp: E.xp,
-      score: E.score, // seat 0's scoreboard — per-seat, hashed, decremented by
-                      // exactly one event in the sim: a PvP death
+      score: E.score, // seat 0's scoreboard — per-seat, hashed, zeroed by
+                      // exactly one event in the sim: DYING (any death now,
+                      // not the PvP kill this line used to name)
       seats: E.seats.map(({ termSeq, ...S }) => ({ ...S, owned: S.owned.slice() })),
+                              // `best` rides this spread — it is unhashed but
+                              // it IS seat state, and a check that reads a
+                              // standing reads it here
+
                               // every seat's record, copied — ranks
                               // DEEP-copied, so a "before" snapshot cannot be
                               // mutated by a buy. termSeq is EXCLUDED on the
@@ -4594,11 +4706,13 @@
       hitPlayer, // the BARE combat primitive, undrained: the server's dev
                  // KILLSEAT lever calls it so the death marker still rides
                  // the wire's own event drain instead of dying in drainStep
-      // damagePlayer keeps its (n, seat) argument order and its PvE meaning —
-      // `src` defaults to undefined, so all 20 committed legs are untouched.
-      // A third argument makes it a PLAYER's blow, which is the only way to
-      // reach the PvP toll through this seam.
-      damagePlayer: (n, seat = 0, src) => { const hit = hitPlayer(seat, n === undefined ? 1 : n, src); drainStep(); return hit; },
+      // damagePlayer keeps its (n, seat) argument order. Its old THIRD
+      // argument — a killer seat, the only way to reach the PvP toll through
+      // this seam — went with hitPlayer's `src`: every death collects the
+      // whole toll now, so there is nothing for a source to select. Legs that
+      // still pass a third value are harmless (JS drops it), but they no
+      // longer mean anything and the PvP section was restated accordingly.
+      damagePlayer: (n, seat = 0) => { const hit = hitPlayer(seat, n === undefined ? 1 : n); drainStep(); return hit; },
       addXp,
       buy,
       // the suites' wave elevator: the old flow rode continueFromShop, and
@@ -4648,6 +4762,12 @@
       segCircleEntryT,
       downCardLine, // the SHIP DOWN card's copy — a rules CLAIM, so it is pinned
                     // by a check rather than left as an unguarded literal
+      boardScoreLine, // ...and the board's score line, published on exactly the
+                      // same ground: it states which number is the standing and
+                      // which is the live run
+      boardRanking,   // ...and the ROW ORDER those lines are drawn in. The
+                      // shopLayout idiom: a check drives the real comparator
+                      // rather than diffing pixels for an ordering question
       resolveBulletHits, // the first-along-the-path pass, staged directly: a check that
                          // wants ONE arbitration must not also pay for the integrate step
                          // that moved the bullet there
@@ -4667,9 +4787,11 @@
       arrowCfg: ARROWS,              // inset/cap/buckets — checks read these, never copy them
       tunables: () => ({ BCOOL, BLIFE, AUTOFIRE, BSPEED, BMAX, VMAX, TICK, BDMG, CONTACTCD, BLASTR, BLASTGAIN, COMETDMG, COMETCD, PVPORBS, PVPREWIND }),
                        // PVPORBS rides here too, and for the same reason COMETCD does:
-                       // the ENCOUNTER is what reads it (pvpDeathToll deals the orbs), and
-                       // it sizes a drop the new PvP fixtures pin, so the meta diagnosis
-                       // line has to be able to say "the constant moved" about it.
+                       // the ENCOUNTER is what reads it (deathToll deals the orbs — on
+                       // EVERY death now, which is why the name still says PvP and the
+                       // behaviour no longer does), and it sizes a drop the fixtures
+                       // pin, so the meta diagnosis line has to be able to say "the
+                       // constant moved" about it.
                        // COMETCD rides HERE and not in flightTunables: the encounter is
                        // what stamps it, beside the CONTACTCD it was split off from
       blastRadius, // the live effective radius, exactly as blastAt() reads it

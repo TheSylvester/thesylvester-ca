@@ -206,14 +206,103 @@ window.runWave1Checks = function () {
   // ---- D1b. the respawn flow: countdown, deal point, grace, the wallet ----
   enc.reset();
   enc.advance(1);
-  enc.addXp(7); // a wallet to forfeit, and a score that must survive it
-  const scoreAtDeath = enc.state().seats[0].score;
+  // THE INVERSION. This leg used to read "a killing blow forfeits the unspent
+  // wallet and keeps the score", and it was the D1b statement of the old
+  // charter: a PvE death cost the wallet and nothing else. Every death costs
+  // the whole run now, so the same staging pins the opposite outcome — and it
+  // pins the STANDING surviving beside it, because a leg that only watched
+  // score fall could not tell "the toll landed" from "the board lost its
+  // memory".
+  enc.addXp(7); // a wallet AND a score to forfeit — and a standing that must outlive both
+  const bestAtDeath = enc.state().seats[0].best;
+  const orbsAtDeath = enc.E.orbs.length;
   enc.damagePlayer(99);
   s = enc.state();
-  ok("a killing blow forfeits the unspent wallet and keeps the score",
-    s.hull === 0 && s.xp === 0 && s.seats[0].score === scoreAtDeath &&
+  ok("a killing blow forfeits the unspent wallet AND the score — the run, not just the purse",
+    s.hull === 0 && s.xp === 0 && s.seats[0].score === 0 &&
     s.seats[0].respawnT === ECFG.player.respawn,
     "xp=" + s.xp + " score=" + s.seats[0].score + " respawnT=" + s.seats[0].respawnT);
+  ok("...while the seat's BEST holds at the peak the run reached",
+    bestAtDeath === 7 && s.seats[0].best === 7,
+    "best=" + s.seats[0].best + " atDeath=" + bestAtDeath);
+  ok("...and an ordinary PvE death pays the same PVPORBS bounty a player kill does",
+    enc.E.orbs.length - orbsAtDeath === enc.tunables().PVPORBS,
+    "dropped=" + (enc.E.orbs.length - orbsAtDeath) + " want=" + enc.tunables().PVPORBS);
+  // the ranks and the bought hull cap go with it. Staged on its own reset so
+  // the buy is provably REAL before the death takes it — the "teeth" idiom the
+  // PvP section uses, applied to the plain PvE path that never used to pay.
+  enc.reset();
+  enc.advance(1);
+  enc.addXp(60);
+  enc.buy(enc.shopInfo().findIndex((r) => r.name === "AFTERBURNER"));
+  enc.buy(enc.shopInfo().findIndex((r) => r.name === "MAX HULL"));
+  const pveHullMaxBought = enc.state().hullMax;
+  const pveSeqBefore = enc.E.seats[0].termSeq;
+  ok("MAX HULL really raised the cap before the PvE death — the reset below has teeth",
+    pveHullMaxBought === ECFG.player.hull + 1 && enc.state().owned.some((n) => n > 0),
+    "hullMax=" + pveHullMaxBought + " owned=" + enc.state().owned.join(","));
+  enc.damagePlayer(99);
+  s = enc.state();
+  ok("a PvE death resets the ranks and the bought hull cap, and bumps the term epoch",
+    s.owned.every((n) => n === 0) && s.hullMax === ECFG.player.hull &&
+    enc.E.seats[0].termSeq === pveSeqBefore + 1,
+    JSON.stringify({ owned: s.owned, hullMax: s.hullMax, seq: enc.E.seats[0].termSeq }));
+  // ...and the same bill through a REAL BODY, not the test seam. Every leg
+  // above kills with damagePlayer, which is hitPlayer with the drain bolted
+  // on; this one lets an enemy do it through the production contact sweep, so
+  // the claim is about the GAME and not about one exported function. It is the
+  // leg that would survive someone re-introducing the old source gate on a
+  // path damagePlayer does not take.
+  enc.reset();
+  enc.advance(1);
+  enc.E.groups = [];             // no scheduled pack — this leg owns the field
+  enc.addXp(40);
+  enc.buy(enc.shopInfo().findIndex((r) => r.name === "AFTERBURNER"));
+  const foeScoreBefore = enc.state().seats[0].score;
+  const foeOrbsBefore = enc.E.orbs.length;
+  enc.E.seats[0].hull = 1;       // one lance pulse is lethal
+  enc.E.seats[0].invuln = 0;
+  // a dart just inside its own engage range: it holds its preferred ring,
+  // telegraphs, and lances. The lance is the plainest PvE weapon in the file
+  // and it has never carried a damage source.
+  enc.spawnEnemy(ship().x + 100, ship().y);
+  enc.advance(ECFG.lance.telegraph + 40);
+  s = enc.state();
+  ok("an ENEMY kill collects the toll through the production lance",
+    s.hull === 0 && foeScoreBefore > 0 && s.seats[0].score === 0 &&
+    s.owned.every((n) => n === 0) &&
+    enc.E.orbs.length - foeOrbsBefore >= enc.tunables().PVPORBS,
+    JSON.stringify({ hull: s.hull, was: foeScoreBefore, score: s.seats[0].score,
+                     owned: s.owned, orbs: enc.E.orbs.length - foeOrbsBefore }));
+  ok("...and the standing outlives it, exactly as it does a seam death",
+    s.seats[0].best === foeScoreBefore,
+    JSON.stringify({ best: s.seats[0].best, want: foeScoreBefore }));
+  // ...and the standing tracks the PEAK across several runs: it rises with
+  // each credit, never falls, and a second run that comes up short leaves the
+  // first run's number on the board.
+  enc.reset();
+  enc.advance(1);
+  enc.addXp(30);
+  const bestPeak = enc.state().seats[0].best;
+  enc.damagePlayer(99);
+  enc.respawnSeat(0);
+  enc.addXp(12); // a shorter second run
+  ok("best tracks the PEAK across deaths — it rises with the credits and never falls",
+    bestPeak === 30 && enc.state().seats[0].best === 30 && enc.state().seats[0].score === 12,
+    JSON.stringify({ best: enc.state().seats[0].best, score: enc.state().seats[0].score }));
+  enc.addXp(25); // ...and a run that passes the old peak raises it again
+  ok("...and a run that beats the standing raises it, live, without waiting for a death",
+    enc.state().seats[0].best === 37 && enc.state().seats[0].score === 37,
+    JSON.stringify({ best: enc.state().seats[0].best, score: enc.state().seats[0].score }));
+  ok("restart clears the standing — best is match-scoped, not a session total",
+    (() => { enc.reset(); return enc.state().seats[0].best === 0 && enc.state().seats[0].score === 0; })(),
+    JSON.stringify({ best: enc.state().seats[0].best, score: enc.state().seats[0].score }));
+  // back to D1b's own staging for the respawn-flow legs below
+  enc.reset();
+  enc.advance(1);
+  enc.addXp(7);
+  enc.damagePlayer(99);
+  s = enc.state();
   const deadAtX = ship().x;
   const deadAtY = ship().y;
   enc.advance(ECFG.player.respawn - 1);
@@ -337,13 +426,30 @@ window.runWave1Checks = function () {
     "from wave " + wipeBefore.wave + " (" + wipeBefore.enemies + "e/" + wipeBefore.missiles +
     "m) to wave " + s.wave + " " + s.state + " tick=" + s.waveTick +
     " (" + s.enemies + "e/" + s.missiles + "m)");
-  ok("the wipe is a TRANSITION, not a restart: score, ranks, hull cap, the timer, orbs and bullets all stand",
+  // RESTATED for the new death rule. The claim is unchanged — the wipe is a
+  // TRANSITION and takes nothing of its own — but the baseline moved: the
+  // DEATH that armed the wipe has already taken the score, the ranks and the
+  // bought hull cap, so the honest comparison is against wipeAtDeath (the
+  // state one tick after the toll) and not against wipeBefore. The old leg
+  // asserted `s.owned[0] === 1` against wipeAtDeath, which read as "the rank
+  // survived the wipe" and now would be asserting that the death did not
+  // collect. Both halves are pinned instead: the death took them (wipeBefore
+  // versus wipeAtDeath) and the wipe took nothing further (wipeAtDeath
+  // versus now).
+  ok("the DEATH that armed the wipe took the run — score, ranks and hull cap all fell at the toll",
+    wipeBefore.seats[0].score > 0 && wipeBefore.owned[0] === 1 &&
+    wipeAtDeath.seats[0].score === 0 && wipeAtDeath.owned.every((n) => n === 0),
+    JSON.stringify({ before: { score: wipeBefore.seats[0].score, owned: wipeBefore.owned },
+                     atDeath: { score: wipeAtDeath.seats[0].score, owned: wipeAtDeath.owned } }));
+  ok("the wipe is a TRANSITION, not a restart: it takes nothing the death did not — the timer, orbs and bullets all stand",
     s.seats[0].score === wipeAtDeath.seats[0].score &&
-    s.owned.join(",") === wipeAtDeath.owned.join(",") && s.owned[0] === 1 &&
+    s.owned.join(",") === wipeAtDeath.owned.join(",") &&
     s.hullMax === wipeAtDeath.hullMax &&
+    s.seats[0].best === wipeAtDeath.seats[0].best && s.seats[0].best > 0 &&
     s.seats[0].respawnT === ECFG.player.respawn - 1 && // the countdown loop ran on this tick too
     s.orbs === wipeAtDeath.orbs && t.G.bullets.length === wipeBullets,
     JSON.stringify({ score: s.seats[0].score, owned: s.owned, hullMax: s.hullMax,
+                     best: s.seats[0].best,
                      respawnT: s.seats[0].respawnT, orbs: s.orbs, bullets: t.G.bullets.length }));
   // the SCHEDULE HOLD: wave 1 is dealt into a world with no living ship, so the
   // whole schedule slides back by the shortest respawn timer. Without it the
@@ -1726,17 +1832,39 @@ window.runWave1Checks = function () {
   t.render();
   const scoreInkA = scoreStrip();
   const scoreWasR = enc.E.seats[0].score;
-  enc.E.seats[0].score = scoreWasR + 88888;
+  const bestWasR = enc.E.seats[0].best;
+  // the STANDING is what the line leads with, so it gets its own lever
+  enc.E.seats[0].best = bestWasR + 88888;
   t.render();
-  const scoreInkB = scoreStrip();
+  const bestInkB = scoreStrip();
+  enc.E.seats[0].best = bestWasR;
+  t.render();
+  // ...and the LIVE RUN is legible beside it: with best held and score pushed
+  // BELOW it, the line grows its parenthesis and the band has to move. This is
+  // the half that would fail on a board that printed the standing alone —
+  // exactly the board the first draft of this change would have shipped.
+  enc.E.seats[0].best = 500;
+  enc.E.seats[0].score = 500;
+  t.render();
+  const runInkAtPeak = scoreStrip();
+  enc.E.seats[0].score = 120; // a run cut short — best holds, score does not
+  t.render();
+  const runInkBehind = scoreStrip();
   enc.E.seats[0].score = scoreWasR;
+  enc.E.seats[0].best = bestWasR;
   t.render();
-  ok("the leaderboard renders the live per-seat score",
-    scoreInkA !== scoreInkB && scoreStrip() === scoreInkA,
-    "moved=" + (scoreInkA !== scoreInkB));
+  ok("the leaderboard renders the per-seat STANDING, and the lever puts the band back",
+    scoreInkA !== bestInkB && scoreStrip() === scoreInkA,
+    "moved=" + (scoreInkA !== bestInkB));
+  ok("...and the LIVE RUN is legible on the same line — a run behind its standing repaints it",
+    runInkAtPeak !== runInkBehind,
+    "moved=" + (runInkAtPeak !== runInkBehind));
   // ---- the CROWN (phase 14) --------------------------------------------
-  // The board's one marker. It is drawn for ranked[0] and only above a score
-  // of 0, so a fresh board crowns nobody. The probe is a GRID across the top
+  // The board's one marker. It is drawn for ranked[0] and only above a BEST
+  // of 0 — the lever below moved from `score` to `best` with the board
+  // itself, because a crown that answered to the live score would come off
+  // the leader for the whole of its respawn timer now that a death zeroes
+  // it. So a fresh board still crowns nobody. The probe is a GRID across the top
   // row's air band — where the chevron sits, above the name line — and every
   // leg asserts BOTH directions, so a board that stopped drawing the crown
   // entirely could not pass as "nothing moved".
@@ -1750,29 +1878,40 @@ window.runWave1Checks = function () {
     }
     return pts.join("|");
   };
+  const crownBestWas = enc.E.seats[0].best;
   const crownScoreWas = enc.E.seats[0].score;
-  enc.E.seats[0].score = 0;
+  enc.E.seats[0].best = 0;
   t.render();
   const crownAtZero = crownStrip();
-  enc.E.seats[0].score = 120;
+  enc.E.seats[0].best = 120;
   t.render();
   const crownAtLead = crownStrip();
   ok("a 0-0 board crowns nobody, and the first point on the board raises the crown",
     crownAtZero !== crownAtLead,
     "moved=" + (crownAtZero !== crownAtLead));
+  // ...and the crown OUTLIVES the death that empties the live score. This is
+  // the leg the whole `best` field exists for: with the standing held and the
+  // run zeroed — exactly what deathToll leaves behind — the marker must not
+  // move. A board still crowning on `score` fails here and only here.
+  enc.E.seats[0].score = 0;
+  t.render();
+  const crownAfterDeath = crownStrip();
+  ok("the crown survives its wearer's death — it answers to the standing, not the live run",
+    crownAfterDeath === crownAtLead,
+    "held=" + (crownAfterDeath === crownAtLead));
   // ...and the crown is behind the panels lever. The OBVIOUS form of this
   // leg is vacuous and was caught being vacuous: comparing the crown band
   // with panels up against the same band with panels DOWN moves because the
   // BOARD moved, and it passes with the crown deleted outright. The band
-  // must be isolated by a lever only the CROWN answers to — the score — and
+  // must be isolated by a lever only the CROWN answers to — the standing — and
   // the panels claim then has to be made the other way round: with the panel
   // suppressed, the crown's own lever must change NOTHING, because there is
   // no surface for it to paint on.
   t.setPanels(false);
-  enc.E.seats[0].score = 0;
+  enc.E.seats[0].best = 0;
   t.render();
   const crownOffZero = crownStrip();
-  enc.E.seats[0].score = 120;
+  enc.E.seats[0].best = 120;
   t.render();
   const crownOffLead = crownStrip();
   t.setPanels(true);
@@ -1790,6 +1929,7 @@ window.runWave1Checks = function () {
                      liveLeverMoved: crownAtZero !== crownAtLead,
                      panelRestored: crownOnLead === crownAtLead }));
   enc.E.seats[0].score = crownScoreWas;
+  enc.E.seats[0].best = crownBestWas;
   t.render();
 
   // the crown FOLLOWS the lead, and the local-seat highlight follows the
@@ -1836,17 +1976,22 @@ window.runWave1Checks = function () {
       }
       return pts.join("|");
     };
-    enc.E.seats[0].score = 0;
-    enc.E.seats[1].score = 0;
+    // the lever is `best` throughout, because `best` is what the comparator
+    // sorts on. score rides along at the same value so every row prints the
+    // bare standing (boardScoreLine's no-parenthesis branch) and the name
+    // bands below compare like for like.
+    const cwSet = (a, b) => {
+      enc.E.seats[0].best = enc.E.seats[0].score = a;
+      enc.E.seats[1].best = enc.E.seats[1].score = b;
+    };
+    cwSet(0, 0);
     t.render();
     const cwCrownNone = cwCrown();
-    enc.E.seats[0].score = 50;
-    enc.E.seats[1].score = 10;
+    cwSet(50, 10);
     t.render();
     const cwLead0 = [cwRow(0), cwRow(1)];
     const cwCrown0 = cwCrown();
-    enc.E.seats[0].score = 10;
-    enc.E.seats[1].score = 50; // the lead FLIPS — seat 1 sorts to the top row
+    cwSet(10, 50); // the lead FLIPS — seat 1 sorts to the top row
     t.render();
     const cwLead1 = [cwRow(0), cwRow(1)];
     const cwCrown1 = cwCrown();
@@ -1860,15 +2005,72 @@ window.runWave1Checks = function () {
     // bright and the other dim, so the same name renders in a different
     // colour depending on which row it lands in — asserting a swap here would
     // be asserting something false.
-    ok("a staged score flip carries the LEADER into the crowned row — the comparator decides who wears it",
+    ok("a staged standing flip carries the LEADER into the crowned row — the comparator decides who wears it",
       cwLead0[0] !== cwLead1[0] && cwLead0[1] !== cwLead1[1],
       JSON.stringify({ row0Moved: cwLead0[0] !== cwLead1[0],
                        row1Moved: cwLead0[1] !== cwLead1[1] }));
-    // the localSeat highlight: with both seats on the SAME score the rows
+    // ...and the ORDER holds through a death. Seat 0 leads on the standing
+    // and then loses its whole run: under the old score-ranked board seat 1
+    // would take the top row on the spot. Ranked by best, nothing moves.
+    cwSet(50, 10);
+    enc.E.seats[0].score = 0; // seat 0 died — run gone, standing kept
+    t.render();
+    const cwCrownAfterDeath = cwCrown();
+    ok("a dead leader keeps the crowned row — the board ranks the standing, not the live run",
+      cwCrownAfterDeath === cwCrown0,
+      "held=" + (cwCrownAfterDeath === cwCrown0));
+    // ---- THE COMPARATOR, on a staging where the two orders DISAGREE ------
+    // Every board leg above stages best and score TOGETHER (cwSet writes
+    // both), so the best-order and the score-order agree in all of them and a
+    // board sorting on either passes the lot. That is not a hypothetical: the
+    // sort shipped for one commit reading `best`, and a mutation swapping it
+    // back to `score` moved not one line of the whole gate — the crown legs
+    // could not see it either, because the crown is structurally pinned to
+    // row 0 (`r.s === king` IS `i === 0`), so a comparator carrying the WRONG
+    // seat into that row still inks the same band.
+    // A comparator can only be pinned by a state where the two orderings are
+    // OPPOSITE, and by reading the ORDER rather than the fields it sorted on.
+    // Seat 0 holds the higher standing with no run left (it died at its
+    // peak); seat 1 is alive on a smaller standing but the higher LIVE score.
+    // By best the rows are [0, 1]; by score they would be [1, 0].
+    enc.E.seats[0].best = 500; enc.E.seats[0].score = 0;   // died at its peak
+    enc.E.seats[1].best = 100; enc.E.seats[1].score = 100; // alive, and behind
+    ok("the sort staging really is contradictory — this is what makes the two legs below bite",
+      enc.E.seats[0].best > enc.E.seats[1].best &&
+      enc.E.seats[0].score < enc.E.seats[1].score,
+      JSON.stringify({ best: [enc.E.seats[0].best, enc.E.seats[1].best],
+                       score: [enc.E.seats[0].score, enc.E.seats[1].score] }));
+    // the ORDER, named rather than inferred from ink — no pixel band can say
+    // it, and "the leaderboard ranks by the standing" is the user's actual
+    // ask. Read through boardRanking, the seam drawBoard itself sorts with,
+    // so the pinned order and the drawn one cannot drift apart: the
+    // shopLayout idiom, never a second copy of the sort.
+    const cwOrder = enc.boardRanking().map((r) => r.s);
+    ok("the board RANKS by the standing — the dead leader holds row 0 over a living seat with the higher live score",
+      cwOrder.join(",") === "0,1", "order=" + cwOrder.join(","));
+    // ...and the DRAWN board really is that ranking, which the seam alone
+    // cannot say: drawBoard could have kept a sort of its own. Row 0's name
+    // band is read under the contradictory staging and again with the live
+    // scores put back in AGREEMENT with the standings. The standings are
+    // identical across the pair, so a board ranking on best draws the same
+    // seat, the same name and the same colour in row 0 both times. A board
+    // ranking on score draws Player2 dim in row 0 for the first render and
+    // Player1 bright for the second, and the bands differ. The score LINE
+    // moves between the two renders (500 leaves the parenthesised branch),
+    // but it sits in its own band below this one and cannot reach it.
+    t.render();
+    const cwRowContradictory = cwRow(0);
+    cwSet(500, 100); // the same standings, live scores back in agreement
+    t.render();
+    const cwRowAgreeing = cwRow(0);
+    ok("...and the drawn rows follow it — row 0 holds its seat when only the live-score order flips",
+      cwRowContradictory === cwRowAgreeing,
+      "held=" + (cwRowContradictory === cwRowAgreeing));
+
+    // the localSeat highlight: with both seats on the SAME standing the rows
     // differ only by their name colour, so a granted seat 1 must repaint.
     // Driven through the real Net accessor the HUD reads, never a poke.
-    enc.E.seats[0].score = 50;
-    enc.E.seats[1].score = 50;
+    cwSet(50, 50);
     t.render();
     const cwLocal0 = [cwRow(0), cwRow(1)];
     const netWas = window.Net;
@@ -4776,8 +4978,11 @@ window.runWave1Checks = function () {
       pvGraceBullet.dead === true && enc.E.seats[1].hull === 3,
       JSON.stringify({ dead: pvGraceBullet.dead, hull: enc.E.seats[1].hull }));
 
-    // (e) THE TOLL. A PvP kill zeroes the score, resets the ranks and the
-    // bought hull cap, and drops PVPORBS orbs. The killer keeps everything.
+    // (e) THE TOLL. A kill zeroes the victim's score, resets its ranks and
+    // its bought hull cap, and drops PVPORBS orbs. The killer keeps
+    // everything. Nothing here changed when the rule did — what changed is
+    // that this is no longer the PvP branch of a fork: (f) below now proves
+    // a sourceless death collects the same bill.
     pvPrep();
     enc.addXp(60, 0);
     enc.addXp(60, 1);
@@ -4826,24 +5031,38 @@ window.runWave1Checks = function () {
       enc.E.seats[1].hull === ECFG.player.hull && enc.E.seats[1].hullMax === ECFG.player.hull,
       JSON.stringify({ hull: enc.E.seats[1].hull, hullMax: enc.E.seats[1].hullMax }));
 
-    // (f) the exception is CARVED: a PvE kill on the same staging keeps
-    // everything, and so does a restart
+    // (f) THE EXCEPTION IS GONE. This leg used to prove the carve-out — "a
+    // PvE kill keeps the score, the ranks and the hull cap, and drops
+    // nothing" — on staging identical to (e)'s but with no killer seat. The
+    // user removed the carve-out, so the same staging now has to prove the
+    // opposite: a sourceless killing blow collects EXACTLY what (e)'s did.
+    // Kept rather than deleted for that reason — it is the one leg that
+    // reads the two death kinds side by side, and it is the leg that would
+    // catch a half-reverted gate that still asked who fired.
     pvPrep();
     enc.addXp(60, 1);
     enc.buy(enc.shopInfo().findIndex((r) => r.name === "AFTERBURNER"), 1);
+    enc.buy(enc.shopInfo().findIndex((r) => r.name === "MAX HULL"), 1);
     const pvPveScore = enc.E.seats[1].score;
-    const pvPveOwned = enc.E.seats[1].owned.join(",");
+    const pvPveBest = enc.E.seats[1].best;
+    const pvPveHullMax = enc.E.seats[1].hullMax;
     const pvPveOrbs = enc.E.orbs.length;
     enc.E.seats[1].hull = 1;
     enc.E.seats[1].invuln = 0;
-    const pvPveKilled = enc.damagePlayer(5, 1); // NO source — the PvE path
-    ok("a PvE kill keeps the score, the ranks and the hull cap, and drops nothing",
+    const pvPveKilled = enc.damagePlayer(5, 1); // NO source at all — the PvE path
+    ok("a PvE kill collects the SAME toll: score, ranks, hull cap and the bounty",
       pvPveKilled === true && enc.E.seats[1].hull === 0 &&
-      enc.E.seats[1].score === pvPveScore &&
-      enc.E.seats[1].owned.join(",") === pvPveOwned &&
-      enc.E.orbs.length === pvPveOrbs,
+      pvPveScore > 0 && pvPveHullMax === ECFG.player.hull + 1 && // the staging had teeth
+      enc.E.seats[1].score === 0 &&
+      enc.E.seats[1].owned.every((n) => n === 0) &&
+      enc.E.seats[1].hullMax === ECFG.player.hull &&
+      enc.E.orbs.length - pvPveOrbs === enc.tunables().PVPORBS,
       JSON.stringify({ score: enc.E.seats[1].score, owned: enc.E.seats[1].owned,
+                       hullMax: enc.E.seats[1].hullMax,
                        orbs: enc.E.orbs.length - pvPveOrbs }));
+    ok("...and the STANDING survives it, exactly as it survives a PvP kill",
+      enc.E.seats[1].best === pvPveBest && pvPveBest > 0,
+      JSON.stringify({ best: enc.E.seats[1].best, was: pvPveBest }));
 
     // (g) the orb drop is world-CLAMPED — a seat killed against a wall pays a
     // bounty that is still inside the world (the enemy drop is not clamped)
@@ -5201,13 +5420,13 @@ window.runWave1Checks = function () {
                        orderA: pvHashOrderA, orderB: pvHashOrderB }));
 
     // THE DOWN CARD'S COPY. It is a claim about the RULES, so it is pinned
-    // rather than left as an unguarded literal: nothing on the wire says why
-    // a seat died, so a line naming the score would be a lie for one of the
-    // two death kinds. The old copy promised "score stands", which a PvP death
-    // makes false. The wallet clause that replaced it was true in both worlds
-    // and still went, on the user's call — a downed player reads the countdown,
-    // not the accounting. The score guards below are what keep the line
-    // neutral, and they matter exactly as much against the short copy.
+    // rather than left as an unguarded literal. It used to be neutral because
+    // it HAD to be — nothing on the wire says why a seat died, so a line
+    // naming the score would have been a lie for one of the two death kinds.
+    // Both kinds cost the same run now, so "you lost your run" would finally
+    // be true; the line stays the countdown anyway, on the user's call that a
+    // downed player reads the timer and not the accounting. The score guards
+    // below are what keep it neutral either way.
     {
       const card = enc.downCardLine({ respawnT: 180 });
       ok("the SHIP DOWN card is the countdown alone and makes NO claim about the score",
@@ -5218,6 +5437,28 @@ window.runWave1Checks = function () {
         enc.downCardLine({ respawnT: 1 }) === "respawn in 1" &&
         enc.downCardLine({ respawnT: 121 }) === "respawn in 3",
         JSON.stringify([enc.downCardLine({ respawnT: 1 }), enc.downCardLine({ respawnT: 121 })]));
+    }
+
+    // THE BOARD'S SCORE LINE, pinned on the same ground downCardLine is: it
+    // states which of two numbers is the standing and which is the live run,
+    // and that is a rules claim the panel makes in words. Driven as a pure
+    // function of a seat-shaped record, so the copy is pinned without a
+    // render — the ink legs above already prove the line reaches the canvas.
+    {
+      const line = enc.boardScoreLine;
+      ok("the board's score line is the STANDING alone while the run is at its peak",
+        line({ score: 120, best: 120 }) === "120" && line({ score: 0, best: 0 }) === "0",
+        JSON.stringify([line({ score: 120, best: 120 }), line({ score: 0, best: 0 })]));
+      ok("...and it names the live run in parentheses once a death has taken it",
+        line({ score: 0, best: 120 }) === "120 (0)" &&
+        line({ score: 45, best: 120 }) === "120 (45)",
+        JSON.stringify([line({ score: 0, best: 120 }), line({ score: 45, best: 120 })]));
+      // the STANDING always leads. A line that printed the live score first
+      // would rank-order the board's own copy against its own comparator, and
+      // the crown would sit on a row whose big number was the smaller one.
+      ok("...the standing always leads the line — the number the crown answers to reads first",
+        line({ score: 45, best: 120 }).indexOf("120") === 0,
+        JSON.stringify(line({ score: 45, best: 120 })));
     }
 
     t.setInputMode(pvInputWas);
@@ -5672,18 +5913,46 @@ window.runWave1Checks = function () {
     ok("the damage probe is looking at an actual hull, not empty field",
       sdPlate > 60, "brightPx=" + sdPlate);
 
-    // (1) the standing damage state — a hull point lost has to be visible on
-    //     the ship that lost it, and on nothing else
+    // (1) the standing damage state, PARKED. The chewed-and-charred hull read
+    //     wrong in play, so the shipped build draws a living seat as the
+    //     pristine ship at every hull value. This section keeps BOTH halves:
+    //     first that the suspension is real and total, then — with the park
+    //     switch flipped — that the parked draw is still there and still works,
+    //     so the day it comes back it comes back to live coverage rather than
+    //     to three checks someone deleted.
+    ok("the damaged-hull look ships parked", t.hullDamageShown() === false,
+      "shown=" + t.hullDamageShown());
+    rec(0).hull = 2;
+    t.render();
+    ok("a hull point lost draws the pristine ship, byte for byte", patch(A) === sdFullA);
+    rec(0).hull = 1;
+    t.render();
+    ok("...and so does a ship one point from dead", patch(A) === sdFullA);
+    ok("...and no other ship moved either", patch(B) === sdFullB);
+
+    // the parked draw, switched back on: the original three legs, unchanged in
+    // what they assert. A leg that cannot fail would not be worth writing, and
+    // these fail the moment drawDamagedHull or hullTint is actually deleted.
+    t.setHullDamage(true);
     rec(0).hull = 2;
     t.render();
     const sdHurtA = patch(A);
-    ok("a hull point lost changes the ship that lost it", sdHurtA !== sdFullA);
+    ok("switched on: a hull point lost changes the ship that lost it", sdHurtA !== sdFullA);
     ok("...and leaves every other ship exactly as it was", patch(B) === sdFullB);
     rec(0).hull = 1;
     t.render();
     const sdCritA = patch(A);
-    ok("a ship one point from dead reads differently again",
+    ok("switched on: a ship one point from dead reads differently again",
       sdCritA !== sdHurtA && sdCritA !== sdFullA);
+    // (3) THE MULTIPLAYER LEG, and it belongs to the switched-on half: every
+    //     seat's damage is read from ITS OWN record. This is the one that fails
+    //     if the ship draw ever goes back to asking localSeat() what to paint.
+    sdClear();
+    rec(1).hull = 1;
+    t.render();
+    ok("switched on: a REMOTE seat's damage draws on the remote ship", patch(B) !== sdFullB);
+    ok("...and never on the local one", patch(A) === sdFullA);
+    t.setHullDamage(false);
     // ...and the repair reverses it EXACTLY: the pristine draw is the original
     // three-step ship, and a hull that has been shot at and patched must land
     // back on it byte for byte
@@ -5702,14 +5971,8 @@ window.runWave1Checks = function () {
     ok("...and the reaction moves as the flash counts down", patch(A) !== sdHit18);
     sdClear();
 
-    // (3) THE MULTIPLAYER LEG. Every seat's damage is read from ITS OWN
-    //     record — this is the one that fails if the ship draw ever goes back
-    //     to asking localSeat() what to paint.
-    rec(1).hull = 1;
-    t.render();
-    ok("a REMOTE seat's damage draws on the remote ship", patch(B) !== sdFullB);
-    ok("...and never on the local one", patch(A) === sdFullA);
-    sdClear();
+    // (3) has moved up into the switched-on half above, where the damage it
+    //     asserts on is actually drawn.
 
     // (4) the wreck and the ten-second wait
     rec(0).hull = 0;
@@ -5760,6 +6023,10 @@ window.runWave1Checks = function () {
     //     with damage, a live hit, a wreck and a blast all on screen at once,
     //     two renders of one tick must paint identical bytes — and the whole
     //     thing must spend nothing from the seeded stream, which is hashed.
+    //     Run with the damaged-hull draw SWITCHED ON: hullPath and woundAt are
+    //     the two places in this file that could reach for a rand(), so the
+    //     leg is only worth its name while they are actually painting.
+    t.setHullDamage(true);
     rec(1).hull = 1;
     rec(1).hitFlash = 17;
     rec(0).hull = 0;
@@ -5775,6 +6042,7 @@ window.runWave1Checks = function () {
       sdD1 === sdD2);
     ok("the damage draw spends nothing from the seeded stream",
       enc.rngState() === sdRngWas, "before=" + sdRngWas + " after=" + enc.rngState());
+    t.setHullDamage(false); // back to the shipped setting, whatever else fails below
 
     sdClear();
     t.setFxInt(sdFxWas);

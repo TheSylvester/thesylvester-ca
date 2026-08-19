@@ -165,7 +165,7 @@ window.runNetChecks = async function () {
       y: 300 + seat * 10 + (tick - 100) * 2,
       vx: 1, vy: 2,
       fx: seat + tick - 100, fy: -seat - tick + 100,
-      hull: 10, hm: 10, inv: 0, fl: 0, xp: 0, score: 0, rsp: 0,
+      hull: 10, hm: 10, inv: 0, fl: 0, xp: 0, score: 0, bst: 0, rsp: 0,
       comet: comet ? 1 : 0, en: energy, em: 100,
       cool: 0, enIdle: 0,
       ow: enc.E.owned.map(() => 0),
@@ -450,6 +450,14 @@ window.runNetChecks = async function () {
     // predictor parks whatever the terms marker asked for, and the reset ranks
     // are adopted from the wire rather than predicted through.
     const pvpDeath = snapshot(440, 1);
+    pvpDeath.players[0].bst = 640; // the STANDING a death leaves behind. It rides
+                                   // every record from here to the settle loop
+                                   // below, because the presented clock trails the
+                                   // newest snapshot by the interpolation lead plus
+                                   // the buffer — the record the decode actually
+                                   // reads at the assertion is one of THESE, and a
+                                   // stream that carried it on the last snapshot
+                                   // alone proved nothing (caught exactly that way)
     pvpDeath.players[0].rsp = 180;
     pvpDeath.players[0].ow = enc.E.owned.map(() => 0); // ranks back to stock
     pvpDeath.players[0].score = 0; // ...and the score with them. The wire field is
@@ -473,6 +481,7 @@ window.runNetChecks = async function () {
     // the ORDER of the two markers inside one tick must not change the
     // outcome — a wire that queued them the other way tears down the same
     const pvpDeath2 = snapshot(450, 1);
+    pvpDeath2.players[0].bst = 640;
     pvpDeath2.players[0].rsp = 180;
     pvpDeath2.players[0].ow = enc.E.owned.map(() => 0);
     pvpDeath2.events = [{ k: "death", seat: 0, x: 100, y: 300 },
@@ -485,6 +494,8 @@ window.runNetChecks = async function () {
     // the seat comes back and the predictor re-arms from the RESET terms —
     // proof the teardown left no bought rank behind in the client's model
     const pvpBack = snapshot(460, 1);
+    pvpBack.players[0].bst = 640; // the respawn does not restore the run, and it
+                                  // does not take the standing either
     pvpBack.players[0].ow = enc.E.owned.map(() => 0);
     pvpBack.events = [{ k: "respawn", seat: 0, x: 500, y: 600 }];
     Net.inject(pvpBack);
@@ -507,17 +518,29 @@ window.runNetChecks = async function () {
     // so staging this through the wire would need ~60 extra ticks and would
     // walk the phase-12 legs below off the end of their own streams.)
     enc.E.seats[0].score = 640;
+    enc.E.seats[0].best = 11; // a WRONG standing, so the decode has to overwrite it
     enc.E.seats[0].owned[cellRow] = 2;
     for (let k = 0; k < 6; k++) {
       const settle = snapshot(470 + k, 1);
       settle.players[0].ow = enc.E.owned.map(() => 0);
       settle.players[0].score = 0;
+      settle.players[0].bst = 640; // the run died, the STANDING held — the shape a
+                                   // death actually puts on the wire
       Net.inject(settle);
       Net.clientTick();
     }
-    ok("the presented seat record carries the PvP reset through: ranks stock, score 0",
+    ok("the presented seat record carries the death reset through: ranks stock, score 0",
       enc.E.seats[0].owned.every((n) => n === 0) && enc.E.seats[0].score === 0,
       JSON.stringify({ owned: enc.E.seats[0].owned, score: enc.E.seats[0].score }));
+    // ...and the STANDING is decoded, not derived. Same staging discipline as
+    // the ranks above: the record is poked to a wrong value first, so the leg
+    // can only pass if `S.best = pr.bst` really ran. Without it the board on
+    // every OTHER client would rank a remote seat at whatever the local sim
+    // last left behind — the client never sees the credits that built a
+    // remote peak, so there is nothing downstream to recompute it from.
+    ok("...and the seat's STANDING comes off the wire: bst decodes into the record",
+      enc.E.seats[0].best === 640,
+      JSON.stringify({ best: enc.E.seats[0].best, score: enc.E.seats[0].score }));
 
     // ---- phase 12: the remote-presentation policy ---------------------------
     // Every leg below drives the DECODER at wire v5, so each enemy record

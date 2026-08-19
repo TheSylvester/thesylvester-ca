@@ -234,7 +234,7 @@ window.runAudioChecks = function () {
   enc.advance(1);
   enc.spawnEnemy(ship().x + 100, ship().y);
   const dart = enc.E.enemies[0];
-  dart.cd = 0; // rested, inside the 110 px engage — the next tick plants
+  dart.cd = 0; // rested, inside the 130 px engage — the next tick plants
   A.clearLog();
   enc.advance(1);
   ok("the lance telegraph sounds the tick the angle locks",

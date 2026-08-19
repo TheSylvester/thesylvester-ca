@@ -127,13 +127,16 @@ window.runGoldenTraces = async function (opts) {
   // G.rightHeld, and the sim's comet flag follows the RING, so only a
   // released button keeps the drained frames comet-off. Flags only, the RAF
   // loop never starts here.
-  // Score is HASHED now and deliberately survives restart — spending, a PvE
-  // death and a restart never take a seat's scoreboard away. Since phase 14
-  // exactly one thing does: being killed by another PLAYER resets it to 0
-  // (pvpDeathToll), which is why the pvp-* traces below pin a score falling.
-  // Either way every judged trace must PIN its starting scores, exactly as
-  // the preps stage hull, or the hash would inherit the whole session
-  // history that ran before the trace.
+  // Score is HASHED, and it no longer survives anything: restart() zeroes it
+  // with the rest of the run, and every DEATH zeroes it too (deathToll) —
+  // spending is the one thing that still leaves it standing. The old note
+  // here said the opposite ("deliberately survives restart… since phase 14
+  // exactly one thing takes it, being killed by another PLAYER"), which is
+  // the rule the user overrode. zeroScores() therefore pins nothing restart
+  // does not already do — it is KEPT because a prep that leans on restart's
+  // internals to state its starting condition is a prep that stops stating
+  // it the day restart changes again, and because the traces below stage
+  // scores directly.
   const zeroScores = () => { for (const S of enc.E.seats) S.score = 0; };
   const flightPrep = (mode) => {
     enc.reset();
@@ -1447,8 +1450,12 @@ window.runGoldenTraces = async function (opts) {
     // score to 0, its ranks to stock, its stored hullMax back to the base,
     // the termSeq step, termChange AND death in one drained tick, the orb
     // count up by exactly PVPORBS, the KILLER's score and ranks untouched,
-    // and the score ordering flipping as a result. Seat 0 never fires back:
+    // the live score ordering flipping as a result — and the BOARD's ordering
+    // NOT flipping, because it ranks the standing. Seat 0 never fires back:
     // this is the DIRECTIONAL case, and the mutual one is a wave1 leg.
+    // Nothing here is PvP-specific in the SIM any more (an ordinary PvE death
+    // collects the same bill); the trace keeps its name and its value as the
+    // pinned end-to-end path from a player's trigger to a victim's toll.
     duoPrep(1414);
     enc.E.groups = [];
     const du0 = t.players[0];
@@ -1509,10 +1516,19 @@ window.runGoldenTraces = async function (opts) {
     ok("pvp-duel: the KILLER's own score and ranks never moved — a kill pays no bounty",
        enc.E.seats[1].score === duKillerScore && enc.E.seats[1].owned.join(",") === duKillerOwned,
        JSON.stringify({ score: enc.E.seats[1].score, owned: enc.E.seats[1].owned }));
-    ok("pvp-duel: the score ordering flipped — the board's comparator now ranks the killer first",
+    // The live SCORE ordering flips — and the BOARD's does not, which is the
+    // whole reason `best` exists. This leg used to end "the board's
+    // comparator now ranks the killer first"; that was true while drawBoard
+    // sorted on score, and it is false now that it sorts on the standing.
+    // Both halves are asserted, because the interesting claim is the second.
+    ok("pvp-duel: the live score ordering flipped — the victim's run is gone and the killer's stands",
        duScoreBefore > duKillerScore && enc.E.seats[0].score < enc.E.seats[1].score,
        JSON.stringify({ before: [duScoreBefore, duKillerScore],
                         after: [enc.E.seats[0].score, enc.E.seats[1].score] }));
+    ok("pvp-duel: ...but the BOARD does not flip — the victim keeps its standing and its crown",
+       enc.E.seats[0].best >= duScoreBefore && enc.E.seats[0].best > enc.E.seats[1].best,
+       JSON.stringify({ best: [enc.E.seats[0].best, enc.E.seats[1].best],
+                        score: [enc.E.seats[0].score, enc.E.seats[1].score] }));
     judge("pvp-duel", q6);
 
     // Q7. pvp-ram — the COMET ram against a player, and its PACING. Seat 0
@@ -1774,14 +1790,22 @@ window.runGoldenTraces = async function (opts) {
     qr3.push(cp("end"));
     judge("vt-clamp", qr3);
 
-    // the score charter, live: credited where XP is credited, per seat, and
-    // never taken back — a restart drains the wallet and keeps the score
+    // The score charter, live — and INVERTED here, because the charter it
+    // pinned is the one the user overrode. It used to read "a seat's score
+    // survives restart while its wallet resets": the scoreboard counted a
+    // whole session and only a PvP kill could take it. Now every death takes
+    // it, and a restart takes it too — a score that outlived a whole new run
+    // would be the last piece of the old rule left standing. The standing
+    // (`best`) goes with it: it is match-scoped, so a restart opens an empty
+    // board rather than carrying the previous match's crown into the new one.
     enc.addXp(5, 1);
     const s1Score = enc.E.seats[1].score;
+    const s1Best = enc.E.seats[1].best;
     enc.restart();
-    ok("a seat's score survives restart while its wallet resets",
-       s1Score >= 5 && enc.E.seats[1].score === s1Score && enc.E.seats[1].xp === 0,
-       JSON.stringify({ s1Score, after: enc.E.seats[1] }));
+    ok("a restart takes the seat's score, its standing and its wallet — the whole run",
+       s1Score >= 5 && s1Best >= 5 &&
+       enc.E.seats[1].score === 0 && enc.E.seats[1].best === 0 && enc.E.seats[1].xp === 0,
+       JSON.stringify({ s1Score, s1Best, after: enc.E.seats[1] }));
 
     t.setPlayerCount(1); // the page goes back to the human single-seat
     enc.restart();
