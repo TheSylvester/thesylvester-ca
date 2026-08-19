@@ -697,6 +697,20 @@
     shopHover: -1,               // the shop-panel card under the pointer, or -1 — the ONE piece
                                  // of shop input state, read by the draw, the detail line and
                                  // the hover art alike, so they cannot disagree inside a frame
+    wipePending: false,          // the deferred WIPE edge: the death that leaves NO seat
+                                 // alive arms it, and encStep consumes it once, later in
+                                 // that same tick, to deal the run back to wave 1.
+                                 // The rule is "no seat is alive", NOT "everyone died
+                                 // inside 10 s". The two coincide only while every dead
+                                 // seat carries respawnT === ECFG.player.respawn — that
+                                 // is, only while lobbyWaiters is 0. Under the quarter
+                                 // rule a seat out of stock parks at hull 0 / respawnT 0
+                                 // forever, and from then on the next death of the last
+                                 // live seat is a wipe with no window involved at all.
+                                 // Nothing in production writes lobbyWaiters today, so
+                                 // that hole is LATENT: phase 16's drop-in joins are what
+                                 // open it, and they are what have to close it.
+                                 // HASHED, and only while true — see hashEncounter.
     lobbyWaiters: 0,             // the phase-09 hook: players waiting for a seat. While it is
                                  // >0 every death consumes one life from the dying seat's
                                  // stock (the quarter rule); at 0 the stock never depletes.
@@ -1131,6 +1145,20 @@
       if (!players.some((_, s) => seatAlive(s)) && !E.seats.some((R) => R.respawnT > 0)) {
         E.state = "dead"; // game step() freezes next tick; R restarts
       }
+      // ...and the WIPE edge, armed on the death that emptied the field: the
+      // waves go back to 1 when no seat is left standing. It is armed HERE, at
+      // the edge, because the decrement above is the only one in the tree — a
+      // seat can only cross into "down" through this branch. A level scan in
+      // encStep would read the same condition true for every tick of the dead
+      // window and re-fire ~599 times, each firing reseeding rand through
+      // startWave and pinning waveTick back at 0, so the wave it dealt could
+      // never spawn anything. The edge fires once and encStep consumes it once.
+      // The terminal "dead" state WINS: the check just above has already had
+      // its say, and a match ended by the quarter rule keeps its death screen
+      // rather than deal a fresh wave 1 behind it.
+      // Corollary for the suites: a direct `E.seats[n].hull = 0` never arms
+      // this. A check that wants the wipe kills through damagePlayer/hitPlayer.
+      if (E.state !== "dead" && !players.some((_, s) => seatAlive(s))) E.wipePending = true;
     }
     // one cue per REGISTERED hit — the invuln early return above keeps graced
     // hits silent for free. The branch reads the state the block above just
@@ -2346,6 +2374,9 @@
       S.respawnT = 0;                // no pending re-entry survives a restart
       S.stock = ECFG.player.stock;   // the quarter-rule lives refill with the run
     }
+    E.wipePending = false;         // no armed wipe survives a restart — the arm belongs to
+                                   // the run that died, and consuming it on the new run's
+                                   // first tick would re-deal the wave 1 restart just dealt
     E.shopHover = -1;              // no hover — and so no hover art — survives a restart
     syncCursor();
     E.shipPrev = null;
@@ -2397,7 +2428,12 @@
     // is load-bearing: it skips E.waveTick++ and the whole spawn/step/reap
     // tail, so no simulation advances on the dealing tick (startWave zeroes
     // waveTick) and the new wave's group loop still evaluates at tick 1.
-    if (E.state === "cleared" && E.waveTick - E.clearTick >= ECFG.clearHold) {
+    // ...and a pending WIPE outranks the elevator. An arm made outside encStep
+    // — __test.damagePlayer, the server's KILLSEAT lever (server/server.js) —
+    // can land on a clear-elevator tick; without the term this return would
+    // deal wave N+1 and the consume below would throw it away one tick later,
+    // two deals and two reseeds paid for one wipe.
+    if (E.state === "cleared" && !E.wipePending && E.waveTick - E.clearTick >= ECFG.clearHold) {
       startWave(E.wave + 1);
       E.state = "warning";
       recordPoseRow(); // the deal tick still SETTLES a pose set (nothing
@@ -2461,11 +2497,57 @@
       if (S.invuln > 0) S.invuln--;
       if (S.hitFlash > 0) S.hitFlash--;
     }
+    // THE WIPE, sampled. This phase is the one moment in the tick where "every
+    // death has landed" and "no seat has been revived yet" are both true, and
+    // that is what makes the window INCLUSIVE: two seats dying respawn-1 ticks
+    // apart still wipe, and the first of them is dealt back in by the loop just
+    // below on this very tick. The condition is RE-READ rather than trusted
+    // from the arm, so an arm whose seat was revived in between (respawnSeat is
+    // a direct hook as well as the timer's own path) is discarded here; the
+    // flag clears either way, which is what makes the edge one-shot.
+    const wipeNow = E.wipePending && E.state !== "dead" &&
+                    !players.some((_, s) => seatAlive(s));
+    E.wipePending = false;
     // downed seats wait out their timers, ascending; a timer reaching zero
     // deals the seat back in on THIS tick, before shipPrev records below
     for (let s = 0; s < E.seats.length; s++) {
       const S = E.seats[s];
       if (S.hull <= 0 && S.respawnT > 0 && --S.respawnT === 0) respawnSeat(s);
+    }
+    // ...and APPLIED, BELOW that loop. The split is the whole reason there are
+    // two halves: respawnSeat draws rand() through rollAnchor, so a startWave
+    // sitting above the loop would reseed the stream with a draw still ahead of
+    // it and break startWave's own charter — every wave reproducible on its
+    // own. Nothing below here draws (recordPoseRow only gathers), so the reseed
+    // is once again the tick's last act.
+    // This is a mid-run TRANSITION, the startWave charter's own case, and NOT a
+    // restart: score, xp, ranks, hullMax, the respawn timers, ship positions,
+    // orbs, live bullets, the event queue, nextEntityId, poseLog, shipPrev,
+    // simTick and matchEpoch all carry across deliberately. Reaching for
+    // restart() here would eat this tick's death cue, kill the ship-blast FX on
+    // every client, and zero nextEntityId with no matchEpoch bump — which
+    // permanently breaks the client's tracer hand-off in js/net.js.
+    if (wipeNow) {
+      E.enemies = [];  // a ceremony-free mass despawn: this bypasses reapDead, so no
+      E.missiles = []; // kill cue, no orbs, no FX — the field simply empties, and the
+      E.pvpCd = {};    // pair windows go with it, exactly as a restart drops them
+      startWave(1);
+      E.state = "warning";
+      // THE SCHEDULE HOLD (the user's call). Wave 1 would otherwise deal into a
+      // world with no living ship: rollAnchor's hold-off short-circuits,
+      // spawnEnemy's push-out skips dead seats and makeBody stamps every body
+      // tgtSeat -1, so the whole pack parks off-screen and converges on the
+      // first player to return — 3 darts solo, 6 in a duo, all aggroed on the
+      // returner the moment they re-enter. Slide the WHOLE schedule back by the
+      // shortest respawn timer instead: nothing spawns while the field is
+      // empty of players, and pack 1 then warns on its committed 36-tick offset
+      // and lands on its 126 measured from the return. One slide, once — the
+      // wipe has already been consumed, so nothing can slide it twice.
+      if (!players.some((_, s) => seatAlive(s))) {
+        let back = Infinity;
+        for (const S of E.seats) if (S.respawnT > 0 && S.respawnT < back) back = S.respawnT;
+        if (back < Infinity) for (const g of E.groups) { g.warnAt += back; g.spawnAt += back; }
+      }
     }
     // A wave clears only when the queue is empty AND the field is empty AND no
     // ordnance is still in the air — still an explicit simplification of Nova
@@ -3746,9 +3828,11 @@
   // It is NEUTRAL on the score by construction: nothing on the wire says why
   // a seat died, so the client cannot tell a PvE death (score stands) from a
   // PvP one (score reset), and a line that named either would be a lie half
-  // the time. The wallet clause is true in both worlds.
+  // the time. The wallet clause went the same way on the user's call: it was
+  // TRUE in both worlds, but it is not what a downed player needs to read, so
+  // the line is the countdown and nothing else now.
   const downCardLine = (S) =>
-    "respawn in " + Math.ceil(S.respawnT / 60) + " · the unspent wallet is forfeit";
+    "respawn in " + Math.ceil(S.respawnT / 60);
 
   // The scoreboard, reworked to the user's spec: per seat, TWO STACKED LINES
   // — the name line ("Player1".."PlayerN" by seat id; no name data exists
@@ -4394,6 +4478,16 @@
         for (const k of ks) { h.str(k); h.num(E.pvpCd[k]); }
       }
     }
+    // The armed wipe edge, folded ONLY while it is set — the pvpCd idiom just
+    // above, kept for the same reason: false contributes ZERO BYTES, so every
+    // committed fixture and the server's boot self-check keep their hashes.
+    // It belongs in the hash under the charter's own rule — it decides what the
+    // next tick does — and there ARE tick boundaries where it stands true:
+    // __test.damagePlayer does not step, and a check can kill both seats
+    // through a bare resolveBulletHits with no encStep after it. Left out, two
+    // different futures would hash the same. Folded UNCONDITIONALLY, the extra
+    // four bytes would move every hash and the boot self-check would exit(1).
+    if (E.wipePending) h.u32(1);
     // shipPrev folds as the array encStep writes; a suite's staged single
     // {x, y} folds as a one-entry walk so the hash never throws mid-suite
     const sp = Array.isArray(E.shipPrev) ? E.shipPrev : E.shipPrev ? [E.shipPrev] : null;

@@ -279,6 +279,12 @@ window.runWave1Checks = function () {
   ok("the last life under the quarter rule ends the match, frozen",
     enc.state().state === "dead" && enc.frozen() && enc.state().seats[0].respawnT === 0,
     "state=" + enc.state().state);
+  // ...and the terminal state OUTRANKS the wipe. That death emptied the field
+  // too, so the arm's condition was met — the "dead" check runs first and
+  // refuses it, which is what keeps the death screen reachable at all: an
+  // armed wipe here would deal a fresh wave 1 behind the frozen world.
+  ok("a match-ending death arms no wipe — the death screen outranks it",
+    enc.E.wipePending === false, "wipePending=" + enc.E.wipePending);
   const deadTick = enc.state().waveTick;
   const deadX = ship().x;
   enc.advance(30);
@@ -299,6 +305,98 @@ window.runWave1Checks = function () {
   ok("restart recenters the ship", ship().x === t.WW / 2 && ship().y === t.WH / 2);
   ok("restart preserves tuner settings", t.camState().EDGEMARGIN === 77);
   t.setEdgeMargin(priorEdge);
+
+  // ---- E2. a total wipe deals the run back to wave 1 ----
+  // The rule is "at some tick-phase, NO seat is alive" — not "everyone died
+  // within 10 s". Solo that is every death, which is the intent. It is a
+  // mid-run TRANSITION and not a restart, so the second leg pins what it must
+  // NOT take as hard as the first pins what it does. Every kill here goes
+  // through damagePlayer: hitPlayer's hull decrement is the only place the
+  // edge can arm, so a staged `hull = 0` would prove nothing.
+  enc.reset();
+  enc.advance(1);
+  enc.dealWave(4);
+  enc.advance(20);
+  enc.addXp(20);
+  enc.buy(0);                                          // a rank the wipe must not take back
+  enc.spawnEnemy(ship().x + 400, ship().y + 300);      // a live field to despawn...
+  enc.spawnMissile(ship().x + 420, ship().y + 300, 0); // ...and ordnance in the air
+  enc.E.orbs.push({ x: 5, y: 5, vx: 0, vy: 0 });       // an orb in the far corner, unbanked
+  t.G.bullets.push({ x: 0, y: 0, px: 0, py: 0, vx: 0, vy: 0, r: 2.2, dmg: 1,
+                     owner: "player", dead: false, ttl: 60 });
+  const wipeBefore = enc.state();
+  const wipeBullets = t.G.bullets.length;
+  enc.damagePlayer(99);            // the seat goes down — the arm, and nothing else yet
+  const wipeAtDeath = enc.state();
+  enc.advance(1);                  // ...and the consume lands on the very next tick
+  s = enc.state();
+  ok("a wipe deals the run back to wave 1 and empties the field",
+    wipeBefore.wave === 4 && wipeBefore.enemies === 1 && wipeBefore.missiles === 1 &&
+    s.wave === 1 && s.state === "warning" && s.waveTick === 0 &&
+    s.enemies === 0 && s.missiles === 0,
+    "from wave " + wipeBefore.wave + " (" + wipeBefore.enemies + "e/" + wipeBefore.missiles +
+    "m) to wave " + s.wave + " " + s.state + " tick=" + s.waveTick +
+    " (" + s.enemies + "e/" + s.missiles + "m)");
+  ok("the wipe is a TRANSITION, not a restart: score, ranks, hull cap, the timer, orbs and bullets all stand",
+    s.seats[0].score === wipeAtDeath.seats[0].score &&
+    s.owned.join(",") === wipeAtDeath.owned.join(",") && s.owned[0] === 1 &&
+    s.hullMax === wipeAtDeath.hullMax &&
+    s.seats[0].respawnT === ECFG.player.respawn - 1 && // the countdown loop ran on this tick too
+    s.orbs === wipeAtDeath.orbs && t.G.bullets.length === wipeBullets,
+    JSON.stringify({ score: s.seats[0].score, owned: s.owned, hullMax: s.hullMax,
+                     respawnT: s.seats[0].respawnT, orbs: s.orbs, bullets: t.G.bullets.length }));
+  // the SCHEDULE HOLD: wave 1 is dealt into a world with no living ship, so the
+  // whole schedule slides back by the shortest respawn timer. Without it the
+  // pack lands on a corpse and converges on whoever returns first.
+  ok("the wave-1 schedule is held until a player is back",
+    enc.E.groups[0].warnAt === W1[0].warnAt + (ECFG.player.respawn - 1) &&
+    enc.E.groups[0].spawnAt === W1[0].spawnAt + (ECFG.player.respawn - 1),
+    "warnAt=" + enc.E.groups[0].warnAt + " spawnAt=" + enc.E.groups[0].spawnAt);
+  // the edge is ONE-SHOT: a level scan would re-fire for every tick of the dead
+  // window, and each firing would pin waveTick back at 0 for ever
+  enc.advance(30);
+  s = enc.state();
+  ok("the wipe fires once — the wave clock runs on and nothing re-deals",
+    s.wave === 1 && s.waveTick === 30 && enc.E.wipePending === false,
+    "wave=" + s.wave + " waveTick=" + s.waveTick + " pending=" + enc.E.wipePending);
+  // ...and a pending wipe OUTRANKS the clear elevator. The arm below is made
+  // outside encStep — the __test/KILLSEAT shape — and lands on a tick the clear
+  // banner has already held out. Without the guard the elevator deals wave N+1
+  // and the consume throws it away one tick later: two deals, two reseeds, for
+  // one wipe.
+  enc.reset();
+  enc.advance(1);
+  enc.dealWave(4);
+  enc.advance(5);
+  enc.E.state = "cleared";
+  enc.E.clearTick = enc.E.waveTick - ECFG.clearHold; // the banner has held long enough
+  enc.damagePlayer(99);
+  enc.advance(1);
+  ok("a pending wipe outranks the clear elevator — wave 5 is never dealt",
+    enc.state().wave === 1 && enc.state().state === "warning",
+    "wave=" + enc.state().wave + " state=" + enc.state().state);
+  // the armed edge is SIMULATION state — it decides what the next tick does —
+  // so it folds into the hash. Armed, it moves the hash; unarmed, it leaves it
+  // exactly where it was. That the unarmed fold costs ZERO BYTES rather than a
+  // stable four is what the committed fixtures prove, not this leg.
+  enc.reset();
+  enc.advance(1);
+  const wipeHashClean = t.hashState();
+  enc.E.wipePending = true;
+  const wipeHashArmed = t.hashState();
+  enc.E.wipePending = false;
+  ok("the armed wipe folds into the state hash, and an unarmed one leaves it untouched",
+    wipeHashArmed !== wipeHashClean && t.hashState() === wipeHashClean,
+    JSON.stringify({ clean: wipeHashClean, armed: wipeHashArmed, back: t.hashState() }));
+  // ...and no arm survives a restart. The arm belongs to the run that died; the
+  // restart has already dealt its own wave 1, and a hashed flag left standing
+  // would make two identical fresh runs read as different.
+  enc.damagePlayer(99); // armed, with no tick to consume it
+  enc.restart();
+  ok("no armed wipe survives a restart",
+    enc.E.wipePending === false && t.hashState() !== wipeHashArmed,
+    "pending=" + enc.E.wipePending);
+  enc.reset();
 
   // ---- F. the panel shop: banner-only clear, the sweep, buy-in-flight ----
   // The modal shop is gone. Every clear holds the banner while the field's
@@ -432,6 +530,14 @@ window.runWave1Checks = function () {
   ok("the revived seat spends again",
     enc.buy(0) === true && enc.state().owned[0] === ownedDead + 1,
     "owned=" + enc.state().owned[0]);
+  // ...and the arm that death left behind is DISCARDED, not banked. The direct
+  // deal above revived the seat with no tick in between, so the consume's own
+  // re-scan finds a live seat and the wave stands. Trust the arm alone and this
+  // reads wave 1.
+  enc.dealWave(3);
+  enc.advance(1);
+  ok("a revival before the tick discards the armed wipe — the wave stands",
+    enc.state().wave === 3, "wave=" + enc.state().wave);
   // the keys the old shop retired stay retired — pointer-only, forever
   const keyBefore = JSON.stringify(enc.state().owned) + "|" + enc.state().xp;
   const keyWave = enc.state().wave;
@@ -4480,6 +4586,74 @@ window.runWave1Checks = function () {
   t.setPlayerCount(1);
   enc.restart();
 
+  // ---- AD. the wipe reads ALL seats, and its window is inclusive ----------
+  // Two seats. Each stage deals a wave and then EMPTIES the schedule, so 600
+  // quiet ticks can pass without a pack landing and killing a seat by accident:
+  // these legs are about the wave number and the seat clock, nothing else. An
+  // empty group list also keeps the state at "warning", so the clear elevator
+  // never deals a wave behind the check's back.
+  {
+    t.setPlayerCount(2);
+    const adDeal = (n) => { enc.dealWave(n); enc.E.groups = []; };
+    enc.restart();
+    enc.advance(1);
+    adDeal(4);
+    enc.damagePlayer(99, 0);
+    enc.advance(1);
+    ok("one seat of two going down is no wipe — the rule is ALL seats, not any",
+      enc.state().wave === 4 && enc.state().seats[1].hull > 0,
+      "wave=" + enc.state().wave + " hull1=" + enc.state().seats[1].hull);
+    enc.damagePlayer(99, 1);
+    enc.advance(1);
+    ok("...and the LAST seat going down is",
+      enc.state().wave === 1 && enc.state().state === "warning",
+      "wave=" + enc.state().wave + " state=" + enc.state().state);
+    // the FAR edge: seat 0's timer has already expired, so seat 1's death
+    // leaves a live seat and nothing arms. The window has an end.
+    enc.restart();
+    enc.advance(1);
+    adDeal(6);
+    enc.damagePlayer(99, 0);
+    enc.advance(ECFG.player.respawn); // the timer expires on the last of these ticks
+    enc.damagePlayer(99, 1);
+    enc.advance(1);
+    ok("a death with the other seat already back is no wipe",
+      enc.state().wave === 6 && enc.state().seats[0].hull > 0,
+      "wave=" + enc.state().wave + " hull0=" + enc.state().seats[0].hull);
+    // ...and ONE TICK inside it: seat 1 dies on the tick seat 0's timer would
+    // have expired. The wipe still fires, because the sample runs ABOVE the
+    // respawn loop — and seat 0 is dealt back in on that very same tick.
+    enc.restart();
+    enc.advance(1);
+    adDeal(6);
+    enc.damagePlayer(99, 0);
+    enc.advance(ECFG.player.respawn - 1);
+    enc.damagePlayer(99, 1);
+    enc.advance(1);
+    ok("the window is inclusive to its last tick — the sample runs before the revival",
+      enc.state().wave === 1 && enc.state().seats[0].hull > 0 &&
+      enc.state().seats[1].hull === 0,
+      "wave=" + enc.state().wave + " hull0=" + enc.state().seats[0].hull +
+      " hull1=" + enc.state().seats[1].hull);
+    // the ARM reads all seats too, and this is the leg that says so: one seat
+    // of two dying under the clear banner leaves a live seat, so nothing arms
+    // and the elevator deals the next wave on schedule. An arm on every death
+    // would hold the elevator for a tick it has no wipe to protect.
+    enc.restart();
+    enc.advance(1);
+    adDeal(4);
+    enc.advance(5);
+    enc.E.state = "cleared";
+    enc.E.clearTick = enc.E.waveTick - ECFG.clearHold;
+    enc.damagePlayer(99, 0);
+    enc.advance(1);
+    ok("a non-final death arms nothing and never holds the clear elevator",
+      enc.state().wave === 5 && enc.E.wipePending === false,
+      "wave=" + enc.state().wave + " pending=" + enc.E.wipePending);
+    t.setPlayerCount(1);
+    enc.restart();
+  }
+
   // ---- (PvP) players are dangerous to each other, and only a PLAYER kill
   // takes a run away. Two seats, staged directly: hitPlayer's third argument
   // is the damage SOURCE, and everything below turns on whether it is present.
@@ -5029,17 +5203,20 @@ window.runWave1Checks = function () {
     // THE DOWN CARD'S COPY. It is a claim about the RULES, so it is pinned
     // rather than left as an unguarded literal: nothing on the wire says why
     // a seat died, so a line naming the score would be a lie for one of the
-    // two death kinds. The old copy promised "score stands", which a PvP
-    // death makes false; the wallet clause is true in both worlds.
+    // two death kinds. The old copy promised "score stands", which a PvP death
+    // makes false. The wallet clause that replaced it was true in both worlds
+    // and still went, on the user's call — a downed player reads the countdown,
+    // not the accounting. The score guards below are what keep the line
+    // neutral, and they matter exactly as much against the short copy.
     {
       const card = enc.downCardLine({ respawnT: 180 });
-      ok("the SHIP DOWN card keeps its wallet promise and makes NO claim about the score",
-        card === "respawn in 3 · the unspent wallet is forfeit" &&
+      ok("the SHIP DOWN card is the countdown alone and makes NO claim about the score",
+        card === "respawn in 3" &&
         !/score/i.test(card) && !/stand/i.test(card),
         JSON.stringify(card));
       ok("...and the countdown is the seat's own respawn timer, in whole seconds",
-        enc.downCardLine({ respawnT: 1 }) === "respawn in 1 · the unspent wallet is forfeit" &&
-        enc.downCardLine({ respawnT: 121 }) === "respawn in 3 · the unspent wallet is forfeit",
+        enc.downCardLine({ respawnT: 1 }) === "respawn in 1" &&
+        enc.downCardLine({ respawnT: 121 }) === "respawn in 3",
         JSON.stringify([enc.downCardLine({ respawnT: 1 }), enc.downCardLine({ respawnT: 121 })]));
     }
 
