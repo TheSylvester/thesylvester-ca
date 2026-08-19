@@ -120,6 +120,16 @@
   let ws = null;
   let helloed = false;
   let pt = -1;             // the presented sim tick (fractional); -1 = nothing yet
+  let ptPrev = -1;         // pt as of the PREVIOUS client tick — the older end of
+                           // the pair the render's interpolation spans; present()
+                           // rolls it before it moves pt, exactly once per tick
+  let vtDrawn = -1;        // the phase-4 view-tick record: floor of the presented
+                           // instant the LAST loop render actually drew for the
+                           // REMOTE bodies (game.js's buildFrameView reports it
+                           // through noteDrawn). -1 = no loop render has shown a
+                           // snapshot yet — no view claim exists. Reset with pt
+                           // in resync(): a dead stream's view is not a claim
+                           // against a new match.
   let ntick = 0;           // the upstream frame counter
   let sent = 0;
   let snaps = 0;
@@ -716,6 +726,10 @@
     jitterValid = false;
     gapsSinceCalc = GAP_RECOMPUTE;
     pt = -1;
+    ptPrev = -1;
+    vtDrawn = -1; // the record described frames of the match that just died —
+                  // a fresh identity's first stamps must claim nothing until
+                  // the loop has rendered the new stream
     stale = 0;
     lastOwnedSum = -1;
     lastSnapAt = -1;
@@ -824,6 +838,23 @@
     rebase(s);
   }
 
+  // ---- the view-tick record (phase 4 — the vt honesty fix) -------------------
+  // Called by game.js's buildFrameView, ONLY from the loop's own render (the
+  // LOOP_RENDER gate there): the render reports the effective presented tick
+  // this frame draws for the REMOTE bodies, and the stamp below reads it back.
+  // Per the alpha scheme documented above buildFrameView, the interpolated
+  // bodies show the OLDER end of the presented pair led by alpha — in this
+  // file's clocks, lerp(ptPrev, pt, alpha) — while a live-branch frame
+  // (alpha 1, or the FRAME_BYPASS seam) draws the applied world at pt itself.
+  // Production-cheap by design: two scalar reads, one floor, one scalar write,
+  // no allocation — never Net.stats(), whose object build is why the probe's
+  // drawn.pt is armed-only.
+  function noteDrawn(alpha, live) {
+    if (pt < 0) { vtDrawn = -1; return; } // pre-first-snapshot: not a view claim
+    const base = ptPrev >= 0 ? ptPrev : pt; // one applied world so far — no pair to span
+    vtDrawn = Math.floor(live ? pt : base + (pt - base) * alpha);
+  }
+
   // ---- the per-tick client boundary (called from game.js's loop) ------------
   function clientTick() {
     refreshPointerWorld();
@@ -836,15 +867,19 @@
       // current cursor
       in0.scur.x = f.cx;
       in0.scur.y = f.cy;
-      // the phase-15 view-tick stamp: floor of the REMOTE presentation clock
-      // as it stands NOW — i.e. BEFORE this animation frame's present()
-      // advances it, so it names the tick the LAST RENDERED frame showed:
-      // what was on screen when the button went down. (The other candidate —
-      // after-present, the tick about to be shown — differs by one tick and
-      // is deliberately NOT the one implemented.) OMITTED entirely while
-      // pt < 0: pre-first-snapshot frames start the match, and floor(-1) is
-      // not a view claim.
-      if (pt >= 0) f.vt = Math.floor(pt);
+      // the view-tick stamp, phase-4 honest form: vtDrawn is the tick the
+      // LAST RENDERED frame actually showed for the remote bodies — recorded
+      // by render() itself (noteDrawn above; the alpha scheme on game.js's
+      // buildFrameView is the contract), so what was on screen when the
+      // button went down is what the frame claims. floor(pt) — the phase-15
+      // stamp — is WRONG since phase 3: the interpolated bodies draw at
+      // (tick − 1) + alpha of the presented clock, so pt overstates the view
+      // by up to one tick and the server's fire-time rebate would rewind
+      // short. OMITTED while vtDrawn < 0: pre-first-render frames start the
+      // match and claim nothing (the old pt < 0 guard's spirit, kept).
+      // A catch-up burst stamps every frame with the SAME record — all of
+      // those inputs were made while that one frame stood on screen.
+      if (vtDrawn >= 0) f.vt = vtDrawn;
       appendInputFrame(pendingInputs, f);
       // the INCREMENTAL prediction: the tick this frame describes, run now —
       // one kernel tick with cues live (fp/fh edges may fire the speculative
@@ -964,7 +999,15 @@
     // a remote ship answers a stick this client cannot see. Hermite yes,
     // projection NEVER: leading it on its last velocity fights every turn the
     // pilot makes, and input speculation about another player is forbidden.
-    remoteShip: { interp: "hermite", boundary: null, project: 0 },
+    // ...and its ONE boundary is the respawn marker. A respawn is a DEAL, not
+    // a move: the seat's pose jumps the width of the world in a single tick,
+    // and a Hermite over that bracket draws the ship flying across the map for
+    // the frames the presented clock spends inside it. Row 4 requires a
+    // discontinuity to cross in ONE presented frame, so the bracket that spans
+    // the marker holds at s0 and the next bracket opens on the dealt position.
+    // The rule is keyed to the MARKER, never to the distance: ordinary remote
+    // motion keeps its Hermite bracket, which is what row 5 measures.
+    remoteShip: { interp: "hermite", boundary: "respawn", project: 0 },
     orb:        { interp: "lerp",    boundary: null, project: 0 },
     bullet:     { interp: "lerp",    boundary: null, project: 0 },
   };
@@ -1111,6 +1154,10 @@
   }
 
   function present() {
+    ptPrev = pt; // roll the pair FIRST, every tick: after this call pt is the
+                 // newer end and ptPrev the older, whatever branch runs below —
+                 // an early return leaves them equal, which is the honest
+                 // degenerate bracket (the world did not move this tick)
     if (pt < 0 || !buf.length) return;
     slewDepth(); // the adaptive buffer walks toward its measured want, one
                  // DELAY_SLEW step per presented tick — never per arrival
@@ -1192,6 +1239,25 @@
                        // would read seat 0's hull, wallet and ranks.
     const p1by = s1 ? new Map(s1.players.map((p) => [p.seat, p])) : null;
 
+    // THE RESPAWN BOUNDARY, per seat. A death/respawn marker lands ON its own
+    // snapshot's tick (the marker-tick contract asserted server-side), and the
+    // dealt position is already in that same snapshot's player record — so the
+    // bracket that must not be interpolated is the one whose LATER endpoint
+    // carries the marker. Later is s1 in the ordinary case and s0 under the
+    // starvation guard, whose endpoints are deliberately reversed: there the
+    // lead runs PAST newest, so a marker on newest is still ahead of the pose
+    // being drawn and still must not be crossed. Derived per bracket and held
+    // nowhere, so nothing can outlive a restart (which clears the buffer with
+    // the match epoch anyway) or arm a stale seat: the marker carries its own
+    // seat and every seat named in the bracket holds independently.
+    const respawned = new Set();
+    if (POLICY.remoteShip.boundary === "respawn") {
+      const marker = starving ? s0 : s1;
+      for (const ev of (marker && marker.events) || []) {
+        if (ev.k === "respawn" && ev.seat !== undefined) respawned.add(ev.seat | 0);
+      }
+    }
+
     // --- every ship: keyed by seat, with position/flame interpolation and the
     // presented delta as velocity. The own velocity drives camera lookahead;
     // remote velocity drives its comet tail. Discrete state stays on s0.
@@ -1208,16 +1274,19 @@
         // other class — Hermite over the v4 wire velocities, no projection,
         // and the ship's own radius as the wall bound (unused with the
         // projection off, but the routine is the same one for everybody)
+        const held = respawned.has(pr.seat);
         const pose = presentBody(POLICY.remoteShip, pr, p1, k, h, shipCap(pr),
-          false, 0, SHIP_R);
+          held, 0, SHIP_R);
         P.ship.x = pose.x;
         P.ship.y = pose.y;
         // v4: the sim's OWN velocity rides the wire — adopted directly, no
         // more position-delta derivation. Discrete from s0 like every state bit.
         P.vel.x = pr.vx || 0;
         P.vel.y = pr.vy || 0;
-        P.flame.x = p1 ? lerp(pr.fx, p1.fx, k) : pr.fx;
-        P.flame.y = p1 ? lerp(pr.fy, p1.fy, k) : pr.fy;
+        // the flame holds with the pose: a respawn refills the seat, and
+        // lerping the plume across the deal draws a thrust the sim never had
+        P.flame.x = p1 && !held ? lerp(pr.fx, p1.fx, k) : pr.fx;
+        P.flame.y = p1 && !held ? lerp(pr.fy, p1.fy, k) : pr.fy;
       }
       P.comet = !!pr.comet;
       P.cool = pr.cool || 0;     // v4: the fire cooldown and the recharge delay
@@ -1414,6 +1483,13 @@
                                     // playing a backlog as one burst
       const at = Number.isFinite(e.x) ? { x: e.x, y: e.y } : null;
       if (window.Sfx) Sfx.cue(e.k, at, e.g);
+      // ...and the light layer, off the same presented queue: in net mode the
+      // local sim never steps, so game.js's drainCues() never runs. It sits
+      // ABOVE the null guard because the RESTART MARKER carries no position
+      // and a net client never restarts its own encounter — that marker is the
+      // only signal this layer gets that the authority cut the run. FX.cue
+      // refuses a positionless cue itself, so nothing else reaches ink.
+      if (e.k !== "termChange" && window.FX) FX.cue({ kind: e.k, at, gain: e.g, seat: e.seat });
       if (!at) continue;
       if (e.k === "hit" || e.k === "boom") spawnImpactFx(at.x, at.y, 0, -1, "enemy");
       else if (e.k === "clang" || e.k === "wall") spawnImpactFx(at.x, at.y, 0, -1, "wall");
@@ -1467,10 +1543,11 @@
     // grant. game.js's localSeat() reads it and folds null to 0.
     seat: () => mySeat,
     clientTick,
+    noteDrawn, // the loop render's view-tick report — see the record above
     flushInputs,
     buy: routeBuy,
     restart: routeRestart,
-    stats: () => ({ url, sent, snaps, stale, pt, ntick,
+    stats: () => ({ url, sent, snaps, stale, pt, ptPrev, vtDrawn, ntick,
       buffered: buf.length, newest: buf.length ? buf[buf.length - 1].tick : -1,
       snapshotGapMs: lastSnapGap, snapshotGapP95Ms: gapP95(),
       // the ADAPTIVE buffer's two instruments: the live (fractional) target

@@ -30,6 +30,7 @@ window.runNetChecks = async function () {
     bullets: t.G.bullets,
     fxBursts: t.fx.bursts.map((b) => ({ ...b })),
     fxCount: t.fx.count,
+    fxOn: window.FX ? window.FX.snapshot().on : null,
   };
 
   class FakeWebSocket {
@@ -86,6 +87,9 @@ window.runNetChecks = async function () {
     t.G.bullets = prior.bullets;
     t.fx.bursts.splice(0, t.fx.bursts.length, ...prior.fxBursts.map((b) => ({ ...b })));
     t.fx.count = prior.fxCount;
+    // the LIGHT LAYER carries state across frames too — flashes, particles, the
+    // phosphor and the pose rings — and the checks below drive it over the wire
+    if (window.FX) { window.FX.reset(); window.FX.setOn(prior.fxOn); }
   };
 
   try {
@@ -232,36 +236,53 @@ window.runNetChecks = async function () {
       Number.isFinite(starveStats.snapshotGapP95Ms) && starveStats.snapshotGapP95Ms >= 0,
       JSON.stringify(starveStats));
 
-    // ---- phase 15: the view-tick stamp --------------------------------------
+    // ---- phase 15 → phase 4: the view-tick stamp -----------------------------
     // the frames sent BEFORE any snapshot landed (the burst above) made no
-    // view claim: pt was -1, and floor(-1) is not a view tick
+    // view claim: nothing net had rendered, and no frame had shown a tick
     ok("pre-first-snapshot frames carry NO vt — a frame that starts the match claims nothing",
       sentFrames.length === 2 && sentFrames.every((f) => !("vt" in f)),
       JSON.stringify(sentFrames.map((f) => f.vt)));
-    // ...and once a snapshot has presented, every upstream frame is stamped
-    // with floor(pt) as it stood BEFORE this tick's present() — the tick the
-    // LAST RENDERED frame showed
+    // phase 4 REWRITE of the floor(pt) pin. The stamp reads the RECORD the
+    // loop's own render wrote (buildFrameView → Net.noteDrawn): the tick the
+    // last rendered frame actually SHOWED for the remote bodies. floor(pt)
+    // overstated that by up to one tick once phase 3 put the interpolated
+    // bodies at (tick − 1) + alpha.
     {
       Net.flushInputs(); // drain any earlier tick's pending records first
+      // a snapshot alone buys no claim: until a LOOP render has shown it,
+      // there is nothing the player can have been looking at
       const vtSent0 = socket.sent.length;
-      const ptBefore = Net.stats().pt;
       t.pushInputFrame(0, frames[0]);
       Net.clientTick();
       Net.flushInputs();
       const vtMsgs = socket.sent.slice(vtSent0).map((raw) => JSON.parse(raw)).filter((m) => m.f);
-      ok("a post-snapshot frame is stamped vt = floor(pt) sampled before present() advances it",
-        vtMsgs.length === 1 && vtMsgs[0].f.vt === Math.floor(ptBefore),
-        JSON.stringify({ vt: vtMsgs[0] && vtMsgs[0].f.vt, pt: ptBefore }));
-      // the coalescing fold keeps the NEWEST vt — the fh rule
+      ok("a snapshot alone buys no view claim — vt stamps only what a loop render showed",
+        vtMsgs.length === 1 && !("vt" in vtMsgs[0].f) && Net.stats().vtDrawn === -1,
+        JSON.stringify({ vt: vtMsgs[0] && vtMsgs[0].f.vt, vtDrawn: Net.stats().vtDrawn }));
+      // one loop render arms the record; the NEXT tick's frame stamps exactly
+      // it — the drawn tick, not the presentation clock's floor
+      t.seedLoopClock(0);
+      t.frameBody(17); // one banked tick, one LOOP render — the record arms
+      const rec = Net.stats().vtDrawn;
       const vtSent1 = socket.sent.length;
-      const ptA = Net.stats().pt;
+      t.pushInputFrame(0, frames[1]);
+      Net.clientTick();
+      Net.flushInputs();
+      const vtStamped = socket.sent.slice(vtSent1).map((raw) => JSON.parse(raw)).filter((m) => m.f);
+      ok("a post-render frame is stamped vt = the render-recorded drawn tick",
+        vtStamped.length === 1 && Number.isInteger(rec) && rec >= 0 &&
+        vtStamped[0].f.vt === rec,
+        JSON.stringify({ vt: vtStamped[0] && vtStamped[0].f.vt, rec }));
+      // the coalescing fold carries the claim: a multi-tick burst under ONE
+      // record folds to records that all claim that record — the same view
+      const vtSent2 = socket.sent.length;
+      const rec2 = Net.stats().vtDrawn;
       for (let i = 0; i < 3; i++) { t.pushInputFrame(0, frames[i]); Net.clientTick(); }
       Net.flushInputs();
-      const vtMerged = socket.sent.slice(vtSent1).map((raw) => JSON.parse(raw)).filter((m) => m.f);
-      ok("the coalesced tail record carries the NEWEST vt through the fold",
-        vtMerged.length === 2 && Number.isInteger(vtMerged[1].f.vt) &&
-        vtMerged[1].f.vt >= Math.floor(ptA),
-        JSON.stringify(vtMerged.map((m) => m.f.vt)));
+      const vtMerged = socket.sent.slice(vtSent2).map((raw) => JSON.parse(raw)).filter((m) => m.f);
+      ok("the coalesced tail record carries the vt claim through the fold",
+        vtMerged.length === 2 && vtMerged.every((m) => m.f.vt === rec2),
+        JSON.stringify({ vts: vtMerged.map((m) => m.f.vt), rec2 }));
     }
     // the live-sweep pin: the sim's per-mode rewind table must equal the
     // project flags phase 12's client actually runs — read from the client's
@@ -728,6 +749,96 @@ window.runNetChecks = async function () {
           missing: rows.filter((el) => !t.netLockedIds().has(el.id)).map((el) => el.id) }));
     }
 
+    // 3c. THE RESPAWN BOUNDARY. A respawn is a DEAL, not a move: the seat's
+    // pose jumps the width of the world in ONE tick, and the client used to
+    // Hermite straight across that bracket — drawing the ship flying over the
+    // map for every frame the presented clock spent inside it. Row 4 requires
+    // a discontinuity to cross in one presented frame; the policy table gave
+    // every enemy mode a boundary and the remote ship none, so remote seats
+    // alone broke that rule. The wait is 600 ticks now, so the re-entry is an
+    // awaited event and the smear was plain to see.
+    //
+    // The RAMP idiom is the enemy legs': every step repeats the same shape, so
+    // whichever bracket the fractional clock settles in carries the property.
+    {
+      const seats = [0, 1, 2].filter((s) => s !== Net.seat());
+      const R = seats[0]; // the seat that respawns
+      const O = seats[1]; // ...and a remote seat travelling straight beside it
+      const DEAD = { x: 400, y: 400 };
+      const SPAWN = { x: 2600, y: 2200 };
+      const dealt = (i) => (i % 2 ? SPAWN : DEAD);
+      const OX = 1200, OV = 1; // O reports the velocity its chord implies, so
+                               // its Hermite collapses onto the straight line
+                               // and the expectation below is EXACT. The speed
+                               // sits under the ship ceiling the overshoot
+                               // guard clamps on, so nothing else touches it.
+      const shipRamp = (tick, markBoth) => {
+        const recs = [];
+        const make = (i) => {
+          const s = snapshot(tick + i, 3);
+          const r = s.players.find((p) => p.seat === R);
+          r.x = dealt(i).x; r.y = dealt(i).y; r.vx = 0; r.vy = 0;
+          const o = s.players.find((p) => p.seat === O);
+          o.x = OX + OV * i; o.y = 1500; o.vx = OV; o.vy = 0;
+          s.events = [{ k: "respawn", x: r.x, y: r.y, seat: R }];
+          if (markBoth) s.events.push({ k: "respawn", x: o.x, y: o.y, seat: O });
+          recs.push(s);
+          return s;
+        };
+        for (let i = 0; i < RAMP; i++) Net.inject(make(i));
+        for (let i = 0; i < 6; i++) { Net.inject(make(RAMP + i)); Net.clientTick(); }
+        const pt = Net.stats().pt;
+        const i0 = Math.floor(pt) - tick;
+        const at = (j, seat) => (recs[j] ? recs[j].players.find((p) => p.seat === seat) : null);
+        return { pt, k: pt - Math.floor(pt), i0,
+          inRange: i0 >= 0 && i0 + 1 < recs.length, at };
+      };
+
+      {
+        const { k, i0, inRange, at } = shipRamp(860, false);
+        const aR = inRange ? at(i0, R) : null;
+        const bR = inRange ? at(i0 + 1, R) : null;
+        const ship = t.players[R] && t.players[R].ship;
+        // the pose the OLD client drew: strictly between the two points, and
+        // hundreds of pixels from either — the smear this leg exists to refuse
+        const smear = inRange ? aR.x + (bR.x - aR.x) * k : null;
+        const aO = inRange ? at(i0, O) : null;
+        const shipO = t.players[O] && t.players[O].ship;
+        ok("net: a respawn crosses in ONE presented frame — the bracket holds at s0",
+          inRange && !!ship && k > 1e-9 &&
+          ship.x === aR.x && ship.y === aR.y &&
+          Math.abs(smear - aR.x) > 1,
+          JSON.stringify({ k, seat: R, got: ship && { x: ship.x, y: ship.y },
+            want: aR && { x: aR.x, y: aR.y }, next: bR && { x: bR.x, y: bR.y },
+            smear }));
+        // ...and the hold is keyed to the MARKER, not to the class: the OTHER
+        // remote seat in the SAME bracket keeps its Hermite. This is row 5's
+        // guard — a blanket hold on remoteShip would freeze every ship on
+        // every marker tick and it would pass the leg above.
+        ok("net: an unmarked seat in the same bracket keeps its Hermite bracket",
+          inRange && !!shipO && k > 1e-9 &&
+          Math.abs(shipO.x - (aO.x + OV * k)) < 1e-9 &&
+          Math.abs(shipO.x - aO.x) > 1e-9,
+          JSON.stringify({ k, seat: O, got: shipO && shipO.x,
+            want: aO && aO.x + OV * k, held: aO && aO.x }));
+      }
+      {
+        // two seats respawning in the SAME bracket must BOTH hold — the marker
+        // carries its own seat and the bracket collects every one it names
+        const { k, i0, inRange, at } = shipRamp(900, true);
+        const aR = inRange ? at(i0, R) : null;
+        const aO = inRange ? at(i0, O) : null;
+        const shipR = t.players[R] && t.players[R].ship;
+        const shipO = t.players[O] && t.players[O].ship;
+        ok("net: two seats marked in one bracket BOTH hold, independently",
+          inRange && !!shipR && !!shipO && k > 1e-9 &&
+          shipR.x === aR.x && shipR.y === aR.y &&
+          shipO.x === aO.x && shipO.y === aO.y,
+          JSON.stringify({ k, R: { got: shipR && shipR.x, want: aR && aR.x },
+            O: { got: shipO && shipO.x, want: aO && aO.x } }));
+      }
+    }
+
     // 4. ADAPTIVE-DEPTH SLEW. Thirty accepted arrivals is the estimator's
     // sample floor; these land back to back, so the measured arrival gap is
     // ~0 ms and the wanted depth is the floor of 1. The target must WALK there
@@ -756,6 +867,108 @@ window.runNetChecks = async function () {
         bounded && monotone && prev < 3 && prev > 1,
         JSON.stringify({ first: walk[0], last: prev, bounded, monotone,
           steps: walk.length }));
+    }
+    // ---- the LIGHT LAYER, on the wire --------------------------------------
+    // This is the ONLY place in the repository that executes js/fx.js's net
+    // path. In net mode the local sim never steps, so game.js's drainCues()
+    // never runs and js/net.js's fireEvents() is the layer's sole intake — a
+    // consumer wired only into the local drain would be silently dead in
+    // multiplayer, and every other fx check runs single-player.
+    if (window.FX) {
+      const FX = window.FX;
+      FX.setOn(true);
+      FX.reset();
+      // walk the presented clock forward until the queued event's tick is
+      // reached; the exact number of ticks depends on the slew, so this drives
+      // it rather than assuming a count
+      const pump = (n) => { for (let i = 0; i < n; i++) Net.clientTick(); };
+      const base = Net.stats().pt;
+      const at = Math.max(1, Math.ceil(base)) + 1;
+      Net.inject({ ...snapshot(at, 2),
+        events: [{ k: "killheavy", x: 400, y: 400, g: 1, seat: 0 }] });
+      Net.inject(snapshot(at + 1, 2));
+      Net.inject(snapshot(at + 2, 2));
+      pump(12);
+      const lit = FX.snapshot();
+      ok("a wire event reaches the light layer — fireEvents is its only intake in net mode",
+        lit.cues >= 1 && lit.flashes >= 1 && lit.parts > 20,
+        JSON.stringify({ cues: lit.cues, flashes: lit.flashes, parts: lit.parts }));
+
+      // ...and the RESTART MARKER, which carries no position at all. A net
+      // client never calls its own Encounter.restart(), so resetImpactFx() —
+      // and the FX.reset() chained to it — never fires here: this marker is the
+      // only signal the layer gets that the authority cut the run. It is also
+      // why the cue hook sits ABOVE fireEvents's null-position guard.
+      const at2 = at + 3;
+      Net.inject({ ...snapshot(at2, 2), events: [{ k: "restart" }] });
+      Net.inject(snapshot(at2 + 1, 2));
+      Net.inject(snapshot(at2 + 2, 2));
+      pump(12);
+      const cut = FX.snapshot();
+      ok("the positionless restart marker clears the layer over the wire",
+        cut.cues === 0 && cut.flashes === 0 && cut.parts === 0,
+        JSON.stringify({ cues: cut.cues, flashes: cut.flashes, parts: cut.parts }));
+
+      // the speculative tracers are read LIVE and retained nowhere: the array
+      // can be spliced, bulk-cleared or retracted from the socket handler
+      // between two draws, so the draw must survive the list changing under it
+      ok("the tracer list is reachable on the net namespace, as the draw expects",
+        typeof Net.tracers === "function" && Array.isArray(Net.tracers()));
+      const tr = Net.tracers();
+      tr.push({ x: 401, y: 401, ox: 400, oy: 400, vx: 2, vy: 0, age: 0, ttl: 30 });
+      t.render();
+      const withTracer = FX.snapshot().cues;
+      tr.length = 0; // the silent bulk clear, exactly as the socket handler does it
+      t.render();
+      ok("a bulk-cleared tracer list costs one frame and never throws",
+        FX.snapshot().cues === withTracer);
+      FX.reset();
+    }
+
+    // 5. PHASE 4 — THE VT HONESTY LEG. Drive REAL loop frames (frameBody:
+    // clientTick → render) and hold the wire to the screen: every stamped vt
+    // must equal the record the PREVIOUS loop render wrote — the tick the
+    // player was actually looking at when the input was made. Two cadences:
+    // 16.9 ms (a tick nearly every frame, alpha sweeping the whole range,
+    // occasional two-tick catch-ups) and then 144 Hz (0-tick frames whose
+    // render moves the record with no tick between it and the next stamp).
+    {
+      // arm the record in the OLD match first, so the cut below has
+      // something real to clear
+      t.seedLoopClock(0);
+      t.frameBody(17);
+      const recOld = Net.stats().vtDrawn;
+      const ME2 = MATCH + 5;
+      deliver({ v: 6, tick: 0, you: { seat: 0, matchEpoch: ME2, seatEpoch: 40 } });
+      ok("a match cut clears the view-tick record — a fresh match's first stamps claim nothing",
+        recOld >= 0 && Net.stats().vtDrawn === -1 && Net.stats().pt === -1,
+        JSON.stringify({ recOld, vtDrawn: Net.stats().vtDrawn, pt: Net.stats().pt }));
+      const inj = (tk) => { const s = snapshot(tk, 2); s.me = ME2; Net.inject(s); };
+      let snapTick = 1000;
+      const diffs = new Map();
+      let stamped = 0, driven = 0, sentAt = socket.sent.length, now = 0;
+      t.seedLoopClock(0);
+      let expected = Net.stats().vtDrawn; // the record as of the last loop render
+      for (let k = 1; k <= 450; k++) {
+        inj(snapTick++);
+        t.pushInputFrame(0, frames[k % 5]);
+        now += k <= 225 ? 16.9 : 1000 / 144;
+        t.frameBody(now);
+        driven++;
+        const msgs = socket.sent.slice(sentAt).map((raw) => JSON.parse(raw)).filter((m) => m.f);
+        sentAt = socket.sent.length;
+        for (const m of msgs) {
+          if (!("vt" in m.f)) continue;
+          const d = m.f.vt - expected;
+          diffs.set(d, (diffs.get(d) || 0) + 1);
+          stamped++;
+        }
+        expected = Net.stats().vtDrawn; // this frame's render — what the NEXT stamp must claim
+      }
+      const dist = [...diffs.entries()].sort((a, b) => a[0] - b[0]);
+      ok("vt honesty: over 450 driven frames every stamped vt equals the render-recorded drawn tick",
+        driven >= 300 && stamped >= 300 && dist.length === 1 && dist[0][0] === 0,
+        "driven=" + driven + " stamped=" + stamped + " dist=" + JSON.stringify(dist));
     }
   } catch (error) {
     ok("net regression setup and execution completes", false, error && (error.stack || error.message || error));

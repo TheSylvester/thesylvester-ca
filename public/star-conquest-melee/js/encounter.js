@@ -2769,8 +2769,8 @@
   // 6 px/tick reads as a teleport, while a tapering 14-sample tail shows the
   // turn radius the player has to beat. Newest sample is brightest and widest,
   // and the live position closes the tail so there is never a gap at the tip.
-  function drawMissiles() {
-    for (const m of E.missiles) {
+  function drawMissiles(list) {
+    for (const m of list || E.missiles) {
       // a radar round wears the sensor cyan nose to tail, so which turn budget
       // is chasing you is readable from the trail alone
       const col = m.radar ? C.radar : C.clay;
@@ -2789,7 +2789,11 @@
       ctx.globalAlpha = 1;
       ctx.save();
       ctx.translate(m.x, m.y);
-      ctx.rotate(Math.atan2(m.vy, m.vx));
+      // the nose heading: a FRAME copy carries headR — the interpolated
+      // heading rolled in game.js's capture (the enemies' pf/cf idiom) — so
+      // the nose turns smoothly between ticks; a live object (no copy, or a
+      // headless caller) keeps the raw velocity heading, byte-identical
+      ctx.rotate(typeof m.headR === "number" ? m.headR : Math.atan2(m.vy, m.vx));
       ctx.fillStyle = col;
       ctx.beginPath();
       ctx.moveTo(5.5, 0);
@@ -2806,7 +2810,38 @@
     }
   }
 
-  function encDraw() {
+  // The light list: every body this file DREW, as position, radius and kind,
+  // for the render-only glow layer in js/fx.js. One accessor rather than a
+  // light-draw inside each of the eight body functions — that keeps the whole
+  // crossing to one site plus one export line, in a file the multiplayer
+  // stream edits constantly.
+  //
+  // It answers `idle` exactly as encDraw does, so light is never claimed for a
+  // body no pass painted, and it reads the SAME view encDraw draws from — a
+  // halo pinned to the tick pose of a body drawn at the interpolated pose
+  // detaches from it by up to a full tick of flight. A caller with no view (a
+  // headless page, a direct probe, the alpha-1 branch) falls back to the LIVE
+  // arrays, because restart() replaces E.enemies/E.missiles/E.orbs whole.
+  // LIGHTS is module-level and cleared per call — the same reused-buffer idiom
+  // the arrow tracker uses.
+  const LIGHTS = [];
+  function lights(view) {
+    LIGHTS.length = 0;
+    if (E.state === "idle") return LIGHTS;
+    for (const e of (view && view.enemies) || E.enemies) LIGHTS.push({ x: e.x, y: e.y, r: e.r, t: e.type });
+    for (const m of (view && view.missiles) || E.missiles) LIGHTS.push({ x: m.x, y: m.y, r: m.r, t: m.radar ? "radarMissile" : "missile" });
+    for (const o of (view && view.orbs) || E.orbs) LIGHTS.push({ x: o.x, y: o.y, r: ECFG.orb.r, t: "orb" });
+    return LIGHTS;
+  }
+
+  // view is game.js's presentation FRAME: pose-shadowed shallow copies of
+  // this file's own bodies, interpolated between their last two tick poses,
+  // plus view.ships (per-seat frame poses) and view.cam. The body loops and
+  // the invulnerability rings read it — every per-type draw function gets a
+  // shadow copy it cannot tell from the live object. The spawn portals stay
+  // on the live anchor by design: an anchor is a static point, and a static
+  // point has nothing to interpolate.
+  function encDraw(_c, view) {
     if (E.state === "idle") return;
     ctx.save();
     const wt = E.waveTick;
@@ -2827,7 +2862,7 @@
       ctx.globalAlpha = 1;
     }
     // XP orbs
-    for (const o of E.orbs) {
+    for (const o of (view && view.orbs) || E.orbs) {
       ctx.fillStyle = C.clay;
       ctx.beginPath();
       ctx.arc(o.x, o.y, ECFG.orb.r, 0, Math.PI * 2);
@@ -2840,20 +2875,23 @@
     // enemy bodies, telegraphs, beams and trails — one function per type off
     // the dispatch table; an unknown type falls back to the dart rather than
     // vanishing, because an invisible body is the worst possible bug here
-    for (const e of E.enemies) (DRAW_BODY[e.type] || drawDart)(e);
+    for (const e of (view && view.enemies) || E.enemies) (DRAW_BODY[e.type] || drawDart)(e);
     // ordnance paints OVER the bodies: a missile crossing a pack is the thing
     // the player has to answer first, so it must never be hidden behind one
-    drawMissiles();
-    // post-hit grace — a blinking ring around each graced ship
+    drawMissiles(view && view.missiles);
+    // post-hit grace — a blinking ring around each graced ship. The ring
+    // centres on the FRAME pose for its seat — the same pose drawShip gets —
+    // so it never orbits a hull the frame drew somewhere else.
     if (wt % 8 < 5) {
       for (let s = 0; s < players.length; s++) {
         if (!E.seats[s] || E.seats[s].invuln <= 0) continue;
         const pl = players[s];
+        const vp = (view && view.ships && view.ships[s]) || pl.ship;
         ctx.strokeStyle = C.clay;
         ctx.globalAlpha = 0.7;
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(pl.ship.x, pl.ship.y, SHIP_R + 4, 0, Math.PI * 2);
+        ctx.arc(vp.x, vp.y, SHIP_R + 4, 0, Math.PI * 2);
         ctx.stroke();
         ctx.globalAlpha = 1;
       }
@@ -2862,9 +2900,14 @@
   }
 
   // ---- drawing: HUD and overlays (screen space, no camera) ---------------
-  function drawIncomingMarker(a, wt) {
-    const sx = a.x - cam.x;
-    const sy = a.y - cam.y;
+  function drawIncomingMarker(a, wt, vc) {
+    // vc is the PRESENTED camera (view.cam) — the marker's world → screen
+    // conversion must use the same camera the world pass drew with, or the
+    // chevron steps against a smooth field. Callers without a view fall back
+    // to the tick camera.
+    const c = vc || cam;
+    const sx = a.x - c.x;
+    const sy = a.y - c.y;
     const cx = Math.max(14, Math.min(FW - 14, sx));
     const cy = Math.max(14, Math.min(FH - 14, sy));
     const off = Math.abs(sx - cx) > 0.5 || Math.abs(sy - cy) > 0.5;
@@ -2906,15 +2949,23 @@
   // survives the cap first, because the marker's job in that moment is the
   // shooter, not the nearest walker standing in front of it.
   const ARROWS = { inset: 14, cap: 16, buckets: 48, far: 1200 };
-  function computeEdgeArrows() {
-    const vx = cam.x + FW / 2; // the view centre — position and heading share
-    const vy = cam.y + FH / 2; // this ray, so an arrow points where it sits
+  function computeEdgeArrows(view) {
+    // view is game.js's presentation FRAME: the camera AND the bodies read
+    // the presented instant together, so an arrow's visibility cut and its
+    // bearing agree with the world pass. A caller without a view (the __test
+    // export, a headless page) keeps the live state — same geometry, tick
+    // camera.
+    const c = (view && view.cam) || cam;
+    const foes = (view && view.enemies) || E.enemies;
+    const miss = (view && view.missiles) || E.missiles;
+    const vx = c.x + FW / 2; // the view centre — position and heading share
+    const vy = c.y + FH / 2; // this ray, so an arrow points where it sits
     const slots = new Array(ARROWS.buckets).fill(null); // fixed slot order — deterministic
     // one bucket claim, shared by the bodies and the ordnance so both fold into
     // the SAME merge and the same nearest-wins rule
     const track = (o, type, hot) => {
-      const sx = o.x - cam.x;
-      const sy = o.y - cam.y;
+      const sx = o.x - c.x;
+      const sy = o.y - c.y;
       if (sx >= -o.r && sx <= FW + o.r && sy >= -o.r && sy <= FH + o.r) return; // any part visible — no arrow
       const dx = o.x - vx;
       const dy = o.y - vy;
@@ -2931,7 +2982,7 @@
         }
       }
     };
-    for (const e of E.enemies) {
+    for (const e of foes) {
       if (e.hp <= 0) continue;
       // a radar variant resolves through its base archetype, so its telegraph
       // buys the same hot flag, scale and danger accent as the parent's —
@@ -2943,7 +2994,7 @@
     // missiles earn arrows too: a 512×342 window on a 3072×3762 world makes an
     // unheralded off-screen seeker unfair, and a harrier that fires from
     // outside the view is exactly the case this layer was built for
-    for (const m of E.missiles) track(m, "missile");
+    for (const m of miss) track(m, "missile");
     const hw = FW / 2 - ARROWS.inset;
     const hh = FH / 2 - ARROWS.inset;
     return slots.filter(Boolean)
@@ -2969,8 +3020,8 @@
   // about to cost a hull reads over every quiet one on the rect.
   const ARROW_SCALE = { charger: 1.25, anvil: 1.25, husk: 1.15, missile: 0.7 };
   const ARROW_ACCENT = { charger: true, harrier: true, missile: true };
-  function drawEdgeArrows() {
-    for (const a of computeEdgeArrows()) {
+  function drawEdgeArrows(view) {
+    for (const a of computeEdgeArrows(view)) {
       const sc = (ARROW_SCALE[a.type] || 1) * (1 + Math.min(a.n - 1, 3) * 0.15);
       ctx.save();
       ctx.globalAlpha = a.hot ? 0.9
@@ -3802,14 +3853,14 @@
     return { shop: { w: L.w, h: L.h }, board: { w: BOARDUI.w, h: BOARDUI.h } };
   }
 
-  function encDrawHud() {
+  function encDrawHud(_c, view) {
     if (E.state === "idle") return;
     ctx.save();
     const wt = E.waveTick;
     // --- off-screen trackers, first so everything else paints over them ---
     // a chevron parked on the inset rect's left column would otherwise sit on
     // top of the hull pips, the XP bar and the readouts below
-    if (EDGEARROWS) drawEdgeArrows();
+    if (EDGEARROWS) drawEdgeArrows(view);
     // --- viewport HUD, top left ---
     // (No suppression gate any more. This column used to stand down whenever a
     // row's big opaque explainer bitmap was up, because that art's rect sliced
@@ -3868,7 +3919,7 @@
     // stock now, so the line it defended against cannot occur)
     // --- spawn warnings ---
     for (const g of E.groups) {
-      if (g.points && !g.spawned) drawIncomingMarker(g.points.anchor, wt);
+      if (g.points && !g.spawned) drawIncomingMarker(g.points.anchor, wt, view && view.cam);
     }
     if (E.state === "warning") {
       ctx.textAlign = "center";
@@ -4204,7 +4255,10 @@
     // render-path only, so the one tiny wrapper object per call is free and
     // the seeded stream is untouched. restart() REPLACES E.enemies/E.orbs, so
     // callers read through this accessor every frame instead of caching it.
-    mapState: () => ({ enemies: E.enemies, orbs: E.orbs }),
+    mapState: () => ({ enemies: E.enemies, orbs: E.orbs, missiles: E.missiles }),
+    lights, // ...and, on the same read-only footing, every body's position,
+            // radius and kind for the glow layer — see lights() above. It takes
+            // the same presentation view Encounter.draw does.
     // ...and, on the same read-only footing, one seat's PRESENTED survival
     // state: what game.js's ship draw needs to paint a hull that has been
     // shot at. Everything here already exists — hull/hullMax are the damage,

@@ -41,6 +41,23 @@ if (!fx || !fx.traces) {
   process.exit(1);
 }
 
+// ---- the sim-host manifest pin ---------------------------------------------
+// server/deploy.sh derives the files it ships from sim-host.mjs's SIM_FILES by
+// sed, and js/fx.js (render-only, window.FX-guarded) must NEVER appear there:
+// a fourth entry reaches the VPS as a boot-time script against the DOM stub.
+// Pinned here so a drift fails as a named test on the dev machine instead of
+// as a server that refuses to serve.
+{
+  const hostSrc = readFileSync(join(ROOT, "server", "sim-host.mjs"), "utf8");
+  const m = hostSrc.match(/^const SIM_FILES = \[(.*)\];$/m); // deploy.sh's exact sed pattern
+  ok("sim-host declares SIM_FILES on one line, where deploy.sh's sed reads it", !!m,
+    m ? "" : "pattern `const SIM_FILES = [...];` not found in server/sim-host.mjs");
+  const names = m ? m[1].split(",").map((s) => s.trim().replace(/^"(.*)"$/, "$1")) : [];
+  ok("SIM_FILES is exactly the three sim files — game, encounter, audio",
+    JSON.stringify(names) === JSON.stringify(["js/game.js", "js/encounter.js", "js/audio.js"]),
+    "got " + JSON.stringify(names));
+}
+
 // ---- the drive layer -------------------------------------------------------
 // MODE mirrors the sim's INPUTMODE; `pending` is the runner's copy of the
 // client boundary's accumulator: the deltas dispatched since the last tick,

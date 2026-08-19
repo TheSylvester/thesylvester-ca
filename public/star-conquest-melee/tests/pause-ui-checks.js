@@ -23,6 +23,13 @@ window.runPauseUiChecks = async function () {
   const priorTab = ui.UI.tab;
   const priorStarted = t.G.started;
   const canvasEl = document.getElementById("field");
+  // The LIGHT LAYER stands down for the run — the screen comparisons below
+  // (and net-checks' evaluated legs) must diff the ink, never an additive
+  // glow over it. The net suite's own fx legs raise the flag themselves and
+  // put it back through their prior ledger, so this stand-down holds across
+  // the eval too.
+  const priorLight = t.fxSnapshot(); // null when js/fx.js is not loaded
+  t.setFx(false);
   const esc = () => document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape" }));
   const clickField = () => canvasEl.dispatchEvent(new MouseEvent("mousedown", { button: 0, clientX: 40, clientY: 40, bubbles: true }));
 
@@ -504,6 +511,7 @@ window.runPauseUiChecks = async function () {
   }
 
   // ---- restore the page for a human ----
+  if (priorLight) t.setFx(priorLight.on);
   if (t.G.running) esc();
   ui.closeDev();
   ui.setDevTab(priorTab);

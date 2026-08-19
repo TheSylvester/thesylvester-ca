@@ -29,6 +29,13 @@ window.runWave1Checks = function () {
   const priorEdge = t.camState().EDGEMARGIN;
   const priorFx = t.fxState();
   const priorStarted = t.G.started;
+  // The LIGHT LAYER (js/fx.js) stands down for the whole run: every pixel
+  // section below is a screen-vs-screen diff, and an additive glow, a
+  // two-pass bloom and a full-field nebula under every comparison is exactly
+  // the scrim this repository has been burned by before. The fx suite owns
+  // proving the layer; these sections must keep proving the ink under it.
+  const priorLight = t.fxSnapshot(); // null when js/fx.js is not loaded
+  t.setFx(false);
 
   // The pixel sections (M's corner map, N's chevrons) read the ORDINARY
   // in-session screen. On a page that has never started, that screen is not
@@ -5599,7 +5606,368 @@ window.runWave1Checks = function () {
     enc.restart();
   }
 
+  // ---- Z. the frame loop, characterized ----
+  // frameBody(now) is loop()'s extracted rAF body, driven here with SYNTHETIC
+  // timestamps — no rAF, no wall clock. A Net stub stands in for the wire so
+  // tick counting never advances the real sim (the stub's clientTick only
+  // counts); the one real-path check at the end drives clientStep for real
+  // and resets the encounter after itself. These pin the loop's actual
+  // catch-up contract: as many as five ticks per frame, so the sim stays
+  // real-time at 30, 20 and 12.5 fps and genuinely slows only below ~12 fps
+  // or after a stall needing more than five ticks.
+  {
+    const TICKMS = t.TICKMS;
+    const priorNet = window.Net;
+    let ticked = 0;
+    let flushed = 0;
+    window.Net = { active: () => true,
+      clientTick: () => { ticked += 1; },
+      flushInputs: () => { flushed += 1; } };
+    const drive = (times) => times.map((now) => t.frameBody(now));
+    try {
+      // 144 Hz: dt ~6.94 ms — frames tick 0 or 1, averaging 60 per second
+      t.seedLoopClock(0);
+      const hz144 = [];
+      for (let k = 1; k <= 288; k++) hz144.push(k * 1000 / 144);
+      const n144 = drive(hz144);
+      const sum144 = n144.reduce((a, b) => a + b, 0);
+      ok("loop: a 144 Hz frame script ticks 0 or 1 per frame — never 2 — and both occur",
+        n144.every((n) => n === 0 || n === 1) && n144.includes(0) && n144.includes(1),
+        "counts=" + [...new Set(n144)].join(","));
+      ok("loop: ...banking 60 ticks per simulated second (2 s → 120 ± 1)",
+        Math.abs(sum144 - 120) <= 1 &&
+        Math.abs(sum144 * TICKMS - (2000 - t.loopAcc())) < 1e-6,
+        "sum=" + sum144 + " acc=" + t.loopAcc().toFixed(4));
+      // 60 Hz with bounded vsync drift: mostly 1 tick, occasionally 0 and 2
+      t.seedLoopClock(0);
+      const hz60 = [];
+      for (let k = 1; k <= 600; k++) hz60.push(k * (1000 / 60) + 1.6 * Math.sin(k * 0.9));
+      const n60 = drive(hz60);
+      const sum60 = n60.reduce((a, b) => a + b, 0);
+      ok("loop: a drifting 60 Hz script produces 0-, 1- and 2-tick frames and never 3",
+        n60.includes(0) && n60.includes(1) && n60.includes(2) && n60.every((n) => n <= 2),
+        "counts=" + [...new Set(n60)].sort().join(","));
+      ok("loop: ...and every millisecond in is a tick out or still in the accumulator",
+        Math.abs(sum60 * TICKMS - (hz60[hz60.length - 1] - t.loopAcc())) < 1e-6,
+        "sum=" + sum60 + " acc=" + t.loopAcc().toFixed(4));
+      // the 200 ms frame-delta cap
+      t.seedLoopClock(0);
+      t.frameBody(10000);
+      ok("loop: a 10 s stall is clamped to a 200 ms frame delta",
+        t.frameDt() === 200, "dt=" + t.frameDt());
+      // the five-tick catch-up cap, then the one-tick backlog clamp
+      t.seedLoopClock(0);
+      ticked = 0;
+      const nBig = t.frameBody(150); // nine ticks owed
+      ok("loop: a 150 ms frame catches up at most 5 ticks",
+        nBig === 5 && ticked === 5, "n=" + nBig + " ticked=" + ticked);
+      ok("loop: ...the leftover backlog clamps to one tick and the frame draws alpha 1",
+        Math.abs(t.loopAcc() - TICKMS) < 1e-9 && t.loopAlpha() === 1,
+        "acc=" + t.loopAcc().toFixed(4) + " alpha=" + t.loopAlpha());
+      // one wire flush per frame, and render on a frame that ran no tick
+      t.seedLoopClock(0);
+      flushed = 0;
+      const seq0 = t.drawnPose().seq;
+      const nz = t.frameBody(5); // dt 5 ms — no tick owed
+      t.frameBody(10);
+      t.frameBody(40);
+      ok("loop: exactly one flushInputs per frame, the 0-tick frame included",
+        flushed === 3, "flushed=" + flushed);
+      ok("loop: render still runs on a 0-tick frame",
+        nz === 0 && t.drawnPose().seq === seq0 + 3,
+        "n=" + nz + " renders=" + (t.drawnPose().seq - seq0));
+      // real time survives 30, 20 and 12.5 fps; below ~12 fps the sim slows
+      for (const fps of [30, 20, 12.5]) {
+        t.seedLoopClock(0);
+        const times = [];
+        const frames = Math.round(2 * fps);
+        for (let k = 1; k <= frames; k++) times.push(k * 1000 / fps);
+        const sum = drive(times).reduce((a, b) => a + b, 0);
+        ok("loop: real time survives " + fps + " fps (2 s banks >= 119 ticks)",
+          sum >= 119, "sum=" + sum);
+      }
+      {
+        t.seedLoopClock(0);
+        const times = [];
+        for (let k = 1; k <= 20; k++) times.push(k * 100); // 10 fps, 2 s
+        const ns = drive(times);
+        const sum = ns.reduce((a, b) => a + b, 0);
+        ok("loop: below ~12 fps the sim genuinely slows — 10 fps banks 5 per frame, 100 of 120",
+          sum === 100 && ns.every((n) => n === 5), "sum=" + sum);
+      }
+      // startLoop parity: a seeded clock's same-timestamp frame is dt 0
+      t.seedLoopClock(500);
+      const n0 = t.frameBody(500);
+      ok("loop: the seeded clock's first same-timestamp frame ticks 0 and draws alpha 0",
+        n0 === 0 && t.loopAlpha() === 0, "n=" + n0 + " alpha=" + t.loopAlpha());
+    } finally {
+      window.Net = priorNet;
+    }
+    // the REAL path: frameBody banks its ticks through clientStep
+    enc.reset();
+    const st0 = t.simTick();
+    t.seedLoopClock(0);
+    let real = 0;
+    for (let k = 1; k <= 12; k++) real += t.frameBody(k * (1000 / 60) + 0.5);
+    ok("loop: the real path advances simTick by exactly the ticks it reports",
+      real > 0 && t.simTick() - st0 === real,
+      "simTick+=" + (t.simTick() - st0) + " reported=" + real);
+    enc.reset();
+  }
+
+  // ---- Z2. the drawn-pose probe ----
+  // render() records what it actually painted: the pose drawShip received
+  // per seat, the designated enemy, the camera transform the world pass
+  // used, the sim clock and the render alpha. At HEAD drawn equals live by
+  // construction — these checks pin that the record IS written from the
+  // draw path, so a renderer drawing through locals moves the record too.
+  {
+    enc.reset();
+    enc.E.hull = 99;
+    enc.advance(W1[0].spawnAt + 1); // the first group has landed
+    const foe = enc.E.enemies[0];
+    t.designateDrawnEnemy(foe.id);
+    const P0 = t.players[0];
+    const seqA = t.drawnPose().seq;
+    t.render();
+    const d = t.drawnPose();
+    ok("probe: render records the pose drawShip received for seat 0",
+      d.seq === seqA + 1 && d.ships[0] &&
+      d.ships[0].x === P0.ship.x && d.ships[0].y === P0.ship.y,
+      "drawn=" + (d.ships[0] && d.ships[0].x + "," + d.ships[0].y) +
+      " live=" + P0.ship.x + "," + P0.ship.y);
+    ok("probe: ...the designated enemy as drawn",
+      d.enemy.seen && d.enemy.id === foe.id && d.enemy.x === foe.x && d.enemy.y === foe.y,
+      "drawn=" + d.enemy.id + "@" + d.enemy.x + "," + d.enemy.y +
+      " live=" + foe.id + "@" + foe.x + "," + foe.y);
+    ok("probe: ...the render camera the world pass used",
+      d.camR.x === t.cam.x && d.camR.y === t.cam.y,
+      "camR=" + d.camR.x + "," + d.camR.y + " cam=" + t.cam.x + "," + t.cam.y);
+    ok("probe: ...and the drawn tick, with a foreign caller's alpha 1",
+      d.tick === t.simTick() && d.alpha === 1,
+      "tick=" + d.tick + " simTick=" + t.simTick() + " alpha=" + d.alpha);
+    t.designateDrawnEnemy(-1);
+    enc.reset();
+  }
+
+  // ---- Z3. the presentation frame ----
+  // The judder metric: drive frameBody with a synthetic timestamp script over
+  // a coasting seat (constant velocity, no input, DAMP 1) and read the DRAWN
+  // screen pose per frame — drawn body minus drawn camR, both off the probe.
+  // Two numbers per run: duplicate frames (screen moved < 0.01 px while the
+  // body's true motion is constant) and the coefficient of variation of the
+  // per-frame screen displacement. The frame must hold 0 and < 0.05; the
+  // bypass seam must reproduce the BEFORE judder, or the metric proves nothing.
+  {
+    const priorCamMode = t.camState().CAMMODE;
+    t.setCamMode("lock");
+    t.setPlayerCount(2);
+    enc.restart();
+    const guard = () => { // the metric seats must survive whatever wave 1 lands
+      for (const s of [0, 1]) { enc.E.seats[s].hullMax = 99; enc.E.seats[s].hull = 99; enc.E.seats[s].invuln = 100000; }
+    };
+    const park = () => {
+      guard();
+      const P0 = t.players[0], P1 = t.players[1];
+      P0.ship.x = t.WW / 2; P0.ship.y = t.WH / 2; P0.vel.x = 0; P0.vel.y = 0;
+      P1.ship.x = t.WW / 2 - 300; P1.ship.y = t.WH / 2 - 200; P1.vel.x = 1.2; P1.vel.y = 0.9;
+    };
+    const metricRun = (times, seat) => {
+      const pts = [];
+      for (const now of times) {
+        t.frameBody(now);
+        const d = t.drawnPose();
+        const s = d.ships[seat];
+        pts.push({ x: s.x - d.camR.x, y: s.y - d.camR.y });
+      }
+      const disp = [];
+      for (let i = 1; i < pts.length; i++) disp.push(Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
+      const d2 = disp.slice(4); // the cache-seeding warm-up frames
+      const dups = d2.filter((v) => v < 0.01).length;
+      const mean = d2.reduce((a, b) => a + b, 0) / d2.length;
+      const sd = Math.sqrt(d2.reduce((a, b) => a + (b - mean) * (b - mean), 0) / d2.length);
+      return { dups, cov: mean > 0 ? sd / mean : 0, frames: d2.length };
+    };
+    const script = (frames, dt) => { const s = []; for (let k = 1; k <= frames; k++) s.push(k * dt); return s; };
+    const run = (frames, dt, seat) => { park(); t.seedLoopClock(0); return metricRun(script(frames, dt), seat); };
+    const fmt = (r) => "dups=" + r.dups + "/" + r.frames + " cov=" + r.cov.toFixed(4);
+
+    // 144 Hz, ~2 simulated seconds, the coasting remote seat
+    const hz144 = run(288, 1000 / 144, 1);
+    ok("frame: 144 Hz — a coasting remote seat draws with zero duplicate frames",
+      hz144.dups === 0, fmt(hz144));
+    ok("frame: 144 Hz — per-frame screen displacement CoV under 0.05",
+      hz144.cov < 0.05, fmt(hz144));
+    t.setFrameBypass(true);
+    const hz144b = run(288, 1000 / 144, 1);
+    t.setFrameBypass(false);
+    ok("frame: ...bypassed, the same script reports the BEFORE judder — the metric sees what it claims to",
+      hz144b.dups > hz144b.frames / 3 && hz144b.cov > 0.8, fmt(hz144b));
+    // 60 Hz with a 16.9 ms drift — the double-stepped-frame case
+    const hz60 = run(120, 16.9, 1);
+    ok("frame: 16.9 ms drift — zero duplicate frames and CoV under 0.05",
+      hz60.dups === 0 && hz60.cov < 0.05, fmt(hz60));
+    t.setFrameBypass(true);
+    const hz60b = run(120, 16.9, 1);
+    t.setFrameBypass(false);
+    ok("frame: ...bypassed, the drift script shows the double-step (CoV > 0.05)",
+      hz60b.cov > 0.05, fmt(hz60b));
+
+    // the sacred pair: in lock mode the own ship sits EXACTLY centred on
+    // every frame, 0-tick frames included — the extrapolated ship and the
+    // shadow camera share one lead by construction
+    park();
+    t.players[0].vel.x = 1.0;
+    t.players[0].vel.y = 0.6;
+    t.seedLoopClock(0);
+    let cerr = 0;
+    for (let k = 1; k <= 60; k++) {
+      t.frameBody(k * 1000 / 144);
+      if (k <= 4) continue;
+      const d = t.drawnPose();
+      cerr = Math.max(cerr,
+        Math.abs(d.ships[0].x - d.camR.x - t.FW / 2),
+        Math.abs(d.ships[0].y - d.camR.y - t.FH / 2));
+    }
+    ok("frame: lock mode holds the own ship EXACTLY centred on every frame",
+      cerr < 1e-6, "maxErr=" + cerr);
+
+    // the displacement guard: a teleport crosses in ONE presented frame —
+    // prev snaps to cur, so the very next drawn pose IS the dealt pose
+    park();
+    t.seedLoopClock(0);
+    for (let k = 1; k <= 6; k++) t.frameBody(k * 1000 / 144);
+    t.players[1].ship.x += 200;
+    let ticked = 0, k2 = 6;
+    while (ticked === 0 && k2 < 200) ticked = t.frameBody(++k2 * 1000 / 144);
+    const dTele = t.drawnPose();
+    ok("frame: a mid-flight teleport crosses in ONE presented frame",
+      dTele.ships[1].x === t.players[1].ship.x && dTele.ships[1].y === t.players[1].ship.y,
+      "drawn=" + dTele.ships[1].x + "," + dTele.ships[1].y +
+      " live=" + t.players[1].ship.x + "," + t.players[1].ship.y);
+
+    // lifecycle: a NEW id appears at its current pose — never lerped from
+    // zero or from a retired body's grave
+    enc.restart();
+    enc.E.hull = 99;
+    guard();
+    enc.advance(W1[0].spawnAt - 2); // two ticks short of the first landing
+    t.designateDrawnEnemy(-1);
+    t.seedLoopClock(0);
+    let seen = false, born = null, k3 = 0;
+    while (!seen && k3 < 40) {
+      t.frameBody(++k3 * 1000 / 144);
+      if (t.drawnPose().enemy.seen) { seen = true; born = { x: t.drawnPose().enemy.x, y: t.drawnPose().enemy.y }; }
+    }
+    const foe0 = enc.E.enemies[0];
+    ok("frame: a newly spawned body appears AT its current pose",
+      seen && foe0 && born.x === foe0.x && born.y === foe0.y,
+      seen ? "drawn=" + born.x + "," + born.y + " live=" + foe0.x + "," + foe0.y : "never seen");
+
+    // ...and an enemy mid-alpha draws BETWEEN its last two tick poses, at
+    // exactly the frame's alpha — the interpolation is the committed scheme
+    let pinned = false, detail = "no 1-tick mid-alpha frame found";
+    let before = { x: foe0.x, y: foe0.y };
+    for (let k = 1; k <= 40 && !pinned; k++) {
+      const n = t.frameBody((k3 + k) * 1000 / 144);
+      const after = { x: enc.E.enemies[0].x, y: enc.E.enemies[0].y };
+      const a = t.loopAlpha();
+      if (n === 1 && a > 0.1 && a < 0.9 && Math.hypot(after.x - before.x, after.y - before.y) > 0.05) {
+        const d = t.drawnPose().enemy;
+        const ex = before.x + (after.x - before.x) * a;
+        const ey = before.y + (after.y - before.y) * a;
+        pinned = Math.abs(d.x - ex) < 1e-9 && Math.abs(d.y - ey) < 1e-9;
+        detail = "drawn=" + d.x.toFixed(6) + "," + d.y.toFixed(6) +
+                 " lerp=" + ex.toFixed(6) + "," + ey.toFixed(6) + " a=" + a.toFixed(4);
+        break;
+      }
+      before = after;
+    }
+    ok("frame: an enemy draws BETWEEN its last two tick poses at the frame's alpha", pinned, detail);
+
+    // degeneracy: a foreign alpha-1 render bypasses every cache — live poses,
+    // the tick camera — however stale the caches are (phase 1's contract)
+    t.players[1].ship.x += 13; // under the guard, so a cached draw WOULD differ
+    t.render();
+    const dLive = t.drawnPose();
+    ok("frame: a foreign alpha-1 render degenerates to live poses and the tick camera",
+      dLive.alpha === 1 && dLive.ships[1].x === t.players[1].ship.x &&
+      dLive.camR.x === t.cam.x && dLive.camR.y === t.cam.y,
+      "ship=" + dLive.ships[1].x + "/" + t.players[1].ship.x +
+      " camR=" + dLive.camR.x + "/" + t.cam.x);
+
+    t.designateDrawnEnemy(-1);
+    t.setFrameBypass(false);
+    t.setCamMode(priorCamMode);
+    t.setPlayerCount(1);
+    enc.restart();
+  }
+
+  // ---- Z4. phase 4 — the remaining draw-time readers joined the frame ----
+  // Three consumers that used to read live cam / live poses at draw time now
+  // read FRAME: the star field's scroll, the minimap's viewport rect and the
+  // aim marker's anchor. Each is pinned at a MID-ALPHA frame where the shadow
+  // camera demonstrably differs from the tick camera, so a consumer regressed
+  // to the live read fails here — at alpha 1 the two are equal and the pin
+  // would be vacuous.
+  {
+    const priorCamMode = t.camState().CAMMODE;
+    const priorMM = t.minimapInfo().on;
+    const priorRunning = t.G.running;
+    t.setCamMode("lock");
+    t.setPlayerCount(2);
+    enc.restart();
+    for (const s of [0, 1]) { enc.E.seats[s].hullMax = 99; enc.E.seats[s].hull = 99; enc.E.seats[s].invuln = 100000; }
+    const P0 = t.players[0], P1 = t.players[1];
+    P0.ship.x = t.WW / 2; P0.ship.y = t.WH / 2; P0.vel.x = 1.0; P0.vel.y = 0.6;
+    P1.ship.x = t.WW / 2 - 300; P1.ship.y = t.WH / 2 - 200; P1.vel.x = 1.2; P1.vel.y = 0.9;
+    t.setMinimap(true);
+    t.setAimMode("mouse"); // cursor aim — the marker draws off the pointer
+    t.G.running = true;    // drawAim only draws in live play
+    const mc = t.fieldToClient(t.FW / 2 + 60, t.FH / 2 - 40);
+    t.setMouseClient(mc.x, mc.y);
+    t.seedLoopClock(0);
+    let hit = null;
+    for (let k = 1; k <= 300 && !hit; k++) {
+      t.frameBody(k * 1000 / 144);
+      const a = t.loopAlpha();
+      const d = t.drawnPose();
+      if (a > 0.2 && a < 0.8 && (d.camR.x !== t.cam.x || d.camR.y !== t.cam.y)) {
+        hit = { a,
+          star: { x: d.star.x, y: d.star.y },
+          mm: { x: d.mm.x, y: d.mm.y },
+          aim: { seen: d.aim.seen, x: d.aim.x, y: d.aim.y },
+          camR: { x: d.camR.x, y: d.camR.y },
+          cam: { x: t.cam.x, y: t.cam.y },
+          ship0: { x: d.ships[0].x, y: d.ships[0].y },
+          live0: { x: P0.ship.x, y: P0.ship.y } };
+      }
+    }
+    ok("phase4: a mid-alpha frame exists where the shadow camera leads the tick camera",
+      !!hit, hit ? "a=" + hit.a.toFixed(4) : "no such frame in 300");
+    ok("phase4: the star field scrolls by FRAME.cam at mid-alpha, not the tick camera",
+      hit && hit.star.x === hit.camR.x && hit.star.y === hit.camR.y &&
+      (hit.star.x !== hit.cam.x || hit.star.y !== hit.cam.y),
+      hit ? "star=" + hit.star.x + "," + hit.star.y + " camR=" + hit.camR.x + "," + hit.camR.y +
+            " cam=" + hit.cam.x + "," + hit.cam.y : "no frame");
+    ok("phase4: the minimap viewport rect frames FRAME.cam at mid-alpha",
+      hit && hit.mm.x === hit.camR.x && hit.mm.y === hit.camR.y,
+      hit ? "mm=" + hit.mm.x + "," + hit.mm.y + " camR=" + hit.camR.x + "," + hit.camR.y : "no frame");
+    ok("phase4: the aim marker anchors on the FRAME ship at mid-alpha, not the live pose",
+      hit && hit.aim.seen && hit.aim.x === hit.ship0.x && hit.aim.y === hit.ship0.y &&
+      (hit.aim.x !== hit.live0.x || hit.aim.y !== hit.live0.y),
+      hit ? "aim=" + (hit.aim.seen ? hit.aim.x + "," + hit.aim.y : "unseen") +
+            " frame=" + hit.ship0.x + "," + hit.ship0.y +
+            " live=" + hit.live0.x + "," + hit.live0.y : "no frame");
+    t.G.running = priorRunning;
+    t.setMinimap(priorMM);
+    t.setCamMode(priorCamMode);
+    t.setPlayerCount(1);
+    enc.restart();
+  }
+
   // ---- restore the page for a human ----
+  if (priorLight) t.setFx(priorLight.on);
   t.setFxInt(priorFx.FXINT);
   t.setFxDur(priorFx.FXDUR);
   t.setAimMode(priorAim);

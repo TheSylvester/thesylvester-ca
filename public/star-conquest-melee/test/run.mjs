@@ -1,8 +1,8 @@
 // Headless runner for every check suite — Node built-ins only, no packages.
 // Usage:
-//   node test/run.mjs                 # all six suites, exit 0 only if all pass
+//   node test/run.mjs                 # all seven suites, exit 0 only if all pass
 //   node test/run.mjs --only golden   # one suite (wave1 | pause-ui | audio |
-//                                     # enemy-tuning | radar | golden)
+//                                     # enemy-tuning | radar | golden | fx)
 //   node test/run.mjs --capture       # re-baseline tests/fixtures/golden.json
 //                                     # from the CURRENT build — do this only
 //                                     # when the current build is the accepted one
@@ -31,6 +31,9 @@ const SUITES = [
   { key: "enemy-tuning", file: "tests/enemy-tuning-checks.js", fn: "runEnemyTuningChecks" },
   { key: "radar", file: "tests/radar-checks.js", fn: "runRadarChecks" },
   { key: "golden", file: "tests/golden-traces.js", fn: "runGoldenTraces" },
+  // the light layer's own suite — js/fx.js is render-only, so its whole
+  // contract is a pixel contract and it is settled here
+  { key: "fx", file: "tests/fx-checks.js", fn: "runFxChecks" },
 ];
 
 const argv = process.argv.slice(2);

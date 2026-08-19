@@ -21,6 +21,11 @@ window.runRadarChecks = function () {
     const failed = R.filter((r) => !r.pass);
     return { total: R.length, passed: R.length - failed.length, failed, results: R };
   };
+  // The LIGHT LAYER stands down for the run — this suite's screen readbacks
+  // must measure the ink, never an additive glow, a bloom or a full-field
+  // nebula over it. Restored at every exit below.
+  const priorLight = t.fxSnapshot(); // null when js/fx.js is not loaded
+  t.setFx(false);
   const norm = (a) => Math.atan2(Math.sin(a), Math.cos(a));
   const shipR = typeof SHIP_R !== "undefined" ? SHIP_R : 7;
   const clampPt = (x, y) => ({
@@ -36,6 +41,7 @@ window.runRadarChecks = function () {
     radarCfg ? JSON.stringify(radarCfg) : "no ECFG.radar");
   if (!radarCfg) {
     ok("the remaining checks were skipped — no radar config to drive", false, "bail");
+    if (priorLight) t.setFx(priorLight.on);
     return done();
   }
   const foundRadar = { leadScale: radarCfg.leadScale, deadband: radarCfg.deadband, missileTurn: radarCfg.missileTurn };
@@ -318,6 +324,7 @@ window.runRadarChecks = function () {
     JSON.stringify(ECFG.radar) + " found=" + JSON.stringify(foundRadar));
 
   // ---- restore the page for a human ----
+  if (priorLight) t.setFx(priorLight.on);
   enc.restart();
   t.render();
 

@@ -732,6 +732,7 @@ function resize() {
   pausemenu.style.top = hintTop + "px"; // both paused screens hang from the same line —
   pausemenu.style.maxHeight = Math.max(60, window.innerHeight - hintTop - DEV_MARGIN) + "px";
   placeDevPanel(); // the panel earns the hint space back — see below
+  if (window.FX) FX.resize(); // the light layers follow the backing store
 }
 // The dev panel hangs from the pause menu's line too, but it also SUPPRESSES
 // the pause text, so that space is free while it is open. A short window used
@@ -1637,10 +1638,18 @@ function hash32(x, y, l, s) {
   return (h ^ (h >>> 16)) >>> 0;
 }
 function drawStars() {
+  // the star field scrolls with the PRESENTED camera (FRAME.cam) — the largest
+  // velocity field on screen must move with the same instant as the bodies it
+  // frames. render() builds the frame before this runs; in the live branch
+  // FRAME.cam carries cam's exact values, so this is byte-identical there.
+  const cbx = FRAME.cam.x;
+  const cby = FRAME.cam.y;
+  drawn.star.x = cbx; // the probe records the base ACTUALLY scrolled by — the
+  drawn.star.y = cby; // one local every layer reads, so a regressed read moves it
   for (let li = 0; li < LAYERS.length; li++) {
     const L = LAYERS[li];
-    const offX = cam.x * L.f; // this layer's scroll — its own view of its own space
-    const offY = cam.y * L.f;
+    const offX = cbx * L.f; // this layer's scroll — its own view of its own space
+    const offY = cby * L.f;
     ctx.setTransform(scale, 0, 0, scale, ox - offX * scale, oy - offY * scale);
     ctx.fillStyle = L.color;
     const x1 = Math.floor((offX + FW) / CELL); // only cells the view intersects
@@ -1666,6 +1675,11 @@ function drawStars() {
 // ---- drawing -------------------------------------------------------------
 function drawFlame() {
   const P = localPlayer(); // VIEW: only the local pilot's ship wears the flame
+  // the exhaust roots on the FRAME pose — the same pose drawShip receives for
+  // this seat, so the flame never trails a hull that has already been drawn
+  // elsewhere. The flame VECTOR stays live: it is thrust, not a pose, and
+  // carries no per-frame shadow.
+  const vp = FRAME.ships[P.id] || P.ship;
   const m = Math.hypot(P.flame.x, P.flame.y);
   const len = Math.min(m * FLAME_GAIN, FLAME_MAX);
   if (len < 1.5) return;
@@ -1674,8 +1688,8 @@ function drawFlame() {
   const px = -dy; // base half-width direction
   const py = dx;
   const jit = 0.8 + Math.random() * 0.4; // flicker
-  const bx = P.ship.x + dx * (SHIP_R - 2);
-  const by = P.ship.y + dy * (SHIP_R - 2);
+  const bx = vp.x + dx * (SHIP_R - 2);
+  const by = vp.y + dy * (SHIP_R - 2);
   const tongue = (w, l, color) => {
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -1694,7 +1708,11 @@ function drawFlame() {
 // (flat shapes under globalAlpha, no randomness stream touched). Render pass
 // only; the suites never raise the comet flag around their pixel probes, so
 // every committed ink comparison stays untouched.
-function drawCometGlow(P, pool) {
+function drawCometGlow(P, pool, vp = P.ship) {
+  // vp is the FRAME pose for this seat — the halo and the tail anchor where
+  // the hull draws this frame, not at the raw tick pose. The tail's direction
+  // and stretch keep reading P.vel: velocity is the cue's meaning, and it has
+  // no per-frame shadow.
   ctx.save();
   ctx.fillStyle = C.clay;
   ctx.globalAlpha = 0.3;
@@ -1712,7 +1730,7 @@ function drawCometGlow(P, pool) {
   const f = pool && pool.enMax > 0
     ? Math.max(0, Math.min(1, pool.en / pool.enMax))
     : energyFrac(P.id);
-  ctx.arc(P.ship.x, P.ship.y, SHIP_R + COMETAOE * f, 0, Math.PI * 2);
+  ctx.arc(vp.x, vp.y, SHIP_R + COMETAOE * f, 0, Math.PI * 2);
   ctx.fill();
   const s = Math.hypot(P.vel.x, P.vel.y);
   if (s > 0.3) { // the tail stretches with speed — the comet reads as a comet
@@ -1723,9 +1741,9 @@ function drawCometGlow(P, pool) {
     const len = SHIP_R + 8 + s * 6;
     ctx.globalAlpha = 0.35;
     ctx.beginPath();
-    ctx.moveTo(P.ship.x + px * 4, P.ship.y + py * 4);
-    ctx.lineTo(P.ship.x - px * 4, P.ship.y - py * 4);
-    ctx.lineTo(P.ship.x + dx * len, P.ship.y + dy * len);
+    ctx.moveTo(vp.x + px * 4, vp.y + py * 4);
+    ctx.lineTo(vp.x - px * 4, vp.y - py * 4);
+    ctx.lineTo(vp.x + dx * len, vp.y + dy * len);
     ctx.closePath();
     ctx.fill();
   }
@@ -1987,10 +2005,28 @@ function drawShip(x, y, seat) {
 
 function drawAim() {
   const P = localPlayer(); // VIEW: the marker orbits the ship this client flies
-  const d = markerDir(); // the LOCAL aim — see markerDir(); the sim keeps fireDir()
+  // THE DRAWN marker anchors on the FRAME ship and, when the pointer drives
+  // it, resolves its direction through FRAME.cam — pixels agree with pixels.
+  // The INPUT path is deliberately untouched: refreshPointerWorld/lcurWorld
+  // keep converting through canonical `cam`, and the sim keeps fireDir().
+  const vp = FRAME.ships[P.id] || P.ship;
+  let d = null;
+  if (cursorAim() && aiming()) {
+    // the pointer's world point through the RENDER camera — locked mode's
+    // drawn cursor is field space, mouse mode's native pointer converts
+    // through pointerField; off-field means no marker, as before
+    const w = lockedMode()
+      ? { x: FRAME.cam.x + in0.lcur.x, y: FRAME.cam.y + in0.lcur.y }
+      : G.mouse.seen ? pointerField(G.mouse.x, G.mouse.y) : null;
+    if (w && !lockedMode()) { w.x += FRAME.cam.x; w.y += FRAME.cam.y; }
+    if (w) d = cursorDir(w, { ship: vp });
+  } else d = markerDir(); // stored angles and velocity aim — no camera term
   if (!d) return; // at rest and never aimed — nothing to point
-  const px = P.ship.x + d.x * AIMDIST;
-  const py = P.ship.y + d.y * AIMDIST;
+  drawn.aim.seen = true; // the probe: the anchor pose the marker orbits
+  drawn.aim.x = vp.x;
+  drawn.aim.y = vp.y;
+  const px = vp.x + d.x * AIMDIST;
+  const py = vp.y + d.y * AIMDIST;
   if (cursorAim()) {
     // Nova Drift-style direction marker: a small triangle stays AIMDIST
     // from the ship and points along the pointer. Normally that is the native
@@ -2083,31 +2119,38 @@ function drawMinimap() {
   const ky = MM_H / WH;
   ctx.strokeStyle = C.bright; // the viewport — sized like the border (w-1,
   // h-1 around the +0.5 path) so the stroke stays inside the frame when the
-  // camera sits clamped at the world's far corner
-  ctx.strokeRect(mx + cam.x * kx + 0.5, my + cam.y * ky + 0.5, FW * kx - 1, FH * ky - 1);
+  // camera sits clamped at the world's far corner. It frames the PRESENTED
+  // camera — the rect must show the slice of world the frame actually drew.
+  const vcx = FRAME.cam.x;
+  const vcy = FRAME.cam.y;
+  drawn.mm.x = vcx; // the probe records the camera the rect ACTUALLY framed —
+  drawn.mm.y = vcy; // the same local the stroke reads, so a regressed read moves it
+  ctx.strokeRect(mx + vcx * kx + 0.5, my + vcy * ky + 0.5, FW * kx - 1, FH * ky - 1);
   // contact dots — between the viewport rectangle and the ship dot so the
   // ship always reads on top. Same clamp discipline as the ship dot: a dot
   // of side s stays inside [m, m + MM − s] per axis, so nothing pokes past
-  // the frame when an entity hugs a world wall. Draw-only reads of live sim
-  // state — no randomness, no mutation, the seeded stream is untouched.
+  // the frame when an entity hugs a world wall. Draw-only reads of the FRAME
+  // view (the live arrays themselves in the live branch) — no randomness,
+  // no mutation, the seeded stream is untouched.
   const dot = (wx, wy, s) => {
     ctx.fillRect(Math.max(mx, Math.min(mx + wx * kx - s / 2, mx + MM_W - s)),
                  Math.max(my, Math.min(my + wy * ky - s / 2, my + MM_H - s)), s, s);
   };
   ctx.fillStyle = C.dim; // player shots — the faintest, most transient trace
-  for (const b of G.bullets) { if (!b.dead && !b.spent) dot(b.x, b.y, 1); }
+  for (const b of FRAME.bullets || G.bullets) { if (!b.dead && !b.spent) dot(b.x, b.y, 1); }
   if (window.Encounter) {
-    const m = Encounter.mapState(); // live arrays — read, never mutate
+    const m = Encounter.mapState(); // the fallback for a frame without copies
     ctx.fillStyle = C.clay;   // XP orbs wear their field color; 1 px vs the 2 px ship
-    for (const o of m.orbs) dot(o.x, o.y, 1);
+    for (const o of FRAME.orbs || m.orbs) dot(o.x, o.y, 1);
     ctx.fillStyle = C.bright; // enemies — the loudest mark on the map
-    for (const e of m.enemies) dot(e.x, e.y, 2);
+    for (const e of FRAME.enemies || m.enemies) dot(e.x, e.y, 2);
   }
   ctx.fillStyle = C.clay; // the ship — clamped so the 2px dot can't poke
   // past the frame when the ship rests against a world wall
   const P = localPlayer(); // VIEW: the map marks where THIS client is
-  const sx = Math.max(mx, Math.min(mx + P.ship.x * kx - 1, mx + MM_W - 2));
-  const sy = Math.max(my, Math.min(my + P.ship.y * ky - 1, my + MM_H - 2));
+  const vp = FRAME.ships[P.id] || P.ship; // the frame's pose, like every dot above
+  const sx = Math.max(mx, Math.min(mx + vp.x * kx - 1, mx + MM_W - 2));
+  const sy = Math.max(my, Math.min(my + vp.y * ky - 1, my + MM_H - 2));
   ctx.fillRect(sx, sy, 2, 2);
 }
 
@@ -2209,7 +2252,7 @@ function spawnImpactFx(x, y, dx, dy, kind, r) {
     r: r === undefined ? 0 : r, // stamped like the lifetime: a slider moved mid-burst never resizes it
     seed: hash32(Math.round(x), Math.round(y), fx.count, FX_SEED) });
 }
-function resetImpactFx() { fx.bursts.length = 0; fx.count = 0; fxWall.length = 0; resetShipFx(); }
+function resetImpactFx() { fx.bursts.length = 0; fx.count = 0; fxWall.length = 0; resetShipFx(); if (window.FX) FX.reset(); }
 
 // ---- ship destruction fx ---------------------------------------------------
 // A seat's death, drawn. This is a SEPARATE ring from fx.bursts on purpose.
@@ -2423,6 +2466,280 @@ function pauseLines() {
        "hold right to aim — qweasdzxc snaps it · left fires · esc releases"];
 }
 
+// ---- the drawn-pose probe --------------------------------------------------
+// The latency rig used to read LIVE sim objects and call them "presented":
+// a render-only change would move the photons while every rig number held
+// still. This record is written by render() itself, from the exact values
+// the draw calls receive, so the rig — and the interpolation phase's judder
+// metrics — can see what was DRAWN rather than what the sim holds.
+// Instrument rules: every field is overwritten in place (the only
+// allocation is one struct per newly seen seat, once), nothing here writes
+// game state, draws from the seeded stream, or touches a hashed field.
+const drawn = {
+  seq: 0,   // renders since load — a 0-tick frame still advances it
+  tick: 0,  // the local sim clock at the draw (net mode: see pt below)
+  pt: -1,   // the presented net clock — filled only while armed, because the
+            // one reader (Net.stats) allocates and production must not pay it
+  alpha: 1, // RALPHA at the draw: acc/TICK inside the loop, 1 for foreign callers
+  camR: { x: 0, y: 0 },                       // the camera the world pass used
+  ships: [],                                  // per seat: the pose drawShip received
+  enemy: { id: -1, x: 0, y: 0, seen: false }, // the designated body, as drawn
+  star: { x: 0, y: 0 },                       // the base camera the star pass scrolled by
+  mm: { x: 0, y: 0 },                         // the camera the minimap viewport rect framed
+  aim: { seen: false, x: 0, y: 0 },           // the anchor pose the aim marker orbited
+};
+let PROBE_ENEMY = -1; // -1 = the field's first body; the rig designates by id
+let PROBE_PT = false; // armed by the rig only — see drawn.pt
+function recordDrawnFrame() {
+  drawn.seq += 1;
+  drawn.tick = simTick;
+  drawn.alpha = RALPHA;
+  drawn.pt = PROBE_PT && window.Net && Net.active() ? Net.stats().pt : -1;
+  drawn.camR.x = FRAME.cam.x; // the SHADOW camera — the transform the world pass really used
+  drawn.camR.y = FRAME.cam.y;
+  drawn.aim.seen = false; // drawAim sets it back when the marker draws this frame
+  // the designated enemy reads the FRAME view — the exact shadow objects the
+  // draw call below (Encounter.draw) receives, so this IS the pose that
+  // frame paints; the __test fallback covers a page without a built frame
+  const T = window.__test;
+  const foes = FRAME.enemies || (T && T.enc ? T.enc.E.enemies : null);
+  const e = !foes || !foes.length ? null
+    : PROBE_ENEMY < 0 ? foes[0]
+      : foes.find((b) => b.id === PROBE_ENEMY) || null;
+  drawn.enemy.seen = !!e;
+  if (e) { drawn.enemy.id = e.id; drawn.enemy.x = e.x; drawn.enemy.y = e.y; }
+}
+// ---- the presentation frame ------------------------------------------------
+// ONE coherent instant per animation frame: every world-pass body and the
+// camera agree about when "now" is. The world advances in whole 60 Hz ticks;
+// without this frame every body is quantised to 60 poses per second — a
+// 2,2,3 judder at 144 Hz, duplicated and double-stepped frames at 60 Hz.
+//
+// THE ALPHA SCHEME (phase 4's vt-honesty fix cites this):
+//   a = RALPHA = acc/TICK, always in [0, 1) inside this builder.
+//   INTERPOLATED bodies — every seat but the local one, enemies, missiles,
+//   orbs, bullets — draw lerp(prev, cur, a): the shown instant is
+//   (tick − 1) + a, a CONSTANT one-tick delay whose screen motion advances
+//   by exactly dt/TICK per frame, which is what kills the judder.
+//   The OWN seat and the camera EXTRAPOLATE: cur + vel·a, an estimate of
+//   NOW, clamped to the world walls — the own-ship response row has no
+//   latency budget left for the interpolation half-tick. The pair shares
+//   one treatment so lock mode stays exactly centred (screen = world − cam;
+//   only the difference is visible).
+//   a === 1 NEVER reaches the shadow branch: RALPHA is 1 only for foreign
+//   callers and the clamped catch-up frame, and both take the LIVE branch —
+//   the whole frame degenerates to today's draw exactly (every body at cur,
+//   zero lead, camR == cam), which is what the phase-1 pins require.
+//
+// The caches are EXTERNAL and identity-keyed (the trails-Map idiom): in net
+// mode apply() rebuilds the presented world every tick, so a prev-pose field
+// written onto a body is destroyed with it. They are draw-side data — rolled
+// once per sim tick from frameBody's tick loop, never from present(),
+// apply() or any sim function; nothing here writes sim or presented state,
+// draws from the seeded stream, or reads a wall clock.
+const alerpR = (a, b, k) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * k; // game.js's own copy — a linear lerp of an angle pops at ±π
+const PRES_SNAP = 28; // px — the displacement guard: clear of a hard dash,
+                      // under any real teleport, so a respawn or restart
+                      // crosses in ONE presented frame (row 4's bar)
+const PRES = {
+  serial: 0,     // capture ticks — the seen-stamp the sweep prunes against
+  maxId: 0,      // highest entity id ever captured — ids are monotonic and
+                 // never reused, so a NEW body wearing an id at or below
+                 // this is an ID-SPACE RESET (restart set nextEntityId back
+                 // to 1) and every id-keyed cache clears rather than let the
+                 // next entity 1 inherit the dead one's pose
+  camSeeded: false,
+  cam: { px: 0, py: 0, cx: 0, cy: 0 },
+  ships: new Map(),    // seat -> {px,py,cx,cy,seen}
+  enemies: new Map(),  // id -> {px,py,cx,cy,pf,cf,pl,cl,mode,seen}
+  missiles: new Map(), // id -> {px,py,cx,cy,seen}
+  orbs: new Map(),     // id -> {px,py,cx,cy,seen}
+  bullets: new Map(),  // id -> {px,py,cx,cy,seen}
+};
+// roll one id-keyed record: new id → appear AT the current pose (never lerp
+// from zero); a displacement above the guard snaps prev to cur (hard cut)
+function presRoll(map, id, x, y) {
+  let r = map.get(id);
+  if (!r) { r = { px: x, py: y, cx: x, cy: y, snap: true, seen: 0 }; map.set(id, r); }
+  else {
+    r.px = r.cx; r.py = r.cy;
+    r.cx = x; r.cy = y;
+    r.snap = Math.abs(x - r.px) > PRES_SNAP || Math.abs(y - r.py) > PRES_SNAP;
+    if (r.snap) { r.px = x; r.py = y; }
+  }
+  r.seen = PRES.serial;
+  if (id > PRES.maxId) PRES.maxId = id;
+  return r;
+}
+function presSweep(map) { // id missing from the current tick → gone at once: no one-frame corpse
+  for (const [id, r] of map) if (r.seen !== PRES.serial) map.delete(id);
+}
+const presIdReset = (list, map) => {
+  for (const o of list) { const id = o.id | 0; if (id > 0 && id <= PRES.maxId && !map.has(id)) return true; }
+  return false;
+};
+function capturePresent() {
+  PRES.serial += 1;
+  // the camera's own per-tick prev/cur — updateCamera (or a frozen hold) has
+  // already settled cam for this tick
+  const c = PRES.cam;
+  if (!PRES.camSeeded) { c.px = c.cx = cam.x; c.py = c.cy = cam.y; PRES.camSeeded = true; }
+  else {
+    c.px = c.cx; c.py = c.cy;
+    c.cx = cam.x; c.cy = cam.y;
+    // the camera's OWN guard sits far above the body guard: a flip-mode room
+    // slide legitimately moves ~50 px per tick and must stay smooth, while a
+    // respawn recentre (world-scale) still hard-cuts
+    if (Math.abs(c.cx - c.px) > 200 || Math.abs(c.cy - c.py) > 200) { c.px = c.cx; c.py = c.cy; }
+  }
+  // ships, keyed by seat — players[] mutates in place but the SEAT is the identity
+  for (const P of players) presRoll(PRES.ships, P.id, P.ship.x, P.ship.y);
+  presSweep(PRES.ships);
+  // the encounter's bodies and the bullets share ONE id space — the reset
+  // check runs across all four lists before any of them rolls
+  const m = window.Encounter && Encounter.mapState ? Encounter.mapState() : null;
+  const foes = m ? m.enemies : null;
+  const miss = m ? m.missiles : null;
+  const orbs = m ? m.orbs : null;
+  if ((foes && presIdReset(foes, PRES.enemies)) || (miss && presIdReset(miss, PRES.missiles)) ||
+      (orbs && presIdReset(orbs, PRES.orbs)) || presIdReset(G.bullets, PRES.bullets)) {
+    PRES.enemies.clear(); PRES.missiles.clear(); PRES.orbs.clear(); PRES.bullets.clear();
+    PRES.maxId = 0;
+  }
+  if (foes) for (const e of foes) {
+    const r = presRoll(PRES.enemies, e.id, e.x, e.y);
+    // facing rolls with the pose; a guard snap or a MODE boundary hard-cuts
+    // the angles too (bodyAngle switches source fields at the boundary — a
+    // lerp across it would spin the hull through poses the sim never held)
+    if (r.mode === undefined || r.snap || r.mode !== e.mode) { r.pf = r.cf = e.face; r.pl = r.cl = e.lockA; }
+    else { r.pf = r.cf; r.cf = e.face; r.pl = r.cl; r.cl = e.lockA; }
+    r.mode = e.mode;
+  }
+  if (foes) presSweep(PRES.enemies);
+  if (miss) {
+    for (const b of miss) {
+      const r = presRoll(PRES.missiles, b.id, b.x, b.y);
+      // the heading rolls with the pose — a velocity heading steps once per
+      // tick exactly like an enemy facing, so it gets the same pf/cf idiom
+      // (alerpR at draw); a new id or a guard snap hard-cuts the angle too
+      if (typeof b.vx === "number" && typeof b.vy === "number") {
+        const h = Math.atan2(b.vy, b.vx);
+        if (r.ph === undefined || r.snap) { r.ph = r.ch = h; }
+        else { r.ph = r.ch; r.ch = h; }
+      }
+    }
+    presSweep(PRES.missiles);
+  }
+  if (orbs) { for (const o of orbs) presRoll(PRES.orbs, o.id, o.x, o.y); presSweep(PRES.orbs); }
+  for (const b of G.bullets) if ((b.id | 0) > 0) presRoll(PRES.bullets, b.id, b.x, b.y);
+  presSweep(PRES.bullets);
+}
+// the frame VIEW the render pass reads at its choke points — one coherent
+// object per frame, never `rpx || x` sprayed through the draw path. In live
+// mode the arrays ARE the live arrays (zero copies, today's draw exactly).
+const FRAME = { live: true, cam: { x: 0, y: 0 }, ships: [],
+                enemies: null, missiles: null, orbs: null, bullets: null };
+let FRAME_BYPASS = false; // draw-side test seam: forces the live branch so the
+                          // judder metric can demonstrate the BEFORE state
+// the own seat leads only while a velocity worth leading with exists: the
+// net predictor's (predOn — hardSnap on own death/respawn and predReset on
+// an identity change both drop it, so a dead ship's momentum never draws),
+// or the local sim's while the seat is alive
+function ownLeadOn(s) {
+  const N = window.Net;
+  if (N && N.active && N.active()) return !!(N.predicted && N.predicted());
+  return seatAlive(s);
+}
+function buildFrameView() {
+  const m = window.Encounter && Encounter.mapState ? Encounter.mapState() : null;
+  const liveB = RALPHA === 1 || FRAME_BYPASS;
+  // the vt-honesty report (phase 4): the LOOP's render tells net.js the
+  // presented instant this frame draws for the remote bodies, per the alpha
+  // scheme above — interpolated bodies at lerp(prev, cur, a), a live-branch
+  // frame at the applied world itself. The next input stamp reads it back
+  // (js/net.js clientTick). Foreign renders don't pass LOOP_RENDER, so a
+  // probe's alpha-1 repaint can never claim the player saw the current tick.
+  // The noteDrawn presence check is the mapState idiom: a suite's minimal
+  // Net stub may not carry the hook, and a page without it has no stamp to feed.
+  if (LOOP_RENDER && window.Net && Net.active() && Net.noteDrawn) Net.noteDrawn(liveB ? 1 : RALPHA, liveB);
+  if (liveB) {
+    FRAME.live = true;
+    FRAME.cam.x = cam.x;
+    FRAME.cam.y = cam.y;
+    FRAME.ships.length = players.length;
+    for (const P of players) FRAME.ships[P.id] = P.ship;
+    FRAME.enemies = m ? m.enemies : null;
+    FRAME.missiles = m ? m.missiles : null;
+    FRAME.orbs = m ? m.orbs : null;
+    FRAME.bullets = G.bullets;
+    return;
+  }
+  const a = RALPHA; // in [0, 1) — see the alpha scheme above
+  FRAME.live = false;
+  const s = localSeat();
+  const lead = ownLeadOn(s);
+  FRAME.ships.length = players.length;
+  for (const P of players) {
+    const r = PRES.ships.get(P.id);
+    if (!r) { FRAME.ships[P.id] = { x: P.ship.x, y: P.ship.y }; continue; } // uncaptured — appear at current
+    FRAME.ships[P.id] = P.id === s && lead
+      ? { x: Math.max(SHIP_R, Math.min(WW - SHIP_R, r.cx + P.vel.x * a)),
+          y: Math.max(SHIP_R, Math.min(WH - SHIP_R, r.cy + P.vel.y * a)) }
+      : { x: r.px + (r.cx - r.px) * a, y: r.py + (r.cy - r.py) * a };
+  }
+  // the shadow camera. Lock mode derives it FROM the own view pose — the
+  // sacred pair moves as one, so the ship sits EXACTLY centred; every other
+  // mode extrapolates the camera's own per-tick delta with the same a. Both
+  // wear clampCam's world bound. `cam` itself is NEVER written here: the
+  // input path (lcurWorld, refreshPointerWorld) reads it every client tick.
+  const own = FRAME.ships[s];
+  let rx, ry;
+  if (CAMMODE === "lock" && own) { rx = own.x - FW / 2; ry = own.y - FH / 2; }
+  else if (PRES.camSeeded) {
+    const c = PRES.cam;
+    rx = c.cx + (c.cx - c.px) * a;
+    ry = c.cy + (c.cy - c.py) * a;
+  } else { rx = cam.x; ry = cam.y; }
+  FRAME.cam.x = Math.max(0, Math.min(WW - FW, rx));
+  FRAME.cam.y = Math.max(0, Math.min(WH - FH, ry));
+  // the world bodies: pose-shadowed SHALLOW COPIES of the live objects — the
+  // per-type draw functions read them unedited, and predX/predY/predT (the
+  // radar's held historical ping) pass through untouched
+  FRAME.enemies = m ? m.enemies.map((e) => {
+    const r = PRES.enemies.get(e.id);
+    if (!r) return e;
+    const c = Object.assign({}, e);
+    c.x = r.px + (r.cx - r.px) * a;
+    c.y = r.py + (r.cy - r.py) * a;
+    if (typeof c.face === "number" && typeof r.cf === "number") c.face = alerpR(r.pf, r.cf, a);
+    if (typeof c.lockA === "number" && typeof r.cl === "number") c.lockA = alerpR(r.pl, r.cl, a);
+    return c;
+  }) : null;
+  const shadowXY = (map) => (o) => {
+    const r = map.get(o.id);
+    if (!r) return o;
+    const c = Object.assign({}, o);
+    c.x = r.px + (r.cx - r.px) * a;
+    c.y = r.py + (r.cy - r.py) * a;
+    return c;
+  };
+  // missiles carry one extra view-only field: headR, the interpolated nose
+  // heading — the draw rotates by it instead of atan2(vy, vx), whose per-tick
+  // steps are exactly the judder this frame exists to kill. Never on a sim
+  // object, never hashed; a copy without a rolled heading simply omits it and
+  // the draw falls back to the live atan2.
+  FRAME.missiles = m ? m.missiles.map((o) => {
+    const r = PRES.missiles.get(o.id);
+    if (!r) return o;
+    const c = Object.assign({}, o);
+    c.x = r.px + (r.cx - r.px) * a;
+    c.y = r.py + (r.cy - r.py) * a;
+    if (typeof r.ch === "number") c.headR = alerpR(r.ph, r.ch, a);
+    return c;
+  }) : null;
+  FRAME.orbs = m ? m.orbs.map(shadowXY(PRES.orbs)) : null;
+  FRAME.bullets = G.bullets.map(shadowXY(PRES.bullets));
+}
 function render() {
   // browser zoom can change devicePixelRatio without a resize event
   if (Math.min(window.devicePixelRatio || 1, 2) !== dpr) resize();
@@ -2441,13 +2758,18 @@ function render() {
   // it, then everything else draws in world coordinates under the camera
   ctx.fillStyle = C.fieldBg;
   ctx.fillRect(0, 0, FW, FH);
-  drawStars(); // sets per-layer fractional-camera transforms
+  buildFrameView(); // ONE coherent instant — the world pass reads FRAME and nowhere else
+  if (window.FX) FX.nebula(FRAME.cam); // the ONE base-ink effect: behind the starfield,
+                                       // baked per SEED, deterministic per state, and
+                                       // parallaxed off the PRESENTED camera like the stars
+  drawStars(); // sets per-layer fractional-camera transforms off FRAME.cam (phase 4)
   ctx.setTransform(scale, 0, 0, scale, ox, oy);
-  ctx.translate(-cam.x, -cam.y);
+  ctx.translate(-FRAME.cam.x, -FRAME.cam.y);
+  recordDrawnFrame(); // the camera transform is set — record what this frame draws
   ctx.strokeStyle = C.wall;
   ctx.lineWidth = 1;
   ctx.strokeRect(0.5, 0.5, WW - 1, WH - 1); // the world border
-  if (window.Encounter) Encounter.draw(ctx); // enemies, orbs, telegraphs — under the camera, below the ship
+  if (window.Encounter) Encounter.draw(ctx, FRAME); // enemies, orbs, telegraphs — under the camera, below the ship
   drawFlame();
   // every seat's ship draws; only seat 0 (the local pilot) wears the flame,
   // and a comet-mode seat wears its glow under the hull
@@ -2455,13 +2777,18 @@ function render() {
     // the local net seat's halo is the SPECULATIVE comet cue: presentedPool
     // answers the predictor's arm rule there and the plain struct elsewhere
     const pool = presentedPool(P.id);
-    if (pool.comet) drawCometGlow(P, pool);
-    drawShip(P.ship.x, P.ship.y, P.id); // ...and its damage, its hit reaction, or
+    const vp = FRAME.ships[P.id] || P.ship; // the frame's pose for this seat
+    if (pool.comet) drawCometGlow(P, pool, vp); // the glow rides the frame pose too
+    let ds = drawn.ships[P.id]; // the probe: record the exact pose the call gets
+    if (!ds) ds = drawn.ships[P.id] = { seat: P.id, x: 0, y: 0 };
+    ds.x = vp.x;
+    ds.y = vp.y;
+    drawShip(vp.x, vp.y, P.id); // ...and its damage, its hit reaction, or
                                         // its wreck — see drawShip; the seat id is
                                         // what lets it read THIS seat's wire record
   }
-  ctx.fillStyle = C.bright; // CQ pixel bullets
-  for (const b of G.bullets) {
+  ctx.fillStyle = C.bright; // CQ pixel bullets — read off the frame view
+  for (const b of FRAME.bullets || G.bullets) {
     if (b.dead || b.spent) continue; // consumed or expired — the next sweep removes it
     ctx.beginPath();
     ctx.arc(b.x, b.y, b.r || 2.2, 0, Math.PI * 2);
@@ -2476,6 +2803,8 @@ function render() {
   drawShipBlasts(); // ...and the ship deaths OVER those: a hull going up is the
                     // loudest thing on the field for the second it lasts
   if (G.running) drawAim();
+  if (window.FX) FX.composite(FRAME); // the light layer, over the world pass and
+                                 // under the HUD — still inside the field clip
   // UI PASS — the letterbox transform without the camera
   ctx.setTransform(scale, 0, 0, scale, ox, oy);
   // one read of the card gate, so the map, the copy and the art cannot
@@ -2487,7 +2816,9 @@ function render() {
   // map and the top-left status stack, so it overlaps neither and the pair of
   // Encounter.hudSuppressed()/ringCardShown() reads went with the art.
   if (MINIMAP && !guide) drawMinimap(); // the first-run card still keeps one hierarchy — see guideShown()
-  if (window.Encounter) Encounter.drawHud(ctx); // encounter HUD and overlays — screen space, no camera
+  if (window.Encounter) Encounter.drawHud(ctx, FRAME); // encounter HUD and overlays — screen
+                                                       // space; the frame rides along for the
+                                                       // trackers that convert world → screen
   // the pause text, and the dev screen's claim on it: while the panel is open
   // it owns the screen, so none of this draws. render() reads UI.dev directly
   // rather than taking a flag, so every foreign caller — the resize listener,
@@ -2563,15 +2894,39 @@ function drainCues() {
     // the wire carried them. `at` is the dying ship's position, `seat` the
     // seat that paid, both already on the event and both already on the wire.
     if (ev.kind === "death" && ev.at) spawnShipBlast(ev.at.x, ev.at.y, ev.seat | 0);
+    // ...and the light layer, a SECOND consumer of the same bus. The termChange
+    // skip above is a conjunct on the Sfx statement, not a loop continue, so
+    // this carries its own.
+    if (ev.kind !== "termChange" && window.FX) FX.cue(ev);
   }
 }
 let raf = 0;
 let looping = false;
 let last = 0;
 let acc = 0;
-function loop(now) {
-  if (!looping) return;
+let frameDt = 0; // the last frame's clamped delta — read by the loop checks,
+                 // written once per frame, never by anything else
+// The render alpha: acc/TICK for the frame loop's OWN render call, and 1 for
+// every foreign caller — the parse-time paint, resize repaints, the pixel
+// probes and every suite's direct render(). frameBody() sets it around its
+// one render and puts 1 back, so a foreign call can only ever see 1 and
+// draws pure current state by construction. Nothing draws through it yet:
+// the interpolation phase is the consumer; today only the drawn-pose probe
+// records it.
+let RALPHA = 1;
+// True only around frameBody's OWN render call. It gates the view-tick report
+// (buildFrameView → Net.noteDrawn): a foreign render — a pixel probe, a resize
+// repaint, a suite's direct render() — draws at alpha 1 but is NOT what stands
+// on screen between loop frames, so it must not overwrite the record the next
+// input stamp reads.
+let LOOP_RENDER = false;
+// The rAF body, extracted from loop() so a suite can drive it with SYNTHETIC
+// timestamps — no rAF, no wall clock, same statements in the same order.
+// Returns the number of sim ticks this frame ran (the rAF wrapper ignores
+// it; the characterization checks count on it).
+function frameBody(now) {
   const dt = Math.min(now - last, 200);
+  frameDt = dt;
   last = now;
   acc += dt;
   let n = 0;
@@ -2588,6 +2943,7 @@ function loop(now) {
     if (!(window.Encounter && Encounter.frozen())) updateCamera();
     refreshPointerWorld(); // the camera moved — the stored aim point rides along
     drainCues(); // per step — see drainCues for why never per frame
+    capturePresent(); // roll the render caches at the tick boundary — the ONE capture point
     acc -= TICK;
     n++;
   }
@@ -2596,7 +2952,18 @@ function loop(now) {
   // two-frame admission window cannot discard the tail of that catch-up.
   if (window.Net && Net.active()) Net.flushInputs();
   if (acc > TICK) acc = TICK; // drop backlog beyond one tick — slow frames slow the sim, never fast-forward it
+  if (window.FX && n) FX.advance(n); // the light layer ages on the SIM clock —
+                                     // never inside render(), which has sixteen callers
+  RALPHA = acc / TICK; // after the clamp, so a caught-up frame draws alpha 1 — current truth
+  LOOP_RENDER = true;  // this render is the frame the player will be looking at
   render();
+  LOOP_RENDER = false;
+  RALPHA = 1; // foreign render callers always draw pure current state
+  return n;
+}
+function loop(now) {
+  if (!looping) return;
+  frameBody(now);
   if (looping) raf = requestAnimationFrame(loop);
 }
 function startLoop() {
@@ -3349,6 +3716,11 @@ window.__test = { G, players, cam, step: clientStep, setCamMode, render, WW, WH,
               // assert the draw and the record agree about a seat
   setFxInt: (v) => { FXINT = v; },
   setFxDur: (v) => { FXDUR = v; },
+  // the LIGHT LAYER's two seams: its suppression lever and its counters. Both
+  // no-op rather than throw when js/fx.js is absent — the headless sim host
+  // loads game.js without it.
+  setFx: (v) => { if (window.FX) FX.setOn(v); },
+  fxSnapshot: () => (window.FX ? FX.snapshot() : null),
   // the corner map: its toggle, its live geometry, and field→backing-store
   // pixels so the contact-dot checks can probe real pixels instead of
   // hardcoding 76/93/8 or guessing the letterbox transform
@@ -3649,6 +4021,26 @@ Object.assign(window.__test, {
     in0.ring.length = 0; // seat 0's ring only — absolute cursor samples from before this teleport are stale
     mirrorLockedCursor();
   },
+  // ---- the frame-loop seams -------------------------------------------------
+  // frameBody is loop()'s extracted body: a suite drives it with synthetic
+  // timestamps and no rAF; it returns the tick count the frame ran.
+  // seedLoopClock is startLoop's clock reset without the rAF arm, so a
+  // driven sequence starts exactly where a resumed loop would.
+  frameBody,
+  seedLoopClock: (t) => { last = t; acc = 0; },
+  loopAcc: () => acc,
+  loopAlpha: () => acc / TICK, // == the alpha the last frameBody's render drew with
+  frameDt: () => frameDt,      // the last frame's clamped delta
+  TICKMS: TICK,
+  // ---- the drawn-pose probe's reach -----------------------------------------
+  drawnPose: () => drawn, // the live record itself — overwritten per render, never copied
+  designateDrawnEnemy: (id) => { PROBE_ENEMY = Number.isInteger(id) ? id : -1; },
+  armDrawnPt: (v) => { PROBE_PT = !!v; },
+  // ---- the presentation frame's seam ---------------------------------------
+  // Forces the LIVE branch of buildFrameView — every body draws its raw tick
+  // pose, camR == cam — so the judder metric can demonstrate the BEFORE
+  // state. Draw-side only: no sim state, no capture, no hashed field.
+  setFrameBypass: (v) => { FRAME_BYPASS = !!v; },
 });
 
 resize();

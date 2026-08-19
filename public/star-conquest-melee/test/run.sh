@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Resolve a Node binary, run the six browser suites through test/run.mjs,
-# then the Node↔browser parity suite (test/node-golden.mjs) as the seventh
+# Resolve a Node binary, run the seven browser suites through test/run.mjs,
+# then the Node↔browser parity suite (test/node-golden.mjs) as the eighth
 # reported line. No `exec` here any more — exec'ing run.mjs made everything
 # after it dead code, and the parity line must run and fold its exit status
 # in. `--only <suite>` still narrows: a browser suite name skips the parity
@@ -18,7 +18,7 @@
 # release.test.mjs pins the row-10 input-loss release rule, the reissue
 # neutralization included; a gate that skipped any of them would let a wire
 # field, an identity rule, the dev route or a held order move unguarded.
-# Green, they print nothing (the seven reported lines stay the seven suites);
+# Green, they print nothing (the eight reported lines stay the eight suites);
 # red, they print node's own TAP output and fail the run.
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
