@@ -282,6 +282,15 @@ function makePlayer(id) {
                     // client's autofire keeps the Δ its last real frame earned —
                     // deliberate UNDER-compensation on staleness, the safe direction.
                     // Input transport, NEVER hashed, exactly like fireHeld above.
+      claimPress: 0, // THIS TICK's fire edge, latched for the encounter's claim
+                     // gate — 1 while a press has been drained (or dispatched, in
+                     // event mode) and not yet spent. Input transport, NEVER
+                     // hashed, exactly like fireHeld: it is a copy of the `fp`
+                     // that already rides every frame, kept where encStep can read
+                     // it AFTER the drain, so a downed seat's click needs no new
+                     // wire field and no new frame key. Cleared once per tick at
+                     // the END of step(), so a press survives exactly the tick it
+                     // was made on — see clearClaimPress.
       cometWant: false, // the raw held right-button bit off the ring — input transport
                         // state, NEVER hashed, exactly like fireHeld beside it. The GATE
                         // (energyStep) is what turns this into the seat's real, hashed
@@ -326,20 +335,40 @@ const cometActive = (s) => !!(players[s] && players[s].comet);
 //
 // A spectator (no seat granted) reads 0 — the cheapest honest view, and the
 // same one a seat whose grant has not arrived yet gets for the one frame it
-// waits. Out-of-range answers fold to 0 rather than throw.
+// waits. Out-of-range answers fold to 0 rather than throw. That fold is a
+// VIEW convenience and it destroys a fact; seatless() below is that fact, kept.
 //
 // SIMULATION reads are NOT view reads: the ring drain, the integrate loops
 // and every per-seat sweep take an explicit seat id and must never call this.
 // The headless host installs no window.Net, so the server always resolves 0
 // and the sim's behavior is byte-identical with this accessor in place.
-function localSeat() {
+//
+// THE one range test both halves run. Deriving it twice is exactly how the
+// fold and the guard drift apart, and that drift is the whole bug class: a
+// grant this client cannot fly — out of range, or absent entirely — is not a
+// seat, and the two must never disagree about which is which. null means NO
+// SEAT. Local play and the headless host answer 0 because there seat 0 really
+// is this player's own seat rather than a fallback: nobody else could hold it.
+function grantedSeat() {
   const N = window.Net;
-  if (N && N.active && N.active() && N.seat) {
-    const s = N.seat();
-    if (Number.isInteger(s) && s >= 0 && s < players.length) return s;
-  }
-  return 0;
+  if (!(N && N.active && N.active() && N.seat)) return 0;
+  const s = N.seat();
+  return Number.isInteger(s) && s >= 0 && s < players.length ? s : null;
 }
+function localSeat() {
+  const s = grantedSeat();
+  return s === null ? 0 : s;
+}
+// ...and the half of localSeat() the fold destroys: WHETHER it answered. Every
+// view read wants a record and gets one — the camera has to follow something,
+// and a spectator watching seat 0 is honest. A CARD is not a view: it is a
+// statement about the READER's own seat, and 0 is the same answer for the pilot
+// flying seat 0 and for a screen that holds nothing at all. Drawn off the
+// fallback, a card tells a stranger their ship is down and counts a respawn
+// they cannot take. So the question is published rather than re-derived at each
+// card — js/encounter.js asks it ONCE, ahead of the whole overlay chain, and
+// every card below inherits the guard whether or not its author knew it existed.
+const seatless = () => grantedSeat() === null;
 // the local seat's player record, never undefined: an unseated view falls
 // back to seat 0, which always exists (see setPlayerCount)
 const localPlayer = () => players[localSeat()] || players[0];
@@ -494,6 +523,11 @@ const Flight = {
       // which is what gives the frameless autofire path (game.js's held-fire
       // loop) the same rebate the fp edge gets.
       b.fireDelta = Number.isInteger(a.vt) ? Math.max(0, Math.min(21, simTick - a.vt)) : 0;
+      // the claim latch, ABOVE the liveness gate and OR'd rather than assigned:
+      // a corpse's press is the whole point (it is how a downed seat asks to be
+      // dealt back), and a catch-up tick that drains two frames must not let the
+      // second frame's silence erase the first frame's click
+      if (a.fp) b.claimPress = 1;
       // a dead seat's frames still land (the cursor and the held bit) but
       // apply no impulse and fire nothing — the corpse takes no input
       if (ctx.alive) {
@@ -1082,6 +1116,11 @@ function inputAim(dx, dy) {
 }
 function inputFire() {
   if (INPUTMODE === "tick") { in0.acc.fp++; return; }
+  // event mode banks nothing, so the claim latch is set at the press itself —
+  // the tick that follows reads it and step() clears it. Ahead of fire(),
+  // which refuses a dead seat outright: the press has to count precisely in
+  // the case the shot does not.
+  in0.claimPress = 1;
   fire();
 }
 function inputCursor(dx, dy) {
@@ -1100,6 +1139,9 @@ function dropTickInput() {
     b.acc.fp = 0;
     b.acc.n = 0;
     b.fireHeld = s === 0 ? G.leftHeld : false; // only seat 0 has a local mouse
+    b.claimPress = 0; // a press made under a frozen overlay is discarded with the
+                      // ring it would have ridden in on — the shop's own click is
+                      // not a request to be dealt back into the field
     b.ring.length = 0;
   }
 }
@@ -1595,6 +1637,17 @@ function step() {
   }
   if (window.Encounter) Encounter.step(); // enemies, damage, XP, wave state
   flushWallFx(); // only the bullets the sweep left alive really met the wall
+  clearClaimPress(); // ...and the tick's claim edges are spent. LAST, after the
+                     // one reader: the encounter's respawn loop is the only thing
+                     // that consumes them, and clearing here (rather than at the
+                     // drain) is what lets event mode — which banks no frame at
+                     // all — and a check's direct press land on the same rule.
+}
+// the per-tick reset for the claim latch. Every seat, ascending, like every
+// other per-seat walk in this file; a press is worth exactly one tick, so an
+// unread one is dropped rather than carried into a tick its player never made.
+function clearClaimPress() {
+  for (let s = 0; s < players.length; s++) players[s].input.claimPress = 0;
 }
 
 // ---- the client tick boundary ---------------------------------------------
@@ -1992,6 +2045,11 @@ let SHOW_HULL_DAMAGE = false;
 // order they matter: down, hit, damaged, pristine.
 function drawShip(x, y, seat) {
   const H = seatHealth(seat);
+  // an UNSEATED seat draws nothing at all — not even the wreck. A wreck on the
+  // field says "a pilot is coming back to this"; nobody is, so the hull leaves
+  // with the seat. First, ahead of the pristine-hull shortcut, because an
+  // unseated seat's hull is 0 and would otherwise fall through to drawWreck.
+  if (H && H.absent) return;
   // no record to read, or an untouched hull: the original draw, untouched
   if (!H || (H.hull >= H.hullMax && H.flash <= 0)) { drawHull(x, y); return; }
   if (H.hull <= 0) { drawWreck(x, y, H, seat); return; }
@@ -3954,6 +4012,12 @@ Object.assign(window.__test, {
   stepSim: step,
   pushInputFrame,
   thrustImpulse,
+  // the claim press, written where the drain writes it. Not a second path:
+  // this is the SAME latch a frame's `fp` sets, so a check that presses here
+  // and a client that clicks reach the encounter's respawn loop identically.
+  // It exists because advance() drives ticks with no frames at all, and the
+  // press has to be assertable on ONE named tick.
+  pressClaim: (seat) => { const P = players[seat]; if (P) P.input.claimPress = 1; },
   FRAMES_PER_TICK, // the ONE frames-per-tick lid — server admission, the sim
                    // drain and the predictor's replay all read this value
   presentedPool,   // the net-mode presentation accessor, for checks
@@ -3966,6 +4030,10 @@ Object.assign(window.__test, {
   setPlayerCount,
   fireDirFor,
   localSeat, // the view/sim boundary, for the suites: 0 unless Net grants otherwise
+  seatless,  // ...and the fact its fold destroys, published on the same ground:
+             // whether this client holds a seat AT ALL is a predicate question,
+             // and the card table drives the real predicate rather than
+             // inferring it from a seat id that reads 0 in both cases
   localPlayer,
   // the flight constants beside enc.tunables() — the fixture records both, so
   // a future failure is diagnosable as "the constants moved" vs "the code moved"

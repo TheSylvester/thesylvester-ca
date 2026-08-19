@@ -530,7 +530,10 @@
       // a downed seat draws a WRECK, not a ship — the same answer drawShip
       // reads, from the same accessor, so the hull and its light agree
       const H = health ? Encounter.seatHealth(P.id) : null;
-      if (H && H.rsp > 0) continue;
+      if (H && H.hull <= 0) continue; // the HULL, not the countdown: a seat sitting
+                                      // at rsp 0 with no hull — the claim window, and
+                                      // an unseated seat after it — used to slip past
+                                      // an rsp test and light a wreck
       const vp = (view && view.ships && view.ships[P.id]) || P.ship; // the FRAME pose drawShip gets
       const pool = presentedPool(P.id);
       if (pool.comet) {
@@ -587,7 +590,8 @@
     if (TRAILS > 0) {
       for (const P0 of players) {
         const H0 = health ? Encounter.seatHealth(P0.id) : null;
-        if (H0 && H0.rsp > 0) continue; // a wreck is not flying anywhere
+        if (H0 && H0.hull <= 0) continue; // a wreck is not flying anywhere — read off
+                                          // the hull for the same reason the glow above is
         const r = rings[P0.id];
         if (!r || r.n < 2) continue;
         const comet = presentedPool(P0.id).comet;

@@ -1,9 +1,26 @@
 "use strict";
 
-// Net mode — the client half of the wire. Enabled by a ?server=ws://… URL
-// parameter and inert without one: window.Net then answers active() false
-// and every hook falls through to the local path, so local single-player is
-// byte-identical with this file loaded.
+// Net mode — the client half of the wire. Enabled by a URL parameter in one
+// of TWO spellings, and inert without either: window.Net then answers active()
+// false and every hook falls through to the local path, so local single-player
+// is byte-identical with this file loaded. That last property is load-bearing
+// rather than merely tidy — every browser suite navigates to a bare index.html
+// and must keep stepping its own sim, so "no parameter" can never come to mean
+// anything but local.
+//
+//   ?server=ws://…  names the endpoint outright. It keeps its exact meaning
+//                   and WINS whenever both spellings appear, because the
+//                   latency rig encodes its impairment profile in that URL's
+//                   own path (ws://127.0.0.1:9100/d250j20) — a spelling that
+//                   carries data cannot be replaced by one that does not.
+//                   Present but VALUELESS still means local, as it always has.
+//   ?mp             the short link a human can type or share. It expands to a
+//                   default DERIVED from the page's own host (see mpDefault):
+//                   a loopback or file:// page gets the server's own
+//                   ws://127.0.0.1:8080 default, any other page gets
+//                   wss://game.<page host>. Derivation, not a constant, is the
+//                   point: no tracked client file names a production host, and
+//                   the published mirror keeps that property.
 //
 // In net mode the client simulates NOTHING. Each frame-loop tick it banks
 // the same input accumulator local play banks (bankTickInput — the identical
@@ -34,7 +51,11 @@
 // it presents everything and sends nothing. `you` also carries the match and
 // seat epochs; a snapshot from another match epoch is discarded, and the input
 // sequence numbers are namespaced by (seat, seatEpoch) so a restart's ring can
-// never mix two generations of frames.
+// never mix two generations of frames. `you` also carries the ROSTER — how
+// many seats are HELD, out of how many this room can seat, and whether the
+// match has started — so the corner banner can answer the one question two
+// people in two browsers actually have: has my friend arrived, and is the door
+// still open? Those fields are ADDITIVE; see onYou for what each one counts.
 //
 // Wire knowledge: this file's decode/apply is the client end of the names
 // server/snapshot.mjs encodes. Nothing outside apply()/onSnapshot() spells a
@@ -48,17 +69,58 @@
 // encounter's internals through the __test.enc surface exactly as
 // server/sim-host.mjs does.
 (() => {
-  const NET_V = 6; // MUST equal server/snapshot.mjs's SNAPSHOT_VERSION — a
+  const NET_V = 7; // MUST equal server/snapshot.mjs's SNAPSHOT_VERSION — a
                    // classic script cannot import it, so this mirrors it by
                    // hand; the s.v gate below silently drops every snapshot
                    // if the two ever drift, and a stale hello meets 4001
-  const url = new URLSearchParams(location.search).get("server");
+  // ---- the opt-in, and the ?mp expansion -----------------------------------
+  // The default ?mp stands for is DERIVED from the page it is running on, not
+  // written down. A hardcoded host would put a production name into a tracked
+  // client file and therefore into the published mirror; today `git grep` finds
+  // that name only in server/server.js, which the mirror excludes, and this
+  // keeps it that way. The arithmetic is deliberately dull:
+  //
+  //   loopback or file://  → ws://127.0.0.1:8080, which is exactly
+  //                          server/server.js's own default HOST and PORT, so a
+  //                          dev who runs `node server/server.js` and opens the
+  //                          page from the same machine needs no URL at all
+  //   anything else        → "wss://game." + the page host, a leading "www."
+  //                          stripped, because www.example.com and example.com
+  //                          are one site and must resolve to one endpoint
+  //
+  // On the published apex that yields wss://game.<apex> — the same endpoint the
+  // long ?server= link spells out by hand. Takes a location-shaped object so the
+  // rule is drivable from a test on a page it could never actually be served
+  // from; production passes the real `location`.
+  const LOOPBACK_HOSTS = ["", "localhost", "127.0.0.1", "[::1]"];
+  const mpDefault = (loc) => {
+    const host = String((loc && loc.hostname) || "");
+    if (LOOPBACK_HOSTS.indexOf(host) >= 0) return "ws://127.0.0.1:8080";
+    return "wss://game." + host.replace(/^www\./, "");
+  };
+
+  // Resolution order, and why it is presence-first rather than value-first:
+  // ?server= WINS whenever it appears, and an empty one keeps meaning local
+  // exactly as it did before ?mp existed. So a URL that carries both is decided
+  // entirely by ?server= — including the degenerate "?server=&mp", which stays
+  // local. One spelling deciding on its own presence is the only version of
+  // this rule that cannot surprise the rig, whose whole configuration lives in
+  // that parameter's value.
+  const params = new URLSearchParams(location.search);
+  const url = params.has("server") ? params.get("server")
+    : params.has("mp") ? mpDefault(location)
+    : "";
 
   if (!url) {
     // local mode: every hook declines, every caller falls through
     window.Net = {
       active: () => false,
       seat: () => 0, // local play is always seat 0 — localSeat() reads this
+      released: () => false, // ...and there is no server to take it away, so the
+                             // release latch is dead here; the card's own gate
+                             // falls back to the seat record — see releasedHere
+      refused: () => false,  // ...nor anyone to refuse an ask: solo, the click
+                             // reaches the sim's own claim window directly
       clientTick: () => {},
       flushInputs: () => {},
       buy: () => false,
@@ -157,8 +219,37 @@
   let mySeat = null;
   let myMatchEpoch = -1;  // -1 = no `you` yet, so the snapshot epoch gate stands down
   let mySeatEpoch = -1;
+  // ...and the one thing `mySeat === null` cannot say: WHICH null this is. A
+  // spectator that never held a seat and a pilot the server just released are
+  // the same value here, and the wire cannot tell them apart either — `cl: -1`
+  // says a seat is gone, not whose screen it is gone from. So the transition is
+  // latched instead: it is the only moment the difference exists. The SEAT
+  // RELEASED card is drawn off this and nothing else (js/encounter.js), because
+  // the alternative — reading `absent` off localSeatRec() — reads seat 0's
+  // record once the seat is cleared, which shows the card to every spectator
+  // and hides it from every released pilot on seats 1-3. Set on the `you` edge
+  // and cleared only on EVIDENCE, which are two different messages on purpose:
+  // see onYou and the apply.
+  let released = false;
+  // ...and the half of THAT the latch alone cannot say: whether the ask this
+  // client has already made came back refused. `released` says a seat was taken
+  // from this screen; it says nothing about whether one is still there to take,
+  // and the card was written as if the two were the same question. They are not:
+  // a released seat is open until somebody else takes it, and the client sees
+  // none of that. So the refusal is latched separately and only the CARD'S LINE
+  // reads it — the ask stays available, because a seat can open again at any
+  // tick and the click is what asks.
+  let refused = false;
   let youChanges = 0;     // identity re-issues seen, for stats
   let epochDrops = 0;     // snapshots discarded because their match was not ours
+  // The lobby roster, as last told. -1 on the two counts means UNKNOWN, not
+  // zero: a `you` from a server older than these fields carries neither, and
+  // the banner must then read exactly as it did before rather than claim
+  // "0 of 0 seated". A roster change alone is NOT an identity change — it
+  // repaints the banner and touches nothing else.
+  let rosGranted = -1;
+  let rosMax = -1;
+  let rosStarted = false;
   let lastAck = 0;        // the server's highest CONTIGUOUS RESOLVED input n
 
   // ---- the OWN-SHIP predictor (phase 11b) -----------------------------------
@@ -186,7 +277,9 @@
   let predOn = false;   // a base exists and the seat is up — the apply() carve-out gate
   let predK = null;     // the predicted kernel state — detached, never players[]
   let predTick = -1;    // the tick predK describes
-  let predIdle = false; // hud dead or own rsp > 0 — no motion, no replay
+  let predIdle = false; // hud dead, own rsp > 0, or no hull at all (the claim
+                        // window and the release both sit at rsp 0) — no motion,
+                        // no replay: there is nothing flying to predict
   const sentHist = [];  // { n, batch, f } — the client's own send history;
                         // one batch per flush = one server tick's admission
   let batchId = 0;
@@ -419,7 +512,11 @@
       else if ((ev.k === "death" || ev.k === "respawn") && ev.seat === mySeat) cut = true;
       else if (ev.k === "termChange" && ev.seat === mySeat) termCut = true;
     }
-    const down = (s.hud && s.hud.state === "dead") || (pr.rsp || 0) > 0;
+    const down = (s.hud && s.hud.state === "dead") || (pr.rsp || 0) > 0 ||
+                 (pr.hull | 0) <= 0; // the HULL closes the gap the countdown left:
+                 // a seat in its claim window, or unseated, sits at rsp 0 with no
+                 // hull, and predicting flight for a wreck was the same latent bug
+                 // the fx layer carried
     if (cut || down || !predK) { hardSnap(s, pr, down); return; }
     // ordinary rebase: drop what the ack resolved, then replay the rest
     while (sentHist.length && sentHist[0].n <= lastAck) sentHist.shift();
@@ -656,6 +753,14 @@
       // ahead of it would swallow the one message that says who this client is
       if (s.you) { onYou(s.you); return; }
       if (s.pong !== undefined) { onPong(s.pong); return; }
+      // the server's answer to an ask it could not fill. It is the ONLY way
+      // this client can learn the seat it was promised is gone: the refusal
+      // path sends no `you`, and the one the pre-start door does send says
+      // `seat: null` — which onYou drops as a no-change, because a seatless
+      // client being re-told it is seatless is what sendYouAll does on every
+      // match epoch. Without this the card kept saying "a released seat is
+      // open, not lost" at a seat somebody else was already flying.
+      if (s.claim !== undefined) { refused = true; return; }
       if (!Number.isFinite(s.tick)) return;
       if (Number.isFinite(s.a) && s.a > lastAck) lastAck = s.a;
       onSnapshot(s);
@@ -669,6 +774,19 @@
       mySeat = null;
       mySeatEpoch = -1;
       myMatchEpoch = -1;
+      // ...and so did the roster. A room this client can no longer see is not
+      // a room it may keep reporting, and forgetting it makes the rejoin's
+      // first `you` a change on both counts rather than only the identity.
+      rosGranted = -1;
+      rosMax = -1;
+      rosStarted = false;
+      released = false; // ...the latch goes with it. A dropped socket is not a
+                        // released seat — the rejoin asks for one like any fresh
+                        // client, and a latch that survived the close would show
+                        // the reclaim card to a socket with nothing to reclaim.
+      refused = false;  // ...and so does the refusal it may have collected: the
+                        // rejoin's ask is a new question to a room that has had
+                        // a reconnect backoff's worth of time to change.
       ntick = 0;
       lastAck = 0;
       if (intentional) return; // the client hung up on purpose — stay down
@@ -681,9 +799,13 @@
       }
       // the 1012 path (SIGTERM: the server restarted, this match is over) and
       // every abnormal close (1006 …) auto-reconnect with capped backoff. The
-      // rejoin asks for a seat like any fresh client: a seat is NOT held for a
-      // dropped socket before phase 16, so a mid-match refresh FORFEITS it and
-      // the rejoining client spectates until the match ends
+      // rejoin asks for a seat like any fresh client, and that ask can now be
+      // ANSWERED mid-match: the server holds a dropped socket's seat for a short
+      // grace and offers it back through openSeat, so a refresh inside the window
+      // gets the same seat with the same ship. It is not a reservation — there is
+      // no token and no identity behind it, so whoever asks first inside the
+      // window takes it — and past the window the seat has left the field and the
+      // rejoining client spectates until something reopens the room.
       if (e.code === 1012) note("NET server restarted — match ended — reconnecting…", true);
       else note("NET disconnected (" + e.code + (e.reason ? " " + e.reason : "") + ") — reconnecting…", true);
       scheduleReconnect();
@@ -740,19 +862,84 @@
   connect();
 
   // ---- identity --------------------------------------------------------------
-  // ANY change to `you` tears the input state down. Not only the epochs: a seat
+  // ANY change to the IDENTITY in `you` tears the input state down (the roster
+  // beside it does not — see below). Not only the epochs: a seat
   // change alone means every frame still queued describes another ship. The
   // SEQUENCE resets only when (seat, seatEpoch) moves, because that pair is
   // what the number is namespaced by — a bare match-epoch change leaves the
   // namespace intact, and rewinding n there would look like a replay attack to
   // the server's duplicate gate.
+  //
+  // The ROSTER rides the same message and is read here too, but it is a LOBBY
+  // fact, not an identity: when only it moves, the banner repaints and nothing
+  // else stirs — no teardown, no resync, and youChanges does not count it,
+  // because that counter means "the server re-issued who I am". The fields are
+  // ADDITIVE on a non-snapshot message, and they ride NET_V 7 — the bump the
+  // AFK unseat made for its conditional per-seat key. They were written for 6
+  // with no bump, to spare every already-open client the terminal 4001 a
+  // mismatch answers with; the bump beside them spent that anyway, and with it
+  // the deploy window the -1 = UNKNOWN reading below was built for. A client on
+  // this version only ever talks to a server that sends the roster.
   function onYou(you) {
     const seat = Number.isInteger(you.seat) ? you.seat : null;
     const seatEpoch = Number.isInteger(you.seatEpoch) ? you.seatEpoch : -1;
     const matchEpoch = Number.isFinite(you.matchEpoch) ? you.matchEpoch : -1;
-    if (seat === mySeat && seatEpoch === mySeatEpoch && matchEpoch === myMatchEpoch) return;
+    // both counts must be present and sane, or the roster reads as UNKNOWN —
+    // a half-decoded roster would print a half-true banner, which is worse
+    // than the honest old one. DEFENSIVE, and knowingly unreachable on a live
+    // wire: the only server that answers a v7 hello sends all three fields on
+    // every `you`, and a v6-era one closes this client at 4001 before a `you`
+    // can arrive. It stays because that is the honest shape for an additive
+    // field and it costs one comparison — do not go looking for the deploy path
+    // that reaches it, there is not one.
+    const hasRoster = Number.isInteger(you.granted) && you.granted >= 0 &&
+      Number.isInteger(you.maxSeats) && you.maxSeats > 0;
+    const granted = hasRoster ? you.granted : -1;
+    const maxSeats = hasRoster ? you.maxSeats : -1;
+    const started = hasRoster && you.started === true;
+    const identitySame = seat === mySeat && seatEpoch === mySeatEpoch &&
+      matchEpoch === myMatchEpoch;
+    const rosterSame = granted === rosGranted && maxSeats === rosMax &&
+      started === rosStarted;
+    if (identitySame && rosterSame) return;
+    rosGranted = granted;
+    rosMax = maxSeats;
+    rosStarted = started;
+    if (identitySame) { noteIdentity(); return; } // a seat arrived, or the door shut
     const namespaceMoved = seat !== mySeat || seatEpoch !== mySeatEpoch;
     const matchMoved = matchEpoch !== myMatchEpoch;
+    // the release latch, set on the EDGE. A `you` that takes a real seat away is
+    // this client being unseated; a seatless client re-told it is seatless
+    // changes nothing — sendYouAll fires on every match-epoch change, and a
+    // spectator must not acquire a release it never had.
+    //   It is NOT cleared here, and the grant is exactly the wrong edge to clear
+    // it on. `you` carries IDENTITY and says nothing about the field, and the
+    // case that matters is the one where nothing else does either: solo, the
+    // lapse that parked the seat was the room's last, so it went to roomReset
+    // and the loop is STOPPED when the reclaim click's grant comes back. No
+    // snapshot follows it, and the seat record this client is holding is still
+    // the corpse it was released as —
+    // hull 0, rsp 0, cl -1. Clear the latch there and SEAT RELEASED stops
+    // matching while no other overlay branch starts, and the player is left
+    // staring at a blank field until a second, unprompted click. That is
+    // absentCardLine's own "real and invisible, which is the worst of both",
+    // reintroduced by the fix for it. Nor can the server paper over it: a
+    // one-off snapshot from the grant would carry room.tick, which is the tick
+    // the last broadcast already used, and onSnapshot drops it as stale.
+    //   So the latch is spent by EVIDENCE instead — see the apply below. The
+    // card stays up across the grant, which is honest: its copy invites a click,
+    // and the click a seated socket sends is the first active frame, which is
+    // what starts the round and makes snapshots flow. The card then clears
+    // itself the moment real state arrives.
+    if (seat === null && mySeat !== null) released = true;
+    // ...and a refusal is spent by the GRANT, which is the only edge it needs.
+    // A refusal can only be collected while seatless — handleClaim answers
+    // nothing to a socket that is already flying — and the only way out of
+    // seatless is this line, so a fresh release can never inherit an old
+    // refusal to begin with. Clearing it here rather than beside `released`
+    // above because it is the SEAT arriving that spends it, not the card's own
+    // state: the promise was kept.
+    if (seat !== null) refused = false;
     mySeat = seat;
     mySeatEpoch = seatEpoch;
     myMatchEpoch = matchEpoch;
@@ -769,9 +956,61 @@
     if (namespaceMoved) { ntick = 0; lastAck = 0; }
     if (matchMoved) resync(); // the buffer, the cues and the presented clock all
                               // describe a match that no longer exists
-    note(seat === null
-      ? "NET spectating — match " + matchEpoch
-      : "NET seat " + seat + " — match " + matchEpoch, seat === null);
+    noteIdentity();
+  }
+
+  // The corner banner's identity line, composed from the state above so that a
+  // roster-only `you` repaints through the SAME arithmetic an identity change
+  // does. Two audiences:
+  //
+  //   seated     — "how many of us are here, and can anyone still join?" The
+  //                count is seats HELD — sockets actually behind seats — and
+  //                the ceiling is what THIS room can still deal: MAX_SEATS
+  //                before the start, the match's own seat range after it. The
+  //                server derives both (see youMessage); this end prints them.
+  //                A seat whose socket closed drops out of the count as soon as
+  //                the next `you` goes out, which is what makes the line honest
+  //                now that a seat can be given up and taken by somebody else.
+  //   SPECTATING — the one state a player can land in and not understand. It
+  //                says why in plain words, in the server's own refusal order
+  //                (a running match beats a full roster), so the answer to
+  //                "why can't I fly?" is on screen rather than in a log — but
+  //                only ever as far as THIS roster proves. Hence three cases,
+  //                not two: started, then granted >= maxSeats, and then the
+  //                leftover, seatless while the door is demonstrably open.
+  //                That third one is real: roomReset clears every seat and
+  //                re-grants in a SECOND pass, and each grant fans `you` out
+  //                to everyone, so a socket still awaiting its turn in that
+  //                pass is handed granted 1 of 4, not started, no seat. The
+  //                old two-branch text called that a full house while the very
+  //                next clause would have counted 1. It rights itself a grant
+  //                later, but a banner whose whole job is an honest answer may
+  //                not fill the gap with a guess — so the third line names the
+  //                gap and promises nothing.
+  //
+  // Without a roster it prints exactly what it printed before the roster
+  // existed. That branch is the defensive one onYou describes: no live server
+  // this client will ever reach omits the fields, so it is kept for the shape
+  // of an additive read rather than for a case a deploy can still produce.
+  function noteIdentity() {
+    const known = rosGranted >= 0 && rosMax > 0;
+    if (mySeat === null) {
+      let why = "";
+      if (known) {
+        why = rosStarted
+          ? " — the match already started, so no seat was dealt"
+          : rosGranted >= rosMax
+            ? " — all " + rosMax + " seats are taken, so no seat was dealt"
+            : " — no seat was dealt yet; the roster is still settling";
+      }
+      note("NET spectating — match " + myMatchEpoch + why, true);
+      return;
+    }
+    const roster = known
+      ? " — " + rosGranted + " of " + rosMax + " seated — " +
+        (rosStarted ? "match running" : "waiting")
+      : "";
+    note("NET seat " + mySeat + " — match " + myMatchEpoch + roster, false);
   }
 
   // ---- app-level RTT ---------------------------------------------------------
@@ -926,7 +1165,23 @@
   // namespace the server's resolved-ack runs in. A spectator sends nothing at
   // all, and so does a client whose grant has not landed yet.
   function flushInputs() {
-    if (mySeat === null) { pendingInputs.length = 0; return; }
+    if (mySeat === null) {
+      // A spectator still sends NO input — there is no seat epoch to sequence
+      // it in and the server would drop it at the demux — but a CLICK is the
+      // one thing it may say, and decision 2 requires it to: an unseated seat
+      // parks RECLAIMABLE, and a connected client takes it by clicking. Without
+      // this a spectator's clicks reached nothing at all and the only route into
+      // a parked seat was a fresh page load. The fire edge already sitting in
+      // the pending frames IS the click, so no new gesture and no new key: the
+      // frames are still discarded, and only the ASK survives them. The server
+      // decides whether anything is open; a claim on a full room is a no-op.
+      const asked = pendingInputs.some((f) => f.fp);
+      pendingInputs.length = 0;
+      if (asked && ws && ws.readyState === 1 && helloed) {
+        ws.send(JSON.stringify({ v: NET_V, ui: "claim" }));
+      }
+      return;
+    }
     if (ws && ws.readyState === 1 && helloed) {
       let flushed = 0;
       for (const f of pendingInputs) {
@@ -1319,7 +1574,28 @@
                                   // the key reads 0 rather than undefined
         S.respawnT = pr.rsp || 0; // the SHIP DOWN countdown card renders from
                                   // the wire, like the rest
+        // ...and the two states past it, out of the ONE conditional key the
+        // encoder sends: -1 is the release, anything above 0 is the window the
+        // click has left. No key means neither, which is every live seat — so
+        // the decode has to fold the absence, not just the value.
+        S.claimT = (pr.cl || 0) > 0 ? pr.cl : 0;
+        S.absent = pr.cl === -1;
         if (Array.isArray(pr.ow)) S.owned = pr.ow.slice();
+        // ...and THIS is what spends the release latch: the seat this client
+        // now holds, presented, showing something other than a release. Not the
+        // grant that handed the seat over — see onYou for why that edge is a
+        // blank field — and not the snapshot's ARRIVAL either, because the card
+        // and the seat record have to change on the same frame. Clear it at
+        // arrival and the buffer's own delay leaves a gap where the card is
+        // gone and the record on screen is still the corpse, which matches no
+        // overlay branch at all. Here the SHIP DOWN / claim-window card takes
+        // over in the same draw, off state that is really on screen.
+        //   `pr.seat === mySeat` and no other seat: a release is a fact about
+        // ONE screen, and seat 0's record is what a released client's draw
+        // reaches once localSeat() folds its null — the same fold releasedHere
+        // exists to route around. A snapshot that carries no record for this
+        // seat says nothing, so the latch simply stays.
+        if (pr.seat === mySeat && pr.cl !== -1) released = false;
       }
     }
     // The local seat's AIM fields stay LOCAL — the marker follows the cursor,
@@ -1515,8 +1791,14 @@
   // whose LOGICAL PANEL space is client-independent — and only the row
   // identity goes upstream: the server has no window, no dpr and no gutter,
   // so device-derived coordinates must never cross the wire. The legacy
-  // {v, ui: "click", x, y} message stays decodable server-side (panel
-  // space now — see server.js), but this client no longer sends it.
+  // {v, ui: "click", x, y} message is GONE from the wire entirely — the
+  // server no longer decodes it (see the shape list above handleSeatMessage
+  // in server.js), and a coordinate route cannot come back: shopClick(x, y)
+  // carries no seat, so the server had to resolve the buyer through the sim's
+  // own pointer path, which answered SEAT 0 for every client — one seat spent
+  // another's wallet. It could not be made seat-aware either, because
+  // E.shopHover, the slot that path writes on its way to buy(), is one global.
+  // A resolved row index is the only purchase shape there is.
   // A spectator sends neither: the server ignores an unseated socket's game
   // messages anyway, and a client that knows it holds no seat should not spend
   // the wire proving it.
@@ -1548,6 +1830,16 @@
     // THE seat this client flies, or null while it spectates or waits for its
     // grant. game.js's localSeat() reads it and folds null to 0.
     seat: () => mySeat,
+    // ...and the half of that null the fold destroys: this client, and only
+    // this client, has had a seat taken back. Set by the `you` that took it and
+    // spent by the first presented snapshot that says the seat is not released
+    // — so it can outlive the grant that answers the reclaim, which is the
+    // point. js/encounter.js draws the SEAT RELEASED card off it.
+    released: () => released,
+    // ...and whether the ask that card invites has already come back empty. The
+    // card is drawn off `released` and only its SECOND LINE off this, so a
+    // refusal changes what the screen promises without taking the screen away.
+    refused: () => refused,
     clientTick,
     noteDrawn, // the loop render's view-tick report — see the record above
     flushInputs,
@@ -1572,6 +1864,10 @@
       seat: mySeat, matchEpoch: myMatchEpoch, seatEpoch: mySeatEpoch,
       ack: lastAck, inFlight: Math.max(0, ntick - lastAck),
       youChanges, epochDrops,
+      // the lobby roster as last told: `granted` is seats HELD and `maxSeats`
+      // what this room can still deal — both -1 while UNKNOWN, which before the
+      // first `you` is the only way to reach it
+      roster: { granted: rosGranted, maxSeats: rosMax, started: rosStarted },
       // app-level RTT, in ms; -1 until the first pong comes back
       rttMs: rtt, rttMinMs: rttMin, rttJitterMs: rttJitter, pongs,
       attempts, reconnects, versionDead,
@@ -1592,8 +1888,20 @@
       vx: predK.vel.x, vy: predK.vel.y } : null),
     // the live speculative-tracer list — game.js draws it in the world pass
     tracers: () => tracers,
+    // test seam, nothing shipped calls it: the ?mp expansion as a pure
+    // function of a location-shaped object. A page served from 127.0.0.1 can
+    // prove the loopback branch by simply existing, but it can never be served
+    // from an apex host, so the OTHER branch's arithmetic is only reachable
+    // through the rule itself rather than through the page's URL.
+    mpDefault,
     // dev/test seam: send one tune message on THIS socket. The server's two
-    // gates (loopback + SCMELEE_DEV) decide; production silently ignores it.
+    // dev gates decide, and a connection must clear BOTH: production clears
+    // neither, so it drops the message in silence — no reply, no state
+    // change, nothing in the snapshot to tell a client it was even tried.
+    // The gate conditions and the accepted key table live on the server side
+    // and are deliberately not spelled out here. This file mirrors to a
+    // PUBLIC site; server/ does not. Read server/tune.test.mjs for the real
+    // contract — it pins both gates and the whole key table.
     tune: (key, val) => {
       if (ws && ws.readyState === 1 && helloed) {
         ws.send(JSON.stringify({ v: NET_V, ui: "tune", key, val }));
