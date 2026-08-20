@@ -353,7 +353,16 @@ function grantedSeat() {
   const N = window.Net;
   if (!(N && N.active && N.active() && N.seat)) return 0;
   const s = N.seat();
-  return Number.isInteger(s) && s >= 0 && s < players.length ? s : null;
+  // the bound is the ROOM's seat range, not the last snapshot's player list.
+  // Those differ for real: the server grants a seat on the `you`, and the first
+  // snapshot carrying that seat can arrive a tick later — or in a room started
+  // at one player, never widen at all. Bounding against players.length there
+  // answered null for a seat this client genuinely owns, and the client drew
+  // "spectating" over it. maxSeats is -1 before the first `you`, and absent
+  // entirely on the offline stub, so both fall back to the old bound — offline
+  // and solo behavior is unchanged.
+  const cap = N.maxSeats && N.maxSeats() > 0 ? N.maxSeats() : players.length;
+  return Number.isInteger(s) && s >= 0 && s < cap ? s : null;
 }
 function localSeat() {
   const s = grantedSeat();
@@ -373,28 +382,277 @@ const seatless = () => grantedSeat() === null;
 // back to seat 0, which always exists (see setPlayerCount)
 const localPlayer = () => players[localSeat()] || players[0];
 // ---- the net-mode PRESENTATION accessor -----------------------------------
-// The seat's pool, cooldown and comet flag AS THE SCREEN SHOULD SHOW THEM:
-// in net mode the LOCAL seat answers with the own-ship predictor's values
-// (js/net.js — the wire stays the state of record on the player struct;
-// this is presentation only), every other seat and every other mode answers
-// straight off the struct. The HUD energy bar and the comet halo read THIS,
-// so the local pilot's cues answer the stick instead of the round trip.
-// Local play and the headless host fall through byte-identically.
-// phase-13 lab flag (candidate D, dev/rig only): when set, the LOCAL halo
-// reads the WIRE comet flag instead of the predictor's — the pilot sees only
-// the server-confirmed glow. Net-locked by construction: it never crosses the
-// wire, and nothing shipped sets it (the __test seam below is its only writer).
-let COMETHALOWIRE = false;
+// The seat's pool and cooldown AS THE SCREEN SHOULD SHOW THEM: in net mode
+// the LOCAL seat answers with the own-ship predictor's values (js/net.js —
+// the wire stays the state of record on the player struct; this is
+// presentation only), every other seat and every other mode answers straight
+// off the struct. The HUD energy bar and the comet halo's SIZE read THIS, so
+// the local pilot's cues answer the stick instead of the round trip. Local
+// play and the headless host fall through byte-identically.
+// The record used to carry a `comet` flag too, plus a lab lever
+// (COMETHALOWIRE, phase-13 candidate D) that could point that flag at the
+// wire — both retired by the integration round: since the windup lane, the
+// halo's comet STATE comes from cometView, whose CONFIRMED phase is the wire
+// flag by construction, so the shipped halo already is candidate D's halo
+// with a windup in front of it. Nothing read the field any more, and a lab
+// round that pulled the lever would have measured a no-op and believed it.
 function presentedPool(s) {
   const N = window.Net;
   if (N && N.active && N.active() && N.predicted && s === localSeat()) {
     const k = N.predicted();
-    if (k) return { en: k.energy, enMax: k.energyMax, cool: k.cool,
-                    comet: COMETHALOWIRE ? !!(players[s] && players[s].comet) : !!k.comet };
+    if (k) return { en: k.energy, enMax: k.energyMax, cool: k.cool };
   }
   const P = players[s];
-  return P ? { en: P.energy, enMax: P.energyMax, cool: P.cool, comet: !!P.comet }
-           : { en: 0, enMax: 0, cool: 0, comet: false };
+  return P ? { en: P.energy, enMax: P.energyMax, cool: P.cool }
+           : { en: 0, enMax: 0, cool: 0 };
+}
+// ---- the COMET PRESENTATION owner ----------------------------------------
+// ONE record per seat answering ONE question: what comet state should this
+// seat's screen be in — nothing, ASKING, or CONFIRMED? Four consumers used to
+// answer it four times off presentedPool(seat).comet alone (the flat halo
+// here, the light layer's bloom and wake in js/fx.js, and the HUD energy bar
+// in js/encounter.js), and two of them carried their own copy of the halo's
+// size. They all read this now, so they cannot disagree about how big the
+// burn is or whether the server has agreed to it yet.
+//
+// WHY the two states are separate. For the local seat in net mode the
+// PREDICTOR arms its own comet flag about four ticks before the wire
+// confirms it (presentedPool used to hand that flag out; only the predicted
+// pool survives there now). The old halo drew that prediction as truth, so
+// a pilot watched a solid burn while the server had not yet started negating
+// damage — and every "I took damage in comet" report the lab round chased was
+// that skew, not a hole in the gate (the gate is airtight: the negation in
+// js/encounter.js returns before any hit is registered). The windup shows the
+// ASK as an ask, and the flash marks the moment the wire says yes.
+//
+// Render-side by construction: nothing here is read by the sim, nothing here
+// is hashed, and the clock is a TICK COUNTER advanced once per PLAYED tick
+// from capturePresent() — a net client plays ticks without ever stepping the
+// sim, which is the whole reason cometClock exists beside simTick. No wall
+// clock of any kind is read here, so two
+// render() calls inside one tick still paint identical bytes (the law at
+// HULL_SEED below).
+const CP_OFF = 0, CP_WIND = 1, CP_LIVE = 2;
+const COMET_WIND_TICKS = 6;  // ticks the flare takes to reach full extension —
+                             // 100 ms at the 60 Hz sim clock, which is the
+                             // shortest flare an eye reliably reads as motion
+const COMET_FLASH_TICKS = 7; // ...and the confirm flash's decay, ~117 ms: long
+                             // enough to register, short enough that it cannot
+                             // be mistaken for the burn itself
+const COMET_WIND_HOLD = 30;  // the RELEASE WINDOW — half a second. A press the
+                             // pool cannot pay for is never confirmed and the
+                             // button may stay down forever, so a windup with
+                             // no confirm inside this retracts and does not
+                             // flare again until the button lifts. Well clear
+                             // of the worst lag budget this repo measures
+                             // (~250 ms unplayable), so a slow round trip
+                             // retracts nothing a fast one would have shown.
+const COMET_PRES = [];       // seat -> { phase, t, spent }
+const CP_NONE = { phase: CP_OFF, t: 0, spent: false }; // the shared answer for a
+                             // seat with no record — never written, never
+                             // allocated per call
+// The seat's presentation record, GUARDED: pre-start a granted seat id can
+// exceed players.length - 1, and every consumer here is a draw path that must
+// answer rather than throw.
+function cometPres(s) { return COMET_PRES[s] || CP_NONE; }
+// The ASK — the local pilot's held right button, straight off the ONE input
+// record the DOM listener writes (in0 is players[0].input, a seat-0-ONLY
+// producer; see setRightHeld for why the write is not seat-aware). It is
+// mode-independent by construction: in net mode js/net.js's predictor arms off
+// this same bit on the same clientTick, so this IS the predicted press edge by
+// another name, and in solo it is the only edge there is. A REMOTE seat has no
+// ask on this screen at all — its halo pops straight to confirmed, which is
+// the whole truth a spectator has.
+//
+// SOLO POPS TOO, and that is not an oversight. `conf` is tested before `want`
+// below, and in solo energyStep() settles players[0].comet inside the very
+// step that read the want — so the machine reaches CP_LIVE on the first tick
+// and a solo press books as a pop, never as a windup. The windup is a
+// NET-MODE cue by construction: it exists to show the four-tick gap between a
+// prediction and its confirmation, and solo has no such gap. A solo flare
+// would be a fake 100 ms of "asking" drawn over an ask the sim had already
+// answered — a decision about feel, not about honesty, and one for the owner
+// rather than for this lane. The single solo case that DOES flare is a
+// refused press, where nothing ever confirms and the retract is the truth.
+// THE MACHINE CLOCK. The instrument below stamps its episodes with this, and
+// simTick cannot serve: simTick increments only in step(), which a net client
+// never runs (frameBody calls Net.clientTick() instead), so a simTick stamp
+// froze over the wire and every lead read 0 — in the ONE mode the lead
+// numbers exist for. This counts cometPresTick() calls, and capturePresent()
+// makes exactly one per played tick in BOTH modes, so a stamp taken here
+// advances once per comet-machine tick whichever loop is driving. No wall
+// clock, no rand — the render-side law above holds.
+let cometClock = 0;
+// One tick of the machine. Called from capturePresent(), the ONE per-tick
+// render-side capture point, so the seat's comet flag has already settled.
+function cometPresTick() {
+  cometClock++;
+  const ask = !!players[0].input.cometWant;
+  // GRANTED, not localSeat(): localSeat() folds a seatless client to 0, and a
+  // spectator still holding right-click — an AFK-unseated or refresh-forfeited
+  // pilot — would drive seat 0's windup ring, its afterburner wind and the
+  // instrument for a ship this screen does not fly. A view may fall back to
+  // seat 0; an ASK is a statement about the reader's own seat (the seatless()
+  // rule above), so with no grant there is no want. The conf path below stays
+  // per-seat: remote confirmed halos still render for a spectator.
+  const me = grantedSeat();
+  for (const P of players) {
+    const s = P.id;
+    let r = COMET_PRES[s];
+    if (!r) r = COMET_PRES[s] = { phase: CP_OFF, t: 0, spent: false };
+    const conf = !!P.comet;   // the WIRE flag on a net client, the sim's own
+                              // flag in solo — the authority either way
+    const want = me !== null && s === me && ask;
+    if (conf) {
+      if (r.phase !== CP_LIVE) { r.phase = CP_LIVE; r.t = 0; noteCometConfirm(s); }
+      else r.t++;
+    } else if (want) {
+      if (r.phase === CP_LIVE) {
+        // the burn ended under a held button — a dry pool, a death, a wipe.
+        // `spent` is what stops the very next tick from flaring again while
+        // the pool trickles back up under the same press.
+        r.phase = CP_OFF; r.t = 0; r.spent = true;
+      } else if (r.phase === CP_WIND) {
+        r.t++;
+        if (r.t >= COMET_WIND_HOLD) { r.phase = CP_OFF; r.t = 0; r.spent = true; noteCometRetract(s); }
+      } else if (!r.spent) { r.phase = CP_WIND; r.t = 0; noteCometAsk(s); }
+    } else {
+      r.phase = CP_OFF; r.t = 0; r.spent = false; // the button is up: the next press may flare
+    }
+  }
+}
+// The one derivation of what a comet-state seat draws. `pool` is the caller's
+// own presentedPool() read where it already has one, so a draw pass pays for
+// that accessor once.
+//   phase — CP_OFF / CP_WIND / CP_LIVE
+//   f     — the presented pool fraction, 0..1
+//   r     — the HALO RADIUS: SHIP_R + COMETAOE * f, the arithmetic
+//           tests/wave1-checks.js section 15 pins, unchanged and now shared
+//   wind  — the windup's extension, 0..1; 0 unless the phase is CP_WIND
+//   flash — the confirm flash, 1 on the tick the wire agreed and decaying to
+//           0 across COMET_FLASH_TICKS; 0 unless the phase is CP_LIVE
+function cometView(s, pool) {
+  const r = cometPres(s);
+  const p = pool || presentedPool(s);
+  const f = p.enMax > 0 ? Math.max(0, Math.min(1, p.en / p.enMax)) : 0;
+  return { phase: r.phase, f, r: SHIP_R + COMETAOE * f,
+    wind: r.phase === CP_WIND ? Math.min(1, (r.t + 1) / COMET_WIND_TICKS) : 0,
+    flash: r.phase === CP_LIVE ? Math.max(0, 1 - r.t / COMET_FLASH_TICKS) : 0 };
+}
+// ---- the comet INSTRUMENT -------------------------------------------------
+// The page's own answer to "how far did the ask lead the confirm, and did
+// anything hurt me in between?". Monotone counters plus a small ring of
+// finished episodes, all preallocated: this is written from the per-tick
+// machine above and from the two cue drains, both hot paths, and it allocates
+// nothing after load. It writes no sim state and reads no wall clock — every
+// stamp is a comet-machine tick (cometClock above), which advances once per
+// played tick in both modes.
+//
+// THE LEAD NUMBERS ARE NET-MODE NUMBERS. leadMin, leadMax, leadSum and the
+// ring's `lead` all measure ask→confirm, and solo has no gap to measure: the
+// machine above pops straight to CP_LIVE there, so a solo session books every
+// episode as a pop and leaves the three lead fields at their empty defaults
+// forever. A reading taken in solo is not a small number, it is no number —
+// which matters, because these are the figures the comet-arm rebate decision
+// is meant to be made on. Take them over the wire.
+const CLOG_N = 16;
+const COMET_LOG = {
+  asks: 0,        // windups armed
+  confirms: 0,    // ...that the authority agreed to
+  retracts: 0,    // ...and that timed out unanswered (a refused press)
+  pops: 0,        // the LOCAL seat's confirms with no windup in front of them:
+                  // solo's same-tick answer (energyStep settles the flag inside
+                  // the step that read the want, so no windup ever arms — see
+                  // "SOLO POPS TOO" above), or a burn the button never asked
+                  // for. Never a remote seat: noteCometConfirm returns for any
+                  // seat but the local granted one before this can count
+  hurtWind: 0,    // hurt/death cues landing INSIDE a windup: the honest count
+                  // of the perceptual gap this lane exists to close
+  hurtLive: 0,    // ...and inside a CONFIRMED burn — read off the SETTLED
+                  // comet flag at drain time (see noteCometCue). In solo that
+                  // is exactly the flag the server's countHurtWhileComet
+                  // counts; over the wire it is the applied snapshot's flag,
+                  // and only a cue from that same snapshot's tick may claim
+                  // it (a mismatched drain books hurtSkew below). This one is
+                  // a SIM DEFECT if it ever moves: the negation returns before
+                  // the cue is emitted, so a hurt cue cannot coexist with a
+                  // live comet
+  hurtSkew: 0,    // hurt/death cues that drained with a live flag but a tick
+                  // the applied snapshot does not vouch for — net mode's jump
+                  // and starvation branches drain a WINDOW of ticks against
+                  // ONE applied flag (js/net.js fireEvents). Never a defect
+                  // claim; the recorder keeps the volume so a skewed run is
+                  // visible instead of silently dropped
+  leadMin: -1, leadMax: -1, leadSum: 0, // ask→confirm lead, in ticks
+  n: 0,           // ring writes, monotone — entry j back is [(n-1-j) % CLOG_N]
+  ring: [],
+};
+for (let i = 0; i < CLOG_N; i++) COMET_LOG.ring.push({ ask: -1, conf: -1, lead: -1, hurt: 0 });
+let clogOpen = -1;   // the machine tick (cometClock) the open episode's windup armed, or -1
+let clogHurt = 0;    // hurt cues seen inside it
+function clogClose(conf, lead) {
+  const e = COMET_LOG.ring[COMET_LOG.n % CLOG_N];
+  e.ask = clogOpen; e.conf = conf; e.lead = lead; e.hurt = clogHurt;
+  COMET_LOG.n++;
+  clogOpen = -1;
+  clogHurt = 0;
+}
+// Every gate below is grantedSeat(), never localSeat(): the instrument is the
+// local pilot's own story, and a seatless client has no story to book — the
+// fold to 0 would record seat 0's episodes off a screen that merely watches
+// them. grantedSeat() answers null there, an integer seat never equals null,
+// and every note returns before it counts.
+function noteCometAsk(s) {
+  if (s !== grantedSeat()) return;
+  COMET_LOG.asks++;
+  clogOpen = cometClock;
+  clogHurt = 0;
+}
+function noteCometConfirm(s) {
+  if (s !== grantedSeat()) return;
+  if (clogOpen < 0) { COMET_LOG.pops++; return; }
+  const lead = cometClock - clogOpen;
+  COMET_LOG.confirms++;
+  COMET_LOG.leadSum += lead;
+  if (COMET_LOG.leadMin < 0 || lead < COMET_LOG.leadMin) COMET_LOG.leadMin = lead;
+  if (lead > COMET_LOG.leadMax) COMET_LOG.leadMax = lead;
+  clogClose(cometClock, lead);
+}
+function noteCometRetract(s) {
+  if (s !== grantedSeat()) return;
+  COMET_LOG.retracts++;
+  clogClose(-1, -1);
+}
+// The cue drains' half — js/game.js's drainCues() in solo and js/net.js's
+// fireEvents() in net mode, because a net client's local sim never steps and
+// only the second of those runs there. `hurtWind` is the measurement this lane
+// wanted; `hurtLive` is the tripwire the server counter mirrors.
+function noteCometCue(kind, seat, tickMatched = true) {
+  if ((kind !== "hurt" && kind !== "death") || seat !== grantedSeat()) return;
+  // hurtLive reads the SETTLED comet flag, never the machine's phase — a
+  // deliberate, stated choice, the Sfx.frame() kind. Both drains run AFTER
+  // the tick's flag has settled (solo: step() precedes drainCues() in
+  // frameBody; net: present() applies the snapshot before fireEvents()),
+  // while cometPres still holds the PREVIOUS tick's phase until
+  // capturePresent() advances it. On a dry-pool-same-tick hit — energyStep
+  // clears the flag inside the step whose hit pass then lands a real cue —
+  // the stale phase still reads CP_LIVE and would book a phantom defect the
+  // server's countHurtWhileComet (a settled-flag read) never counts.
+  // hurtWind stays on the phase: CP_WIND is presentation-only, and no sim
+  // flag exists for it.
+  //
+  // tickMatched is the wire's honesty bit. Net mode's jump and starvation
+  // branches drain EVERY event with tick <= pt in one fireEvents call, all
+  // against the single flag apply() wrote from ONE snapshot — so a hurt from
+  // before a comet arm inside that window would land on a flag that is not
+  // its own tick's and book a phantom defect. A mismatched drain books
+  // hurtSkew instead of the tripwire: the choice is to KEEP the count
+  // visible rather than drop it, so a skew-heavy run reads as skew-heavy.
+  // Solo drains are tick-matched by construction and pass no flag.
+  if (cometActive(seat)) {
+    if (tickMatched) COMET_LOG.hurtLive++;
+    else COMET_LOG.hurtSkew++;
+  } else if (cometPres(seat).phase === CP_WIND) { COMET_LOG.hurtWind++; clogHurt++; }
 }
 // ---- the FLIGHT KERNEL ----------------------------------------------------
 // The per-seat FLIGHT slice of the sim, extracted whole: the aim and thrust
@@ -1389,13 +1647,25 @@ function mouseAimDir() {
 // cursor. The faithful delayed version would land on the identical angle N
 // ticks later (the ring's cx/cy ARE this cursor's bank-time world points);
 // only the window differs.
-// The seat parameter is dormant plumbing until phase 07: the resolvers here
-// (lcurWorld, mouseAimDir) are seat 0's — only the written aim state is
-// parameterized, and every current caller passes nothing (seat 0).
+// The resolvers here (lcurWorld, mouseAimDir) are seat 0's — the DOM listener
+// layer is a seat-0-only producer — and only the WRITTEN aim state is
+// parameterized. No caller passes a seat; they all take the default, which is
+// localSeat().
+//
+// ...and localSeat() can name a seat this client has no RECORD for. The grant
+// is bounded by the room's maxSeats, not by the last snapshot's player list
+// (see grantedSeat), so the second client into a lobby holds seat 1 while
+// `players` is still length 1 — no snapshot flows until the round starts, and
+// only an applied snapshot widens that array. The guard below is what makes
+// that harmless: this function draws nothing and decides nothing, so a seat
+// with no record simply has no aim state to write, and the record the first
+// snapshot deals arrives with aimed false exactly as a fresh seat should.
+// Without it every right-button release in the lobby threw.
 function snapshotMouseAim(seat = localSeat()) {
   const d = lockedMode() && INPUTMODE === "tick" ? cursorDir(lcurWorld()) : mouseAimDir();
   if (!d) return;
   const P = players[seat];
+  if (!P) return;
   P.aimAngle = Math.atan2(d.y, d.x);
   P.aimOff.x = d.x * AIM_R;
   P.aimOff.y = d.y * AIM_R;
@@ -1764,7 +2034,7 @@ function drawFlame() {
 // (flat shapes under globalAlpha, no randomness stream touched). Render pass
 // only; the suites never raise the comet flag around their pixel probes, so
 // every committed ink comparison stays untouched.
-function drawCometGlow(P, pool, vp = P.ship) {
+function drawCometGlow(P, cv, vp = P.ship) {
   // vp is the FRAME pose for this seat — the halo and the tail anchor where
   // the hull draws this frame, not at the raw tick pose. The tail's direction
   // and stretch keep reading P.vel: velocity is the cue's meaning, and it has
@@ -1783,11 +2053,37 @@ function drawCometGlow(P, pool, vp = P.ship) {
   // The tail below stays on SPEED: the two cues must stay separable at a glance.
   // presentedPool hands the PRESENTED fraction in (predicted for the local
   // net seat); a caller without one falls back to the struct, as before
-  const f = pool && pool.enMax > 0
-    ? Math.max(0, Math.min(1, pool.en / pool.enMax))
-    : energyFrac(P.id);
-  ctx.arc(vp.x, vp.y, SHIP_R + COMETAOE * f, 0, Math.PI * 2);
+  // cometView owns both the fraction and the radius now — the same record the
+  // light layer, the wake and the HUD read, so no consumer carries its own
+  // copy of this arithmetic any more.
+  const v = cv || cometView(P.id);
+  if (v.phase === CP_WIND) {
+    // THE WINDUP — the ask, drawn as an ask. A thin ring inflating toward the
+    // halo's own radius, and nothing else: no fill, no tail, so it can never
+    // be mistaken for the burn. It is a STROKE in the flat layer, which is
+    // what keeps the cue readable with the light layer off entirely.
+    ctx.globalAlpha = 0.18 + 0.3 * v.wind;
+    ctx.strokeStyle = C.clay;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(vp.x, vp.y, SHIP_R + (v.r - SHIP_R) * v.wind, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+  ctx.arc(vp.x, vp.y, v.r, 0, Math.PI * 2);
   ctx.fill();
+  if (v.flash > 0) {
+    // THE CONFIRM — one solid bright ring on the tick the authority agreed,
+    // fading over COMET_FLASH_TICKS. This is the beat the windup was waiting
+    // for, and the only moment the halo is ever anything but clay.
+    ctx.globalAlpha = 0.75 * v.flash;
+    ctx.strokeStyle = C.bright;
+    ctx.lineWidth = 1 + 1.5 * v.flash;
+    ctx.beginPath();
+    ctx.arc(vp.x, vp.y, v.r + 2 * (1 - v.flash), 0, Math.PI * 2);
+    ctx.stroke();
+  }
   const s = Math.hypot(P.vel.x, P.vel.y);
   if (s > 0.3) { // the tail stretches with speed — the comet reads as a comet
     const dx = -P.vel.x / s;
@@ -2614,6 +2910,28 @@ const alerpR = (a, b, k) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * k
 const PRES_SNAP = 28; // px — the displacement guard: clear of a hard dash,
                       // under any real teleport, so a respawn or restart
                       // crosses in ONE presented frame (row 4's bar)
+// ---- the CUT verdict, forwarded to the light layer ------------------------
+// PRES_SNAP is the ONE displacement predicate on this screen now. It used to
+// have a rival: js/fx.js carried its own TELEPORT of 80 px, measured per
+// FX.advance FRAME rather than per sim tick, so a hop between the two — 28 to
+// 80 px — was CUT by the presentation frame and BRIDGED by the wake. The wake
+// drew a line the ship never flew, straight through the gap the snap had just
+// refused to smear.
+//
+// The two windows are genuinely different, and no choice of constant closes
+// that: one FX.advance covers n coalesced ticks and legitimately sees n times
+// a tick's displacement, so a per-frame threshold is either deaf on a slow
+// frame or trigger-happy on a fast one. So the VERDICT travels instead of the
+// number. capturePresent already computes the per-tick answer for every seat;
+// each cut is latched here, and the light layer takes and clears the latch on
+// its own clock. A frame that swallowed five ticks inherits every cut inside
+// it, exactly once, and a frame that swallowed none inherits nothing.
+const PRES_CUT = [];
+const presTakeCut = (seat) => {
+  const c = PRES_CUT[seat] === true;
+  PRES_CUT[seat] = false;
+  return c;
+};
 const PRES = {
   serial: 0,     // capture ticks — the seen-stamp the sweep prunes against
   maxId: 0,      // highest entity id ever captured — ids are monotonic and
@@ -2653,6 +2971,9 @@ const presIdReset = (list, map) => {
 };
 function capturePresent() {
   PRES.serial += 1;
+  cometPresTick(); // the comet presentation machine rides the SAME per-tick
+                   // boundary as the pose caches — one tick, one advance, and
+                   // never a wall clock (see the owner block above)
   // the camera's own per-tick prev/cur — updateCamera (or a frozen hold) has
   // already settled cam for this tick
   const c = PRES.cam;
@@ -2666,7 +2987,15 @@ function capturePresent() {
     if (Math.abs(c.cx - c.px) > 200 || Math.abs(c.cy - c.py) > 200) { c.px = c.cx; c.py = c.cy; }
   }
   // ships, keyed by seat — players[] mutates in place but the SEAT is the identity
-  for (const P of players) presRoll(PRES.ships, P.id, P.ship.x, P.ship.y);
+  for (const P of players) {
+    const had = PRES.ships.has(P.id);
+    const r = presRoll(PRES.ships, P.id, P.ship.x, P.ship.y);
+    // a FIRST sighting is not a cut. presRoll marks a new record snap so it
+    // appears AT its pose rather than lerping from zero, but there is no prior
+    // pose for a wake to bridge and no ring to cut — only a displacement
+    // verdict is worth forwarding.
+    if (had && r.snap) PRES_CUT[P.id] = true;
+  }
   presSweep(PRES.ships);
   // the encounter's bodies and the bullets share ONE id space — the reset
   // check runs across all four lists before any of them rolls
@@ -2847,11 +3176,13 @@ function render() {
   // every seat's ship draws; only seat 0 (the local pilot) wears the flame,
   // and a comet-mode seat wears its glow under the hull
   for (const P of players) {
-    // the local net seat's halo is the SPECULATIVE comet cue: presentedPool
-    // answers the predictor's arm rule there and the plain struct elsewhere
-    const pool = presentedPool(P.id);
+    // cometView owns the seat's comet STATE — its CONFIRMED phase is the wire
+    // flag by construction — while presentedPool hands in the pool FRACTION,
+    // predicted for the local net seat, so the halo sizes off the stick and
+    // exists off the authority
+    const cv = cometView(P.id, presentedPool(P.id));
     const vp = FRAME.ships[P.id] || P.ship; // the frame's pose for this seat
-    if (pool.comet) drawCometGlow(P, pool, vp); // the glow rides the frame pose too
+    if (cv.phase) drawCometGlow(P, cv, vp); // the glow rides the frame pose too
     let ds = drawn.ships[P.id]; // the probe: record the exact pose the call gets
     if (!ds) ds = drawn.ships[P.id] = { seat: P.id, x: 0, y: 0 };
     ds.x = vp.x;
@@ -2967,6 +3298,9 @@ function drainCues() {
     // the wire carried them. `at` is the dying ship's position, `seat` the
     // seat that paid, both already on the event and both already on the wire.
     if (ev.kind === "death" && ev.at) spawnShipBlast(ev.at.x, ev.at.y, ev.seat | 0);
+    noteCometCue(ev.kind, ev.seat); // the comet instrument's hurt half — see
+                                    // noteCometCue; js/net.js's fireEvents
+                                    // carries the same call for net mode
     // ...and the light layer, a SECOND consumer of the same bus. The termChange
     // skip above is a conjunct on the Sfx statement, not a loop continue, so
     // this carries its own.
@@ -3089,6 +3423,10 @@ function pause() {
   stopLoop();
   syncTuner();
   render();
+  // ...and the name field, which the render above cannot take away: it is shown
+  // and hidden from the overlay chain, and a paused screen draws no further
+  // frames. The resume's first frame puts it back if the card is still up.
+  if (window.Net && Net.showNameField) Net.showNameField(false);
 }
 // A lock request can fail (Chrome's ~1.3s post-Escape cooldown, automation,
 // no API at all). Push mode cannot run without it, so only that caller pauses
@@ -3266,7 +3604,14 @@ const KEY_AIM = {
   KeyW: [0, -1], KeyE: [1, -1], KeyD: [1, 0], KeyC: [1, 1],
   KeyX: [0, 1], KeyS: [0, 1], KeyZ: [-1, 1], KeyA: [-1, 0], KeyQ: [-1, -1],
 };
+// The name field is a DOM input over the canvas (js/net.js). While it holds
+// focus the keyboard belongs to it and not to the ship: the element stops its
+// own events from bubbling, and this is the second half of that guard, for
+// focus taken with Tab or by a handler added later. Local play's Net stub
+// answers false, so nothing here changes off the wire.
+const typingName = () => !!(window.Net && Net.typing && Net.typing());
 document.addEventListener("keydown", (e) => {
+  if (typingName()) return;
   if (e.code === "Escape") {
     if (G.running && mouseMode()) {
       e.preventDefault();
@@ -3300,6 +3645,10 @@ document.addEventListener("keydown", (e) => {
   P.aimed = true;
 });
 document.addEventListener("keyup", (e) => G.keys.delete(e.code));
+// ...and NOT guarded by typingName: a key released while the box has focus must
+// still leave G.keys, or a key held before the click stays held forever. The
+// keydown guard is what keeps anything from entering that set in the first
+// place, so clearing is only ever safe.
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 function trackMouse(e) {
   if (!Number.isFinite(e.clientX) || !Number.isFinite(e.clientY)) return;
@@ -3837,6 +4186,25 @@ window.__test = { G, players, cam, step: clientStep, setCamMode, render, WW, WH,
   },
   keyThrustUnlocked, // the ring's thrust gate, read exactly as step() reads it
   cometActive, // the comet flag, read exactly as the encounter reads it
+  // the COMET PRESENTATION owner — the record every consumer of the halo, the
+  // bloom, the wake and the HUD bar reads, its per-tick advance (the frame
+  // loop's own call sits in capturePresent, so a suite driving stepSim must
+  // call this itself), and the page-side instrument beside it. The phase
+  // constants ride along so a check names them instead of copying 0/1/2.
+  cometPres, cometView, cometPresTick,
+  cometPhases: () => ({ off: CP_OFF, wind: CP_WIND, live: CP_LIVE,
+    windTicks: COMET_WIND_TICKS, flashTicks: COMET_FLASH_TICKS, hold: COMET_WIND_HOLD }),
+  cometLog: () => ({ ...COMET_LOG, ring: COMET_LOG.ring.map((e) => ({ ...e })) }),
+  cometLogReset: () => {
+    COMET_LOG.asks = COMET_LOG.confirms = COMET_LOG.retracts = COMET_LOG.pops = 0;
+    COMET_LOG.hurtWind = COMET_LOG.hurtLive = COMET_LOG.hurtSkew = 0;
+    COMET_LOG.leadSum = COMET_LOG.n = 0;
+    COMET_LOG.leadMin = COMET_LOG.leadMax = -1;
+    for (const e of COMET_LOG.ring) { e.ask = e.conf = e.lead = -1; e.hurt = 0; }
+    clogOpen = -1; clogHurt = 0;
+  },
+  cometCue: noteCometCue, // the drains' hook, so a check can land a cue inside
+                          // a known phase without a wire or an encounter
   pauseLines, // the copy the idle screen would print — the card's text stand-in included
   // locked+tick+lag intentionally mixes the immediate pointer mirror with the
   // delayed simulation direction; consumers must not assert they agree.
@@ -4021,6 +4389,12 @@ Object.assign(window.__test, {
   FRAMES_PER_TICK, // the ONE frames-per-tick lid — server admission, the sim
                    // drain and the predictor's replay all read this value
   presentedPool,   // the net-mode presentation accessor, for checks
+  // the presentation caches' own per-tick roll. The frame loop calls it once
+  // per sim tick; a suite that drives FX.advance directly has to call it too,
+  // because the light layer's cut verdict is FORWARDED from here now and a
+  // layer driven with no capture behind it would never see one.
+  capturePresent,
+  presTakeCut,     // ...and the latch itself, so a check can name the verdict
   // the FLIGHT KERNEL itself — the pure per-seat slices, so a check (and
   // phase 11b's predictor) can run them against a DETACHED kernel state
   // rather than re-implementing the flight arithmetic
@@ -4084,9 +4458,6 @@ Object.assign(window.__test, {
   // variable the rebate converts to ticks; enc.tunables() carries it too
   // once the capture-commit meta pin admits it
   pvpRewind: () => PVPREWIND,
-  // candidate D's client flag: the local halo shows server-confirmed comet
-  // only (presentedPool above). Render-side; never crosses the wire.
-  setCometHaloWire: (v) => { COMETHALOWIRE = !!v; },
   // the seat parameter defaults to 0, so the ~20 existing no-arg reads keep
   // reporting the local seat; the report keys (acc/scur/fireHeld) are API
   inputState: (s = 0) => ({ INPUTMODE, INPUTLAG, acc: { ...players[s].input.acc },

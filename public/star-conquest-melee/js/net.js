@@ -111,6 +111,58 @@
     : params.has("mp") ? mpDefault(location)
     : "";
 
+  // ---- the display name ------------------------------------------------------
+  // The ONE piece of state this repository keeps across visits, and the only
+  // localStorage key it writes anywhere (js/fx.js's flag comment names the
+  // exception). It is a LOBBY fact: the server sanitizes it, stores it per
+  // SOCKET and fans it out on the `you` roster — it never enters the sim, the
+  // snapshot, or any hash, so no trace and no golden fixture can move for it.
+  //
+  // The READ has to live HERE, ahead of connect(): the hello fires from the
+  // socket's own open handler moments after this module loads, long before any
+  // DOM input exists, so a name typed on a previous visit can only reach that
+  // hello from storage. A first-ever visitor has nothing stored and its hello
+  // carries no name at all — the `ui: name` route is the only path on visit 1,
+  // which is exactly what the field below sends.
+  //
+  // The client's copy is never authoritative. This sanitize mirrors the
+  // server's so the field shows what the server will accept, but every name
+  // that reaches a screen came back down off the wire.
+  const NAME_MAX = 12; // mirrored by hand from server/server.js, like NET_V
+  const NAME_KEY = "scmelee.name";
+  // ...and so is the strip. Cc, Cf, Zl and Zp by category — Cf is the class
+  // that carries the soft hyphen, the zero-width family, the invisible
+  // operators and the bidi overrides — plus the invisibles no category catches,
+  // because the Hangul and Khmer fillers are letters and the blank Braille
+  // pattern is a symbol. server/server.js carries the same expression and the
+  // long form of this reasoning; the two must move together, and the SERVER's
+  // answer is the only one that reaches a screen.
+  const NAME_STRIP = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u115F\u1160\u17B4\u17B5\u2800\u3164\uFFA0]/gu;
+  function cleanName(v) {
+    if (typeof v !== "string") return null; // type gate first — a non-string is ABSENT
+    // strip, then trim, then cap: a name of STRIPPED characters has to come out
+    // EMPTY here, or the box shows a blank it will not be able to explain and
+    // the board draws a nameless row instead of falling back to Player-N. Only
+    // of stripped ones — an invisible code point outside NAME_STRIP survives
+    // this call as it survives the server's, and server/server.js records why
+    // that residue is accepted.
+    const trimmed = v.replace(NAME_STRIP, "").trim();
+    if (!trimmed) return null;
+    return Array.from(trimmed).slice(0, NAME_MAX).join("").trim() || null;
+  }
+  // Storage can throw outright — Safari's private mode, a file:// page, a
+  // profile with site data blocked — and a name is the least important thing on
+  // the screen. Both halves swallow, and the game runs on nameless.
+  function storedName() {
+    try { return cleanName(window.localStorage.getItem(NAME_KEY)); } catch { return null; }
+  }
+  function storeName(name) {
+    try {
+      if (name) window.localStorage.setItem(NAME_KEY, name);
+      else window.localStorage.removeItem(NAME_KEY);
+    } catch { /* a name that cannot be remembered is still a name this session */ }
+  }
+
   if (!url) {
     // local mode: every hook declines, every caller falls through
     window.Net = {
@@ -126,6 +178,13 @@
       buy: () => false,
       restart: () => false,
       stats: () => null,
+      // ...and the display name, which local play DOES have: there is no wire
+      // to fan one out, so the stored name answers for seat 0 — this player's
+      // own seat, and the only one solo ever has. Every other seat is nameless
+      // and the board draws its Player-N fallback, unchanged.
+      seatName: (s) => (s === 0 ? storedName() : null),
+      typing: () => false,     // no field is built without a server to send to
+      showNameField: () => {}, // ...so the render's per-frame call is a no-op
     };
     return;
   }
@@ -250,6 +309,12 @@
   let rosGranted = -1;
   let rosMax = -1;
   let rosStarted = false;
+  // ...and the display names, parallel to the seats and exactly rosMax long —
+  // whatever the last `you` said. Empty until the first one lands, which reads
+  // as "every seat nameless" and draws the ordinary Player-N fallbacks. Like
+  // the two counts it is a LOBBY fact: a names-only `you` repaints the board
+  // and tears nothing down (see onYou).
+  let seatNames = [];
   let lastAck = 0;        // the server's highest CONTIGUOUS RESOLVED input n
 
   // ---- the OWN-SHIP predictor (phase 11b) -----------------------------------
@@ -638,6 +703,116 @@
   document.body.appendChild(banner);
   note("NET connecting to " + url + " …");
 
+  // ---- the name field (DOM, not canvas) -------------------------------------
+  // A real <input>, appended to document.body exactly as the banner above is,
+  // and for the same reason: the draw pass stays untouched. It also dodges four
+  // things a canvas-drawn text box would have had to re-implement or fight —
+  // the global keydown handler in js/game.js, pointer lock, the shop/board hit
+  // test, and the fillText vocabulary the browser suites filter on. Typing into
+  // a DOM node produces no fillText at all, so no existing pixel or card leg
+  // can see this element.
+  //
+  // It rides the CLAIM and SEAT RELEASED cards — js/encounter.js's render calls
+  // showNameField from the one branch that knows a card is up, and js/game.js's
+  // pause() hides it, since a paused screen draws no frame to hide it with.
+  const nameField = document.createElement("input");
+  nameField.id = "netname";
+  nameField.type = "text";
+  nameField.maxLength = NAME_MAX; // a courtesy stop, not the rule: it counts
+                                  // UTF-16 units and the server counts code
+                                  // points, and the server's answer is the only
+                                  // one that reaches a screen
+  nameField.autocomplete = "off";
+  nameField.spellcheck = false;
+  nameField.placeholder = "your name";
+  nameField.setAttribute("aria-label", "your display name");
+  nameField.style.cssText = "position:fixed;left:50%;top:calc(50% + 34px);" +
+    "transform:translateX(-50%);z-index:10;display:none;width:150px;text-align:center;" +
+    "font:400 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;" +
+    "color:#e6e9ef;background:rgba(14,17,25,0.9);border:1px solid #313a4e;" +
+    "border-radius:0;padding:3px 6px;outline:none;";
+  // the canvas fills the viewport (index.html: 100vw/100vh), so 50% of the page
+  // IS the middle of the field, and the offset puts the box under the card's
+  // second line rather than over it
+  nameField.value = storedName() || "";
+  // One id, one element, enforced here rather than assumed. A page normally
+  // evaluates this file once — but the browser suites re-evaluate it under one
+  // URL after another to pin the ?server= / ?mp opt-in, and every load that
+  // appended a second #netname would leave a focusable input behind for every
+  // later load and every later suite to trip over.
+  const staleField = document.getElementById("netname");
+  if (staleField) staleField.remove();
+  document.body.appendChild(nameField);
+
+  // What the server has last been told. It starts as what the hello carried, so
+  // a returning player who opens the card and closes it again sends nothing.
+  let nameSent = storedName();
+  let nameSentAt = -1;
+  let namePending = false;
+  // The server rate-gates renames at a quarter second and answers a dropped one
+  // with silence, so a fast second edit would vanish with no way to tell. Hold
+  // it here instead and flush when the window opens — 300 ms, a margin over the
+  // server's 250, because the two clocks are not the same clock.
+  function pushName() {
+    if (!ws || ws.readyState !== 1) return;
+    const now = Date.now();
+    const gap = now - nameSentAt;
+    if (nameSentAt >= 0 && gap < 300) {
+      if (!namePending) {
+        namePending = true;
+        setTimeout(() => { namePending = false; pushName(); }, 300 - gap);
+      }
+      return;
+    }
+    nameSentAt = now;
+    // an empty string, not an absent field: this is how a player CLEARS a name,
+    // and the server's sanitize reads it as null exactly as it reads junk
+    ws.send(JSON.stringify({ v: NET_V, ui: "name", name: nameSent || "" }));
+  }
+  function commitName() {
+    const next = cleanName(nameField.value);
+    nameField.value = next || ""; // what was accepted, shown back — the box never
+                                  // keeps text the server would have thrown away
+    if (next === nameSent) return;
+    nameSent = next;
+    storeName(next); // remembered for the NEXT visit; this visit's copy is the
+                     // one the server just sanitized and fanned out
+    pushName();
+  }
+  // Every one of these stops propagation and NONE of them preventDefault: the
+  // keystroke has to reach the box, it simply must not also reach the ship.
+  // js/game.js and js/encounter.js both hang their handlers on `document`, so
+  // stopping the bubble at the element is what keeps W from thrusting and R
+  // from restarting the match while somebody types "Warder".
+  for (const kind of ["keydown", "keyup", "keypress"]) {
+    nameField.addEventListener(kind, (e) => {
+      e.stopPropagation();
+      if (kind !== "keydown") return;
+      if (e.key === "Enter") { commitName(); nameField.blur(); }
+      else if (e.key === "Escape") { nameField.value = nameSent || ""; nameField.blur(); }
+    });
+  }
+  // ...and the other direction: a click INTO the box must not become a claim
+  // ask. The ask rides the ordinary fire edge — js/net.js's flushInputs asks
+  // `pendingInputs.some((f) => f.fp)`, and `fp` is incremented by inputFire()
+  // off the CANVAS mousedown alone, which a press on this element never
+  // reaches. The stop is here anyway because document-level handlers do see
+  // the bubble.
+  //
+  // MOUSEUP IS DELIBERATELY NOT ON THIS LIST, and it was: `G.leftHeld` is set
+  // by the canvas mousedown and cleared ONLY by the document-level mouseup
+  // (js/game.js), so a left press begun on the field and released over this
+  // box — which sits thirty-four pixels under the card's own text, squarely in
+  // the claim click's neighbourhood — never cleared it. A stranded leftHeld
+  // rides the wire as `fh` and calls fire(0) every tick, so the ship fired
+  // continuously until the next resume(). Letting the release bubble re-opens
+  // nothing: the button-0 branch of that handler does exactly one thing, which
+  // is to clear the flag, and the button-2 branch is all release work too.
+  for (const kind of ["mousedown", "click", "contextmenu", "pointerdown"]) {
+    nameField.addEventListener(kind, (e) => e.stopPropagation());
+  }
+  nameField.addEventListener("blur", commitName);
+
   // ---- helpers ---------------------------------------------------------------
   const lerp = (a, b, k) => a + (b - a) * k;
   // angle lerp through the wrapped difference — no ±π seam
@@ -740,7 +915,15 @@
   function connect() {
     ws = new WebSocket(url);
     ws.addEventListener("open", () => {
-      ws.send(JSON.stringify({ v: NET_V, hello: true }));
+      // the stored name rides the hello, and the server sets it BEFORE the
+      // grant — so the very first roster this room fans out already carries it.
+      // Omitted entirely when there is nothing stored: an absent field is the
+      // honest shape for "this visitor has never typed one", and the server's
+      // type gate reads it as absent either way.
+      const hello = { v: NET_V, hello: true };
+      const boot = storedName();
+      if (boot) hello.name = boot;
+      ws.send(JSON.stringify(hello));
       helloed = true;
       note("NET connected — " + url);
     });
@@ -777,9 +960,17 @@
       // ...and so did the roster. A room this client can no longer see is not
       // a room it may keep reporting, and forgetting it makes the rejoin's
       // first `you` a change on both counts rather than only the identity.
+      // The NAMES are the roster's third field and go with the other two, for
+      // that same reason and one more: they are the only roster value that is
+      // drawn on the FIELD rather than in the banner, so a set kept here would
+      // leave a frozen board labelled with the pilots of a room this client has
+      // been disconnected from. Nothing depends on the clear — the identity
+      // reset above forces the next `you` through the assignment either way —
+      // so it is here to keep the sentence above true of every line under it.
       rosGranted = -1;
       rosMax = -1;
       rosStarted = false;
+      seatNames = [];
       released = false; // ...the latch goes with it. A dropped socket is not a
                         // released seat — the rejoin asks for one like any fresh
                         // client, and a latch that survived the close would show
@@ -897,15 +1088,31 @@
     const granted = hasRoster ? you.granted : -1;
     const maxSeats = hasRoster ? you.maxSeats : -1;
     const started = hasRoster && you.started === true;
+    // the names, re-sanitized on arrival. NOT because the server is doubted —
+    // it is the authority and this array is the only thing that ever reaches a
+    // screen — but because a decode that trusts a shape it did not check is how
+    // a stray object ends up as "[object Object]" on somebody's scoreboard row.
+    // A non-array reads as no names at all, which is the same UNKNOWN the two
+    // counts fall back to and draws exactly the pre-name board.
+    const nextNames = Array.isArray(you.names) ? you.names.map(cleanName) : [];
     const identitySame = seat === mySeat && seatEpoch === mySeatEpoch &&
       matchEpoch === myMatchEpoch;
     const rosterSame = granted === rosGranted && maxSeats === rosMax &&
       started === rosStarted;
-    if (identitySame && rosterSame) return;
+    // ...and the names are the roster's third count for this purpose: a change
+    // here is a LOBBY change, so it reaches the early return and nothing else.
+    // The teardown below keys on IDENTITY alone — seat, seatEpoch, matchEpoch —
+    // so a `you` that carries only a new name can never clear the input ring,
+    // reset the sequence or resync the buffer. That is the whole reason a name
+    // is allowed to ride this message at all.
+    const namesSame = nextNames.length === seatNames.length &&
+      nextNames.every((v, i) => v === seatNames[i]);
+    if (identitySame && rosterSame && namesSame) return;
     rosGranted = granted;
     rosMax = maxSeats;
     rosStarted = started;
-    if (identitySame) { noteIdentity(); return; } // a seat arrived, or the door shut
+    seatNames = nextNames;
+    if (identitySame) { noteIdentity(); return; } // a seat arrived, the door shut, or somebody named themselves
     const namespaceMoved = seat !== mySeat || seatEpoch !== mySeatEpoch;
     const matchMoved = matchEpoch !== myMatchEpoch;
     // the release latch, set on the EDGE. A `you` that takes a real seat away is
@@ -1485,6 +1692,9 @@
     const lead = starving ? 0 : leadTicks();
 
     if (!s0.players.length) return; // the wire always carries seat 0; reject a malformed empty view
+    appliedTick = s0.tick; // the tick the discrete state below belongs to — set
+                           // AFTER the malformed-view reject, so a rejected
+                           // apply cannot vouch for a tick it never wrote
     setPlayerCount(s0.players.length);
     enc().syncSeats(); // ...and the ENCOUNTER's seat records with them. Local
                        // play only ever resizes at restart(), so nothing else
@@ -1757,6 +1967,11 @@
 
   // events fire when the presented clock reaches their snapshot's tick, so a
   // boom lands with the frame that shows it, not the moment the packet arrived
+  // ...the tick the LAST apply() actually wrote state from (its s0 — discrete
+  // bits stay on s0). fireEvents hands the comet instrument this so a cue from
+  // any OTHER tick in a multi-tick drain window cannot claim the applied comet
+  // flag as its own tick's truth — see noteCometCue's tickMatched.
+  let appliedTick = -1;
   function fireEvents() {
     while (evq.length && evq[0].tick <= pt) {
       const { tick, e } = evq.shift();
@@ -1772,6 +1987,13 @@
       // only signal this layer gets that the authority cut the run. FX.cue
       // refuses a positionless cue itself, so nothing else reaches ink.
       if (e.k !== "termChange" && window.FX) FX.cue({ kind: e.k, at, gain: e.g, seat: e.seat });
+      // the comet instrument's hurt half. game.js's drainCues() carries the
+      // same call, and in net mode the local sim never steps, so this is the
+      // only one that ever runs here. The third argument says whether this
+      // event's tick is the one apply() wrote the comet flag from — a jump or
+      // starvation drain empties a whole window against one flag, and the
+      // instrument's tripwire must not fire on the mismatched ones.
+      noteCometCue(e.k, e.seat, tick === appliedTick);
       if (!at) continue;
       if (e.k === "hit" || e.k === "boom") spawnImpactFx(at.x, at.y, 0, -1, "enemy");
       else if (e.k === "clang" || e.k === "wall") spawnImpactFx(at.x, at.y, 0, -1, "wall");
@@ -1830,6 +2052,36 @@
     // THE seat this client flies, or null while it spectates or waits for its
     // grant. game.js's localSeat() reads it and folds null to 0.
     seat: () => mySeat,
+    // the room's SEAT RANGE, straight off the last `you` — -1 until the first
+    // one lands. It is NOT rosGranted: that is the seated COUNT (sockets held),
+    // which says nothing about which ids exist. game.js's grantedSeat() bounds
+    // the granted id against this instead of the last snapshot's player list,
+    // because a grant can legitimately name a seat the snapshot has not shown
+    // yet. A plain field read, no allocation — it is on the per-view path.
+    maxSeats: () => rosMax,
+    // ...and the seat's DISPLAY NAME, or null where there is none. Straight off
+    // the last `you` — a plain indexed read with no allocation, because
+    // js/encounter.js's board calls it once per row per frame. It answers null
+    // for a seat outside the roster's range and for a seat with no record yet,
+    // which is a real state: pre-start the server reports maxSeats 4 before any
+    // snapshot has widened the player list, so a card can render for a seat
+    // nothing else knows about. The board's Player-N fallback covers both.
+    seatName: (s) => (Number.isInteger(s) && s >= 0 && s < seatNames.length
+      ? seatNames[s] : null),
+    // ...and the field itself. showNameField is called once per rendered frame
+    // from js/encounter.js's overlay chain, so it is written as a no-op when
+    // nothing changes — one string compare, no layout read, no allocation.
+    showNameField: (on) => {
+      const want = on ? "block" : "none";
+      if (nameField.style.display === want) return;
+      if (!on && document.activeElement === nameField) nameField.blur(); // commits
+      nameField.style.display = want;
+    },
+    // ...and whether the keyboard currently belongs to the box. js/game.js and
+    // js/encounter.js ask before acting on a key, which covers the one route
+    // the stopPropagation above cannot: focus taken with Tab, and a handler
+    // added later that does not know this element exists.
+    typing: () => document.activeElement === nameField,
     // ...and the half of that null the fold destroys: this client, and only
     // this client, has had a seat taken back. Set by the `you` that took it and
     // spent by the first presented snapshot that says the seat is not released
@@ -1880,10 +2132,13 @@
         offset: Math.hypot(off.x, off.y), lastRebaseMag, rebases,
         unacked: sentHist.length, tick: predTick,
         tracers: tracers.length } }),
-    // the predictor's presented kernel view, for the presentation accessor
-    // (game.js presentedPool) and the harness — null while it stands down
+    // the predictor's presented kernel view — the pool and cooldown for
+    // game.js's presentedPool, the pose and velocity for the harness; null
+    // while the predictor stands down. The comet flag left this record with
+    // the halo-wire retirement: the machine's CONFIRMED state reads the wire
+    // flag off the player struct, and nothing read predicted().comet any more.
     predicted: () => (predOn ? { energy: predK.energy, energyMax: predK.energyMax,
-      cool: predK.cool, comet: predK.comet,
+      cool: predK.cool,
       x: predK.ship.x + off.x, y: predK.ship.y + off.y,
       vx: predK.vel.x, vy: predK.vel.y } : null),
     // the live speculative-tracer list — game.js draws it in the world pass

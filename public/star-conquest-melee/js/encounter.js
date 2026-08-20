@@ -835,16 +835,28 @@
   // all 33 call sites), so aggro, targeting, sweeps and orbs drop the seat for
   // free; `absent` is what additionally takes it off the board and out of the
   // draw, and what stops the respawn loop from ever dealing it back on its own.
-  function unseatSeat(s) {
+  // THE one definition of a seat with nobody behind it — the terminal write
+  // unseatSeat (a mid-run leave) and parkSeat (an empty-seat statement, made
+  // at match start or across a restart cut) both make, extracted so a seventh
+  // terminal field added later cannot be cleared on one path and left stale
+  // on the other: that split is a hashed divergence waiting for a four-seat
+  // start. A seat already terminal or missing is left alone — the same guard
+  // both callers used to carry themselves.
+  function vacateSeat(s) {
     const S = E.seats[s];
     if (!S || S.absent) return;
-    const wasStanding = S.hull > 0;
     S.absent = true;
     S.claimT = 0;
     S.respawnT = 0;
     S.hull = 0;
     S.invuln = 0;
     S.hitFlash = 0;
+  }
+  function unseatSeat(s) {
+    const S = E.seats[s];
+    if (!S || S.absent) return;
+    const wasStanding = S.hull > 0; // read BEFORE the terminal write takes the hull
+    vacateSeat(s);
     // ...and the ONE thing a leave does share with a death: it can empty the
     // field. The wipe rule is "the run deals back to a new one when no seat is
     // left standing", and it was armed only inside hitPlayer's death branch — so a
@@ -877,6 +889,22 @@
     if (!S || !S.absent) return;
     S.absent = false;
     S.claimT = ECFG.player.claim;
+  }
+  // PARKING (the drop-in round): a seat the fresh deal leaves with nobody
+  // behind it. The same terminal shape as an AFK unseat — the ONE shared
+  // write, vacateSeat — but a DIFFERENT operation, deliberately not routed
+  // through unseatSeat: parking is a statement about an already-empty seat,
+  // not a leave, so it must never arm the wipe (unseatSeat's wasStanding
+  // branch arms one when it takes the last standing seat; both callers here
+  // just dealt a fresh wave with wipePending cleared), bill nothing and cue
+  // nothing. TWO callers, both in server.js and both right after a restart of
+  // the sim: startRound parks after startMatch, and restartRound — the
+  // mid-match restart cut — parks after enc.restart(). Each must park AFTER
+  // its restart, because restart() clears `absent` on every seat, and each
+  // then re-deals wave 1 (when anything parked) so the parked seats' shares
+  // leave the schedule.
+  function parkSeat(s) {
+    vacateSeat(s);
   }
   // the previous-tick ship position for seat s — see E.shipPrev's comment
   function prevOf(s) {
@@ -2462,9 +2490,23 @@
     // the pack's initial aggro for the owner-lock window (makeBody). Copies
     // interleave seat-ascending inside each base group, so with one seat the
     // deal is byte-identical to the single-player schedule.
+    //   THE PRESENCE GATE (the drop-in round): a PARKED seat — `absent`,
+    // nobody behind it — is dealt NO copy at all. The gate lives HERE, at the
+    // deal, and nowhere else: skipping an absent owner at SPAWN time instead
+    // would leave its groups forever un-spawned and deadlock the wave-clear
+    // check (`every g.spawned`). The deal is the one place the wave's size is
+    // decided, so it is the one place presence may shrink it — and a deal in
+    // which EVERY seat is absent lawfully produces ZERO groups: the schedule
+    // holds, `every` on an empty list clears vacuously, and the field stays
+    // empty until a reclaim asks for wave 1 (see the re-deal in encStep).
+    // E.seats[] can be shorter than players[] mid-setup, so the record's
+    // existence is guarded; a missing record reads as "present" — exactly
+    // what syncSeats is about to make it.
     E.groups = [];
     for (const g of waveGroups(n)) {
       for (let s = 0; s < players.length; s++) {
+        const S = E.seats[s];
+        if (S && S.absent) continue;
         E.groups.push({ count: g.count, type: g.type, radar: g.radar, owner: s,
                         warnAt: g.warnAt, spawnAt: g.spawnAt, points: null, spawned: false });
       }
@@ -2711,6 +2753,31 @@
     // and one code path: a net client never steps its own encounter, so this
     // runs on the server in net play and in the local sim solo, which is the
     // whole point of putting it here rather than behind a mode flag.
+    // ...and the one press the ALL-ABSENT re-deal reads. A wave dealt while
+    // every seat was parked produced ZERO groups (the presence gate), and
+    // nothing re-deals on its own — "nobody returns unasked". The press that
+    // deals a seat back INTO that starved field is the ask, and it is an EDGE
+    // sampled here, in the two branches a RECLAIM can land in, never derived
+    // from state at rest: the suites (and the shop legs) stage `E.groups = []`
+    // with live seats all the time, and a level-read would re-deal under every
+    // one of them. The edge asks for BOTH halves of the starved room — no
+    // groups AND no living seat — which in production say the same thing
+    // (only an all-absent deal is empty), so the second half costs nothing
+    // live and keeps a staged empty list beside a flying ship from ever
+    // re-dealing. The respawnT branch is deliberately NOT sampled — a seat
+    // with a countdown running was PRESENT at its wave's deal, so its wave has
+    // groups and the empty-deal case cannot reach that branch at all.
+    //   ON THE LIVE SERVER this state is hard to reach, not dead: every
+    // transition into all-absent passes a sweep that calls endRoomIfOver, and
+    // roomReset usually stops the loop before an all-absent tick ever runs.
+    // The surviving window is a seat whose sim claim window lapses inside
+    // encStep while a socket GRACE is still pending (absent, no ws, lapseAt
+    // still armed) — both server sweeps skip that shape, and the room ticks
+    // all-absent until the grace expires. The fixtures reach the state
+    // directly through the test seam. Do not delete this as dead code.
+    const emptyDealAsk = () =>
+      !E.groups.length && !players.some((_, i) => seatAlive(i));
+    let reclaimedIntoEmptyDeal = false;
     for (let s = 0; s < E.seats.length; s++) {
       const S = E.seats[s];
       const press = claimPress(s);
@@ -2719,7 +2786,11 @@
         // the RECLAIM. A press on a parked seat takes it back — and it can only
         // reach here from a client the server has bound to this seat, which is
         // what keeps a seat nobody is behind from dealing itself in
-        if (press) { S.absent = false; respawnSeat(s); }
+        if (press) {
+          if (emptyDealAsk()) reclaimedIntoEmptyDeal = true;
+          S.absent = false;
+          respawnSeat(s);
+        }
       } else if (S.respawnT > 0) {
         // the press is READ on the expiry tick, and it is an EDGE, not a level.
         // claimPress is latched off a frame's `fp` — the fire presses that began
@@ -2743,8 +2814,15 @@
           else S.claimT = ECFG.player.claim;
         }
       } else if (S.claimT > 0) {
-        if (press) { S.claimT = 0; respawnSeat(s); }
-        else if (--S.claimT === 0) unseatSeat(s);
+        if (press) {
+          // the ordinary window's press — and the OTHER route a reclaim takes:
+          // the server's grant goes through reseatSeat, which turns a parked
+          // seat into exactly this waiting one, so the click that answers an
+          // all-absent field lands here rather than on the absent branch above
+          if (emptyDealAsk()) reclaimedIntoEmptyDeal = true;
+          S.claimT = 0;
+          respawnSeat(s);
+        } else if (--S.claimT === 0) unseatSeat(s);
       }
     }
     // ...and APPLIED, BELOW that loop. The split is the whole reason there are
@@ -2830,16 +2908,42 @@
                          // exists; a PERSISTENT one is server business, not this field
         if (S.stock > 0) S.stock = ECFG.player.stock; // the quarter-rule lives refill
                          // with the run — but only for a seat that is still IN it. A
-                         // seat the quarter rule RETIRED sits at stock 0, hull 0,
-                         // respawnT 0, claimT 0 and absent false: the respawn loop has
-                         // no branch that matches it, so nothing on the field can ever
-                         // deal it back and only the phase-09 hand-off (reseatSeat, on
-                         // the server's grant) may. Refilling it would hand three lives
-                         // to a seat with no path onto the field — inert today, and a
-                         // lie the moment the hand-off reads stock to decide whether
-                         // the seat is free, because it would quietly cancel the turn
-                         // a waiter had already been given. The wipe deals nobody back
-                         // in; that has to include the seat the rule already parked.
+                         // seat the quarter rule RETIRED is PARKED: stock 0 and respawnT
+                         // 0 (the retirement line writes those two and nothing else),
+                         // hull 0 from the death branch above it, claimT 0 and absent
+                         // false, both untouched since the death. The claim loop's three
+                         // branches are absent, respawnT > 0 and claimT > 0 — a retired
+                         // seat matches NONE, so nothing on the FIELD deals it back, and
+                         // reseatSeat is a no-op on it too: it opens `if (!S ||
+                         // !S.absent) return;` and a retired seat's absent is false.
+                         // Two things still reach it. restart() re-arms it outright,
+                         // stock included. And the SOCKET route does, in one hop more
+                         // than it looks: unseatSeat refuses only an ALREADY-absent
+                         // seat, so when the retired player's grace lapses,
+                         // server.js's unseatLapsedSeats parks the seat `absent` — and
+                         // from there reseatSeat is live. It is what deals the seat
+                         // back, but not by itself and not through the branch it looks
+                         // like: server.js runs it UNCONDITIONALLY on every grant, and
+                         // it writes absent false and claimT — so by the time the claim
+                         // loop reads the seat, the absent branch no longer matches and
+                         // the CLAIM WINDOW branch is the one holding it. A click there
+                         // deals it back; silence spends the window and unseatSeat parks
+                         // it again. (The absent branch deals back only the seat no
+                         // grant ran for — the same socket, still bound, clicking on the
+                         // seat it never left.) Either way it comes back with stock
+                         // STILL 0, because respawnSeat never writes stock, so its next
+                         // death runs `--S.stock` to -1 and retires it again on the
+                         // spot. One life, not three, for a seat the rule already spent
+                         // — and that outcome is EMERGENT, not a decision anyone
+                         // recorded: it falls out of no path refilling stock on the way
+                         // back in. What follows is the argument for leaving it that
+                         // way, not a ruling. Refilling here would undo
+                         // exactly that: the seat would come back through the reclaim on
+                         // a full three lives it never earned, and a hand-off reading
+                         // stock to decide whether the seat is free would quietly cancel
+                         // the turn a waiter had already been given. The wipe deals
+                         // nobody back in; that has to include the seat the rule
+                         // already parked.
                          // (lobbyWaiters is 0 in all of production today, so stock
                          // never depletes and this guard is a no-op there — it exists
                          // for the phase-16 drop-in joins that turn the rule on.)
@@ -2876,14 +2980,19 @@
                            // long past that line, so "idle" would hash a state the wave
                            // has already left for a whole tick
       // ...and the wave 1 startWave just dealt is dealt into a world with no
-      // living ship: rollAnchor's hold-off short-circuits, spawnEnemy's push-out
-      // skips dead seats and makeBody stamps every body tgtSeat -1, so left to
-      // run the whole pack parks off-screen and converges on the first player to
-      // click back in — 3 darts solo, 6 in a duo. Nothing is done about it HERE.
-      // The schedule hold at the top of encStep is what holds it, and it holds
-      // every tick the field is empty rather than sliding once by a guess at the
-      // return: this block has no idea when — or whether — anybody comes back,
-      // and it must not pretend to.
+      // living ship — and, presence-gated, only for the seats still PRESENT:
+      // a dead seat waiting on its countdown or its window gets its share, a
+      // PARKED seat gets none, and a room where every seat is parked gets an
+      // EMPTY deal that starves until a reclaim asks (the re-deal below the
+      // loop). For the shares that ARE dealt: rollAnchor's hold-off
+      // short-circuits, spawnEnemy's push-out skips dead seats and makeBody
+      // stamps every body tgtSeat -1, so left to run the pack parks
+      // off-screen and converges on the first player to click back in — 3
+      // darts per present seat. Nothing is done about it HERE. The schedule
+      // hold at the top of encStep is what holds it, and it holds every tick
+      // the field is empty rather than sliding once by a guess at the return:
+      // this block has no idea when — or whether — anybody comes back, and it
+      // must not pretend to.
       emit("wipe");        // the RUN's discontinuity marker. Every symptom of a wipe is
                            // a value a client already adopts — wave 1, an empty field,
                            // a board of zeroes — so this is the only fact on the wire
@@ -2894,6 +3003,23 @@
                            // answers that one by clearing every live flash and particle,
                            // which would take out the ship blast this block preserved
     }
+    // DEAL AT FIRST RECLAIM (owner decision, 2026-08-19). A wave whose deal
+    // found EVERY seat parked has zero groups: the field starves lawfully —
+    // schedule held, clear gate vacuous, nothing re-deals — because nobody
+    // returns unasked. The press sampled in the claim loop above is the ask:
+    // the first seat dealt back into that field gets wave 1 dealt fresh, AT
+    // THIS TICK, presence-gated against the seats as they stand NOW — the
+    // reclaimers are present, the still-parked seats are not, so the deal is
+    // the returning seats' shares as they stand at that tick (two same-tick
+    // reclaimers are dealt both shares). It sits HERE, below the loop and
+    // below the wipe apply, for the same reason the wipe's own startWave
+    // does: respawnSeat draws rand() through rollAnchor, so the reseed stays
+    // the tick's last act. `E.groups.length` is re-read because the wipe
+    // apply above may have dealt already on this very tick — a reclaim
+    // landing on a wipe's own tick leaves nothing for this line to do. No
+    // flag rides E.* for any of this: "the deal was empty" is derived, so
+    // the state hash and every committed fixture stand untouched.
+    if (reclaimedIntoEmptyDeal && !E.groups.length) startWave(1);
     // A wave clears only when the queue is empty AND the field is empty AND no
     // ordnance is still in the air — still an explicit simplification of Nova
     // Drift's timer-driven overlapping scheduler. The missile term is what
@@ -4365,7 +4491,14 @@
     ranked.forEach((r, i) => {
       const top = pad + i * cellH;
       const alive = seatAlive(r.s);
-      const name = "Player" + (r.s + 1);
+      // the seat's own name if it has told anyone one, and the ordinary
+      // Player-N string if it has not. The fallback is UNCHANGED on purpose:
+      // it is what every default-state pixel leg in the browser suites was
+      // captured against, and a nameless board must still draw exactly what it
+      // drew before. Net mode reads the last `you`; local play reads the one
+      // stored name, for seat 0, which is the only seat solo ever has.
+      const named = window.Net && Net.seatName ? Net.seatName(r.s) : null;
+      const name = named || "Player" + (r.s + 1);
       const score = boardScoreLine(r.S);
       ctx.font = "700 " + fit(name, nameH) + "px " + FONT;
       // the LOCAL seat is the bright one — a client granted seat 1 must see
@@ -4463,8 +4596,13 @@
     if (ebF > 0) {
       // a seat below the re-arm floor and not already in comet is LOCKED OUT,
       // not merely low — the dimmer fill is what makes "why won't it turn on"
-      // answerable from the screen, and the notch below says where the line is
-      ctx.globalAlpha = !EB.comet && ebF < ENARM ? 0.4 : 1;
+      // answerable from the screen, and the notch below says where the line is.
+      // "already in comet" comes off the ONE presentation owner the halo, the
+      // light layer and the wake read (game.js's cometView), so a bar that has
+      // gone bright and a ship that has not lit up cannot happen: a WINDUP
+      // brightens the bar too, because the pilot has asked and the screen owes
+      // them the answer to that ask rather than to the round trip.
+      ctx.globalAlpha = cometView(localSeat(), EB).phase === CP_OFF && ebF < ENARM ? 0.4 : 1;
       ctx.fillStyle = C.clay;
       ctx.fillRect(9, 32, Math.max(1, (ebW - 1) * ebF), 3);
       ctx.globalAlpha = 1;
@@ -4502,6 +4640,12 @@
       ctx.lineWidth = 1;
     }
     // --- state overlays ---
+    // ...and the DOM name field that rides them. It is shown from exactly ONE
+    // branch below — the claim / seat-release card — so the flag is set there
+    // and spent once after the chain, rather than by re-deriving the branch
+    // condition a second time and letting the two drift. Net mode owns the
+    // element; local play's Net stub answers this call with nothing at all.
+    let nameFieldOn = false;
     if (E.state === "cleared" && wt - E.clearTick < ECFG.clearHold) {
       const left = ECFG.clearHold - (wt - E.clearTick);
       ctx.globalAlpha = Math.min(1, left / 60); // the banner fades out
@@ -4515,6 +4659,10 @@
       // banner promises the wave encStep now deals itself — no shop screen follows
       ctx.globalAlpha = 1;
     } else if (seatless() || releasedHere(LS)) {
+      // the one screen the field belongs on: this player has no seat of its own
+      // and the card is inviting a click, which is the moment a name is worth
+      // asking for and the only moment the keyboard is not flying a ship
+      nameFieldOn = true;
       // NO SEAT OF ITS OWN — and therefore NO CARD BELOW THIS POINT. Every
       // branch under here reads LS, and LS is localSeatRec(), which falls back
       // to seat 0 so the camera and the HUD column always have a record to
@@ -4602,6 +4750,7 @@
       ctx.fillStyle = C.dim;
       ctx.fillText("press R to restart from wave 1 — tuner settings survive", FW / 2, FH / 2 + 12);
     }
+    if (window.Net && Net.showNameField) Net.showNameField(nameFieldOn);
     // --- the hovered row's own panel, over everything it explains ---
     // Last, so it paints over the spawn markers and the warning line if a wave
     // lands while the player is shopping — but never over the status stack or
@@ -4618,6 +4767,10 @@
   // thing on the screen with no picture. The death screen's R is what is left.
   document.addEventListener("keydown", (e) => {
     if (e.repeat) return;
+    // the name field owns the keyboard while it holds focus — an R typed into
+    // "Ranger" must not restart the match. The element stops its own bubble, so
+    // this covers the route that stop cannot: focus taken with Tab.
+    if (window.Net && Net.typing && Net.typing()) return;
     if (e.code === "KeyR" && E.state === "dead") {
       e.preventDefault();
       // NET MODE: the restart is the server's to perform — send it upstream
@@ -5186,6 +5339,9 @@
       reseatSeat,  // ...and the way BACK for the server: a parked seat that has
                    // been granted to a socket again is waiting on a click, not
                    // empty — see reseatSeat's own block
+      parkSeat,    // parking, for startRound and restartRound's restart cut:
+                   // absent with no wipe arm, no toll and no cue — see
+                   // parkSeat's own block
       // phase 15: the pose ring and the rebate, bare, for the suites — a
       // check may STAGE rows exactly as the standing legs stage E.shipPrev,
       // and rebate here lets a leg drive era arithmetic without a socket

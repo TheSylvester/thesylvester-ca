@@ -49,8 +49,14 @@
   // ---- the flag ------------------------------------------------------------
   // One switch for every drop of ink this file lays down. Off, the game is
   // byte-identical to fx.js not being loaded at all — that is check 1 of the
-  // fx suite, and it is the whole contract. `?fx=0` reaches the flat look; no
-  // localStorage, because this repository keeps none by policy.
+  // fx suite, and it is the whole contract. `?fx=0` reaches the flat look, and
+  // this flag keeps no localStorage of its own: the look must be reproducible
+  // from the URL alone, or a rig run and a player's tab stop agreeing.
+  //   The blanket claim that once stood here — that the repository keeps no
+  // localStorage at all — is no longer true. js/net.js keeps exactly ONE key,
+  // `scmelee.name`, the player's typed display name, so a returning player does
+  // not retype it. That key is a lobby fact: it never reaches the sim, a
+  // snapshot or a hash, and it does not reach this file at all.
   let ON = new URLSearchParams(location.search).get("fx") !== "0";
 
   // ---- the shipping look ---------------------------------------------------
@@ -86,10 +92,16 @@
                               // a monotonic counter, O(1) per step. Entry j back
                               // is [(n - 1 - j) % RING_N] — never push/shift.
   const FLASH_MAX = 24;       // live explosion records; the oldest is evicted
-  // A ship that moves further than this between two advances did not fly
-  // there: it is a respawn, a net snap or a restart. The trail is cut and the
-  // phosphor is dropped rather than smeared across the world.
-  const TELEPORT = 80;
+  // A ship that did not FLY where it now is — a respawn, a restart, a net snap
+  // — has its trail cut and the phosphor dropped rather than smeared across
+  // the world. This layer no longer decides that for itself: it used to carry
+  // a TELEPORT of 80 px measured per ADVANCE, against the presentation frame's
+  // own 28 px measured per TICK, and a hop between the two was cut by the
+  // frame and bridged by the wake. game.js owns the one predicate now and
+  // hands the verdict over per seat; see PRES_CUT there for why the verdict
+  // travels and not the number.
+  const cuts = [];            // seat -> this advance's forwarded verdict,
+                              // refilled at the top of every advance
 
   // ---- baked radial glow sprites, one per color ----------------------------
   // Never build a gradient per frame. One 64px sprite per color, baked once and
@@ -251,12 +263,12 @@
     fxTick += frames;
     stepFlashes(frames);
     stepParticles(frames);
+    // the frame layer's verdicts for every tick since the last advance, taken
+    // ONCE and shared: the wake and the phosphor must agree about what was
+    // cut, and the latch clears when it is read
+    const jump = takeCuts();
     writeRings();
-    advancePersist(frames);
-    // last, and it must be last: advancePersist asks jumped(), which compares
-    // against the pose the PREVIOUS advance saw, so the record is stamped only
-    // after that comparison has been made
-    notePoses();
+    advancePersist(frames, jump);
   }
 
   function stepFlashes(frames) {
@@ -276,11 +288,11 @@
   // Matching screen resolution in world space needs ~104 Mpx. So the buffer
   // lives in screen space and is re-registered to the camera each advance
   // instead, and it is dropped whole on any discontinuity.
-  function advancePersist(frames) {
+  function advancePersist(frames, jump) {
     const dx = camHas ? (cam.x - camPX) * scale * HALF : 0;
     const dy = camHas ? (cam.y - camPY) * scale * HALF : 0;
     if (!camHas || scale !== lastScale ||
-        Math.abs(dx) >= LW || Math.abs(dy) >= LH || jumped()) {
+        Math.abs(dx) >= LW || Math.abs(dy) >= LH || jump) {
       // no continuous registration to keep — a teleport, a restart, a net snap
       // or a re-fit. Smearing the old ink across the new frame would be a lie.
       persistCtx.setTransform(1, 0, 0, 1, 0, 0);
@@ -348,25 +360,20 @@
     persistCtx.globalCompositeOperation = "source-over";
   }
 
-  // Did any seat move further than a tick of flight this advance? Net snaps
-  // move a ship with no event at all, so this is detected here rather than
-  // through a hook in js/net.js.
-  const lastPose = [];
-  function jumped() {
+  // Did any seat fail to FLY where it now is, on any tick since the last
+  // advance? The frame layer answered that per TICK and latched it; this takes
+  // every latch, keeps the per-seat answers for the wake, and reports whether
+  // any of them fired for the phosphor. Net snaps move a ship with no event at
+  // all, which is why the answer comes from a displacement test at all rather
+  // than from a hook in js/net.js.
+  function takeCuts() {
     let jump = false;
     for (const P of players) {
-      const q = lastPose[P.id];
-      if (q && (Math.abs(P.ship.x - q.x) > TELEPORT || Math.abs(P.ship.y - q.y) > TELEPORT)) jump = true;
+      const c = presTakeCut(P.id);
+      cuts[P.id] = c;
+      if (c) jump = true;
     }
     return jump;
-  }
-  function notePoses() {
-    for (const P of players) {
-      let q = lastPose[P.id];
-      if (!q) q = lastPose[P.id] = { x: 0, y: 0 };
-      q.x = P.ship.x;
-      q.y = P.ship.y;
-    }
   }
 
   // ---- the cosmetic pose rings --------------------------------------------
@@ -377,17 +384,17 @@
   // a trail is: a polyline through recent positions, covering the same world
   // distance either way.
   //
-  // The ring is CUT — not bent — on any move longer than a tick of flight. A
+  // The ring is CUT — not bent — wherever the presentation frame cut. A
   // respawn, a restart and a net snap all move a ship with no continuity to
-  // draw, and a trail drawn across one is a line the ship never flew.
+  // draw, and a trail drawn across one is a line the ship never flew. The
+  // verdict is the frame layer's, taken once per advance above.
   function writeRings() {
     for (const P0 of players) {
       let r = rings[P0.id];
       if (!r) r = rings[P0.id] = { x: new Float64Array(RING_N), y: new Float64Array(RING_N), n: 0 };
-      if (r.n > 0) {
-        const j = (r.n - 1) % RING_N;
-        if (Math.abs(P0.ship.x - r.x[j]) > TELEPORT || Math.abs(P0.ship.y - r.y[j]) > TELEPORT) r.n = 0;
-      }
+      if (r.n > 0 && cuts[P0.id]) r.n = 0; // the frame layer cut this seat, so
+                                          // the wake cuts with it — one verdict,
+                                          // both consumers, no second threshold
       r.x[r.n % RING_N] = P0.ship.x;
       r.y[r.n % RING_N] = P0.ship.y;
       r.n++;
@@ -535,14 +542,23 @@
                                       // an unseated seat after it — used to slip past
                                       // an rsp test and light a wreck
       const vp = (view && view.ships && view.ships[P.id]) || P.ship; // the FRAME pose drawShip gets
-      const pool = presentedPool(P.id);
-      if (pool.comet) {
-        // the comet halo is the big warm bloom source, sized off the pool the
-        // ship draw reads — the same accessor, so the light and the hull can
-        // never disagree about whether the burn is on
-        const en = pool.enMax > 0 ? pool.en / pool.enMax : 0;
-        blob(vp.x, vp.y, (SHIP_R + 25 * en) * 1.5, PAL.clay, 0.5 * g1);
-        blob(vp.x, vp.y, SHIP_R + 4, PAL.bright, 0.22 * g1);
+      // the comet halo is the big warm bloom source, sized off the ONE owner
+      // the flat halo reads (game.js's cometView), so the light and the hull
+      // can never disagree about how big the burn is or whether the authority
+      // has confirmed it. The radius used to be a hard-coded 25 here against
+      // the flat layer's COMETAOE — a stale copy of that constant, which is 11
+      // today. Only the x1.5 survives, and it is not a second copy of the
+      // halo's size: it is this layer's own stated law that light exceeds the
+      // ink it surrounds.
+      const cv = cometView(P.id);
+      if (cv.phase === CP_LIVE) {
+        blob(vp.x, vp.y, cv.r * 1.5, PAL.clay, 0.5 * g1);
+        blob(vp.x, vp.y, SHIP_R + 4, PAL.bright, (0.22 + 0.5 * cv.flash) * g1);
+      } else if (cv.phase === CP_WIND) {
+        // the WINDUP is an ASK, not a burn: a faint core that swells with the
+        // flare and no warm halo at all, so the confirmed state stays the only
+        // thing on this screen that looks like a comet
+        blob(vp.x, vp.y, SHIP_R + 4, PAL.bright, 0.12 * cv.wind * g1);
       }
       blob(vp.x, vp.y, SHIP_R * 2.8, PAL.clay, 0.4 * g1);
       blob(vp.x, vp.y, SHIP_R * 1.5, PAL.clay, 0.22 * g1);
@@ -594,7 +610,11 @@
                                           // the hull for the same reason the glow above is
         const r = rings[P0.id];
         if (!r || r.n < 2) continue;
-        const comet = presentedPool(P0.id).comet;
+        // the wake stretches on the CONFIRMED burn alone — through the same
+        // owner the halo above reads. A windup is an ask, and a wake drawn for
+        // an ask that the authority may still refuse is the same lie the solid
+        // predicted halo used to tell.
+        const comet = cometView(P0.id).phase === CP_LIVE;
         const span = Math.min(Math.min(r.n, RING_N) - 1,
           Math.round((14 + 40 * TRAILS) * (comet ? 1.7 : 1)));
         for (let i = 0; i < span; i++) {
@@ -952,7 +972,7 @@
     P.length = 0;
     rings.length = 0;
     flashes.length = 0;
-    lastPose.length = 0;
+    cuts.length = 0; // the verdicts owed to a wake that no longer exists
     cueCount = 0;
     fxTick = 0;
     fseed(1);

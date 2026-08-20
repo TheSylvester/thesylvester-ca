@@ -59,6 +59,23 @@
   // lowpass below — most of the saw's energy dies in that filter, and what
   // survives is the rumble.
   const ENG_GAIN = 0.17, ENG_F0 = 40, ENG_F1 = 26;
+  // ---- the AFTERBURNER ------------------------------------------------------
+  // Comet mode drives the ONE persistent engine voice harder instead of adding
+  // a second one: a new voice would be a new thing to leak, to mute and to
+  // stop, and the hum is already the ship's own sound.
+  //
+  // Three parameters move, and the PITCH is deliberately not among them. The
+  // pitch belongs to speed alone — it is the only cue that says how fast this
+  // ship is going, and the flat layer keeps its halo and its tail separable
+  // for exactly the same reason. What moves instead is the timbre: the lowpass
+  // opens so more of the saw's harmonics survive, the resonance at the cutoff
+  // rises into a growl, and a floor under the drive means a COASTING comet
+  // still rumbles when no thrust is being asked for at all.
+  const ENG_BURN_CUT = 110; // Hz the lowpass opens by at a full burn, from 120
+  const ENG_BURN_Q = 0.9;   // ...and the resonance it gains there
+  const ENG_BURN_DRIVE = 0.55; // the drive floor a burn holds with no flame
+  const ENG_BURN_WIND = 0.45;  // ...and the fraction of it a WINDUP reaches, so
+                               // the ask is audible and the confirm still lands
 
   // distance attenuation — the listener is the SHIP, not the camera: the ship
   // is what the sounds are about, and a lookahead camera would otherwise make
@@ -570,6 +587,39 @@
   // below; visibilitychange, which already routes through game.js's pause()
   // — this file registers NO listener of its own and needs none; and a page
   // that never started, which has no context and no oscillator at all.
+  // The engine's WHOLE drive calculation, as pure math over live state: no
+  // node is touched here, so the __test seam below can assert every one of
+  // these numbers with no audio device and no user gesture, and frame() and
+  // that seam are structurally unable to drift apart because there is only
+  // one copy. Throws are the caller's to answer — both callers guard.
+  //
+  // The comet term reads game.js's cometView, which is the SAME presentation
+  // owner the halo, the light layer's bloom, the wake and the HUD bar read.
+  // That is the deliberate choice: frame() otherwise reads LIVE struct state,
+  // and reading the struct's comet flag here would make the rumble arrive on
+  // the wire's clock while every visual on the screen arrived on the
+  // predictor's. A cue that leads the visuals by the same prediction is
+  // consistent; one that mixes the two sources is not.
+  function engCalc() {
+    const on = armed && G.running && !SFXMUTE
+            && !(window.Encounter && Encounter.frozen());
+    const m = Math.hypot(localPlayer().flame.x, localPlayer().flame.y); // the SAME vector drawFlame reads
+    const len = Math.min(m * FLAME_GAIN, FLAME_MAX);  // ...through drawFlame's own curve
+    const drive = len < 1.5 ? 0 : len / FLAME_MAX;    // ...and its own visibility gate
+    // the LOCAL seat's own cap (the same ship whose flame and velocity feed
+    // this hum), through the one term derivation
+    const cap = VMAX + (window.Encounter ? Encounter.termsFor(localSeat()).speed : 0);
+    const sp = Math.min(1, Math.hypot(localPlayer().vel.x, localPlayer().vel.y) / Math.max(0.001, cap));
+    const cv = cometView(localSeat());
+    const burn = cv.phase === CP_LIVE ? 1
+               : cv.phase === CP_WIND ? ENG_BURN_WIND * cv.wind : 0;
+    return { on, drive, burn,
+      gain: ENG_GAIN * Math.min(1, drive + ENG_BURN_DRIVE * burn),
+      cut: 120 + ENG_BURN_CUT * burn,
+      q: 1.1 + ENG_BURN_Q * burn,
+      freq: ENG_F0 + ENG_F1 * sp };
+  }
+
   function frame() {
     try {
       if (!ac || ac.state !== "running") return;
@@ -584,17 +634,16 @@
       engWatch.gain.linearRampToValueAtTime(0, now + 0.4);
       sweepStale(now);
       if (now < engHold) return; // an audition owns the engine ramp — do not stomp it
-      const on = armed && G.running && !SFXMUTE
-              && !(window.Encounter && Encounter.frozen());
-      const m = Math.hypot(localPlayer().flame.x, localPlayer().flame.y); // the SAME vector drawFlame reads
-      const len = Math.min(m * FLAME_GAIN, FLAME_MAX);  // ...through drawFlame's own curve
-      const drive = len < 1.5 ? 0 : len / FLAME_MAX;    // ...and its own visibility gate
-      engDyn.gain.setTargetAtTime(on ? ENG_GAIN * drive * SFXENG : 0, now, 0.05);
-      // the LOCAL seat's own cap (seat 0 — the same ship whose flame and
-      // velocity feed this hum), through the one term derivation
-      const cap = VMAX + (window.Encounter ? Encounter.termsFor(localSeat()).speed : 0);
-      const sp = Math.min(1, Math.hypot(localPlayer().vel.x, localPlayer().vel.y) / Math.max(0.001, cap));
-      engOsc.frequency.setTargetAtTime(ENG_F0 + ENG_F1 * sp, now, 0.08);
+      const E = engCalc();
+      engDyn.gain.setTargetAtTime(E.on ? E.gain * SFXENG : 0, now, 0.05);
+      engOsc.frequency.setTargetAtTime(E.freq, now, 0.08);
+      // the afterburner's two timbre writes. Slower constants than the gain
+      // ramp on purpose: a filter that snapped with the flag would click, and
+      // the burn is a thing the ship LEANS into over a breath. They ramp back
+      // to the stock 120 Hz / 1.1 whenever the burn is 0, so a page that never
+      // touches comet mode holds exactly the voice it had before.
+      engFilt.frequency.setTargetAtTime(E.cut, now, 0.09);
+      engFilt.Q.setTargetAtTime(E.q, now, 0.12);
     } catch {}
   }
 
@@ -645,21 +694,14 @@
       stats: () => ({ played, dropped, live }),
       armed: () => armed,                    // the user-activation gate, readable
       att: (x, y) => att({ x, y }),          // the rolloff, assertable as pure math
-      // the pure drive calc frame() uses, off live G — no node is touched, so
-      // a check can assert the hum-is-the-flame invariant with no audio
-      // device and no gesture
+      // THE calc frame() uses — the same function, not a copy of it — off live
+      // G, so a check can assert the hum-is-the-flame invariant and the whole
+      // afterburner with no audio device and no gesture
       engine: () => {
-        try {
-          const on = armed && G.running && !SFXMUTE
-                  && !(window.Encounter && Encounter.frozen());
-          const m = Math.hypot(localPlayer().flame.x, localPlayer().flame.y);
-          const len = Math.min(m * FLAME_GAIN, FLAME_MAX);
-          const drive = len < 1.5 ? 0 : len / FLAME_MAX;
-          const cap = VMAX + (window.Encounter ? Encounter.termsFor(localSeat()).speed : 0); // the local seat, as frame() reads it
-          const sp = Math.min(1, Math.hypot(localPlayer().vel.x, localPlayer().vel.y) / Math.max(0.001, cap));
-          return { on, drive, freq: ENG_F0 + ENG_F1 * sp };
-        } catch {
-          return { on: false, drive: 0, freq: ENG_F0 };
+        try { return engCalc(); }
+        catch {
+          return { on: false, drive: 0, burn: 0, gain: 0,
+                   cut: 120, q: 1.1, freq: ENG_F0 };
         }
       },
       resetThrottles: () => { for (const k in lastAt) delete lastAt[k]; streak = 0; lastPickupT = -1; },
