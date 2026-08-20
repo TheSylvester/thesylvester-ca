@@ -70,7 +70,16 @@
                    // frame() must not stomp the test cue's audible bump
 
   const MAXVOICES = 32; // whole-cue admission budget — a cue starts all of its
-                        // steps or none of them, never half a recipe
+                        // steps or none of them, never half a recipe.
+                        // The SFXLOOK lookahead adds its 20 ms to every
+                        // voice's hold (o.stop(t + dur + 0.02) with t already
+                        // 20 ms ahead, and `live` counted from creation), so
+                        // budget pressure rose with it — MEASURED, not felt:
+                        // the 10 s four-seat melee of the audio-duck harness
+                        // (.ai-reference/tools/audio-duck, e2.live) asked 311
+                        // / played 311 / refused 0 both BEFORE and AFTER the
+                        // lookahead, in Firefox and in Chrome. stats().live is
+                        // the number to watch if the mix is ever raised.
   // the master trim: master.gain = SFXVOL^1.6 × MASTER_TRIM (the ancestor's own
   // curve, printed beside the slider by game.js). 0.5, not the 0.4 the
   // compressor era carried: the Chrome compressor added ≈+2 dB of makeup on
@@ -88,6 +97,16 @@
   const LOOK_MAX = 1000;
   const anchorAt = (look, delay) =>
     (Number.isFinite(look) ? Math.min(LOOK_MAX, Math.max(0, look)) : 0) / 1000 + delay;
+  // the ONE read of the tuner let. SFXLOOK is a bare `let` in js/game.js, and
+  // this file is a separate classic script: a cache skew that serves an OLD
+  // game.js (no `let SFXLOOK`) beside a NEW audio.js makes the bare name a
+  // ReferenceError on every cue — thrown inside the step players' try, caught
+  // as "nothing started", and the page goes silent with no log line to say
+  // why. `typeof` on an undeclared name is the one read that cannot throw, so
+  // the players read through here and fall back to the shipped 20 ms. The
+  // build stamp only helps a tab that re-fetches index.html; the transition
+  // publish — old page, new script, or the reverse — is exactly the window.
+  const lookMs = () => (typeof SFXLOOK === "number" ? SFXLOOK : 20);
   // the ceiling's transfer function — pure math, one copy, so a headless check
   // can assert it: linear to T, then a tanh knee that approaches but never
   // reaches ±1. The node samples it on [-1, 1] (odd length, so x = 0 maps to
@@ -450,7 +469,7 @@
   function startBeep(f0, f1, dur, type, vol, delay, busNode) {
     let o = null, g = null;
     try {
-      const t = ac.currentTime + anchorAt(SFXLOOK, delay);
+      const t = ac.currentTime + anchorAt(lookMs(), delay);
       o = ac.createOscillator();
       g = ac.createGain();
       o.type = type;
@@ -477,7 +496,7 @@
                                      // table — noise steps skip, beeps still play
     let src = null, f = null, g = null;
     try {
-      const t = ac.currentTime + anchorAt(SFXLOOK, delay);
+      const t = ac.currentTime + anchorAt(lookMs(), delay);
       src = ac.createBufferSource();
       src.buffer = NOISE[nix++ % NOISE.length];
       f = ac.createBiquadFilter();
@@ -845,7 +864,8 @@
       clearLog: () => { LOG.length = 0; },
       names: () => Object.keys(CUES),
       recipe: (n) => CUES[n],                // the table itself — read, never copied
-      levels: () => ({ SFXVOL, SFXMUTE, SFXSHOT, SFXFOE, SFXUI, SFXENG, SFXLOOK }),
+      levels: () => ({ SFXVOL, SFXMUTE, SFXSHOT, SFXFOE, SFXUI, SFXENG, SFXLOOK: lookMs() }),
+      look: lookMs,                          // the read the step players make — the skew fallback, assertable
       // the ceiling's transfer function (the math the curve is sampled from —
       // the node clamps past ±1, see softClipAt) and the master trim, as the
       // pure math unlock() and applyLevels() use — assertable with no context

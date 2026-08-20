@@ -73,6 +73,17 @@
                    // classic script cannot import it, so this mirrors it by
                    // hand; the s.v gate below silently drops every snapshot
                    // if the two ever drift, and a stale hello meets 4001
+  // THE parked-seat predicate — the wire contract in one place. Since v8 a
+  // seat with nobody behind it crosses as the FOUR-KEY record `{ seat, hull,
+  // hm, cl: -1 }` and nothing else (server/snapshot.mjs encodes it, its
+  // snapshot.test.mjs pins the key set): no pose, no velocity, no flame, no
+  // pool, no wallet, no ranks. A `cl` of -1 is the sentinel the encoder puts
+  // on exactly that record and on no other — a seat waiting for its click carries
+  // a positive `cl`, a live seat omits the key — so every consumer that must
+  // tell a parked record from a seated one asks this and never spells the
+  // sentinel itself. One spelling means one place to change if the contract
+  // ever moves.
+  const isParked = (pr) => pr.cl === -1;
   // ---- the opt-in, and the ?mp expansion -----------------------------------
   // The default ?mp stands for is DERIVED from the page it is running on, not
   // written down. A hardcoded host would put a production name into a tracked
@@ -521,7 +532,7 @@
     // instead. The only caller that can reach here with one is hardSnap (the
     // rebase's `down` test is true for it), and hardSnap turns the predictor
     // OFF, so the zeros are never presented.
-    if (pr.cl === -1) return;
+    if (isParked(pr)) return;
     K.ship.x = pr.x; K.ship.y = pr.y;
     K.vel.x = pr.vx || 0; K.vel.y = pr.vy || 0;
     K.flame.x = pr.fx; K.flame.y = pr.fy;
@@ -749,13 +760,16 @@
       else if (ev.k === "termChange" && ev.seat === mySeat) termCut = true;
     }
     const down = (s.hud && s.hud.state === "dead") || (pr.rsp || 0) > 0 ||
-                 (pr.hull | 0) <= 0 || // the HULL closes the gap the countdown left:
+                 (pr.hull | 0) <= 0; // the HULL closes the gap the countdown left:
                  // a seat in its claim window, or unseated, sits at rsp 0 with no
                  // hull, and predicting flight for a wreck was the same latent bug
-                 // the fx layer carried
-                 pr.cl === -1; // ...and the v8 short record says so by its
-                 // sentinel as well as its hull — stated here so the ordinary
-                 // rebase below, which adopts the pose, can never see one
+                 // the fx layer carried. The v8 PARKED record (isParked) is
+                 // caught by this same clause and needs no term of its own: the
+                 // sim's vacateSeat is the ONE writer of `absent` and zeroes the
+                 // hull in the same write, and the encoder sends that hull raw
+                 // (server/snapshot.mjs's four-key record carries `p.hull`), so a
+                 // parked record ALWAYS reads hull 0 here — the ordinary rebase
+                 // below, which adopts the pose, can never see one
     if (cut || down || !predK) { hardSnap(s, pr, down); return; }
     // ordinary rebase: drop what the ack resolved, then replay the rest
     while (sentHist.length && sentHist[0].n <= lastAck) sentHist.shift();
@@ -1173,8 +1187,8 @@
     // both counts must be present and sane, or the roster reads as UNKNOWN —
     // a half-decoded roster would print a half-true banner, which is worse
     // than the honest old one. DEFENSIVE, and knowingly unreachable on a live
-    // wire: the only server that answers a v7 hello sends all three fields on
-    // every `you`, and a v6-era one closes this client at 4001 before a `you`
+    // wire: the only server that answers a v8 hello sends all three fields on
+    // every `you`, and an older one closes this client at 4001 before a `you`
     // can arrive. It stays because that is the honest shape for an additive
     // field and it costs one comparison — do not go looking for the deploy path
     // that reaches it, there is not one.
@@ -1833,35 +1847,66 @@
       const P = players[pr.seat];
       if (!P) continue;
       const S = E.seats[pr.seat];
-      // v8: the PARKED seat — `{ seat, hull, hm, cl: -1 }` and nothing else.
-      // The seat record takes what the record carries plus the folds the sim's
-      // own vacateSeat makes (no invulnerability, no flash, no countdown, no
-      // window); xp, score, best and owned stay as they were, because the
-      // server holds the truth, every board filters an absent row, and the next
-      // FULL record on reclaim overwrites all four. One reader does reach them
-      // while the seat is parked: localSeatRec() folds a seatless client to
-      // seat 0, so a spectator's HUD reads seat 0's wallet and ranks even when
-      // seat 0 is parked — stale-but-finite numbers it read at v7 too, and the
-      // cards that must not promise a seat go through seatless() instead of
-      // this record. The ship, flame, pool and
-      // comet fields are not touched at all — they go STALE across a park, and
-      // nothing reads them while it lasts: drawShip returns on `absent`, the
-      // draw loop skips the seat ahead of the glow and the probe, and the fx
-      // bloom and the invuln ring key off the hull and the invulnerability this
-      // branch zeroes. An assignment from this record would write undefined
-      // into a pose the presented frame still lerps.
-      if (pr.cl === -1) {
+      // v8: the PARKED seat — `{ seat, hull, hm, cl: -1 }` and nothing else
+      // (isParked). The seat record takes the terminal fold through the sim's
+      // OWN vacateSeat — absent, no window, no countdown, hull 0, no
+      // invulnerability, no flash — the same function unseatSeat and parkSeat
+      // call on the server, so a seventh terminal field added there cannot be
+      // cleared on the sim's path and left stale on this one; then the one
+      // field the fold does not own and the record does carry (hullMax), and
+      // then the RESET the record cannot carry. The resets are the point: the
+      // server's two parkSeat callers both park straight after a restart()
+      // that zeroed xp, score and best and dealt every seat the fresh rank
+      // vector, and a seat parked at that cut sends this four-key record from
+      // its very first post-restart snapshot — so the zeros never cross, and
+      // a record left as it was holds LAST MATCH's wallet and ranks. One
+      // reader reaches them while the seat is parked: localSeatRec() folds a
+      // seatless client to seat 0, so a spectator's HUD and shop read seat
+      // 0's wallet and ranks even when seat 0 is parked, and a lapsed tab that
+      // outlived a roomReset seatless read the old match's numbers — and the
+      // blast fx sized off ranks nobody holds. The other parking path, an AFK
+      // lapse through unseatSeat, leaves the ranks in place on the server; it
+      // is the reclaim's first FULL record that restores them, and it overwrites
+      // all four whichever way the seat was parked, so the choice here decides
+      // only what the spectator fold shows while it lasts: zero, the honest
+      // number for a seat with nobody behind it, and the server's own number
+      // on the path that has a reader at every solo restart. (resetSeatUpgrades
+      // also bumps the seat's termSeq and emits termChange; both are sim-side
+      // — the sequence is unhashed and the event never crosses — so only the
+      // vector is mirrored.) The ship's POSE is not touched: it goes STALE
+      // across a park and nothing reads it while it lasts — drawShip is never
+      // reached for an absent seat (the draw loop skips it ahead of the glow
+      // and the probe) and the fx bloom and the invuln ring key off the hull
+      // and the invulnerability the fold zeroes — and an assignment from this
+      // record would write undefined into a pose the presented frame still
+      // lerps. The velocity, pool and comet flag ARE zeroed, to the values a
+      // missing key already decodes to (`vx`/`en` → 0, `em` → ENMAX), and the
+      // flame on its own merits (the full path assigns `fx`/`fy` raw; a seat
+      // with no ship has no plume): no thrust, no pool, no comet, and the
+      // spectator fold's HUD bar reads the pool.
+      if (isParked(pr)) {
         if (S) {
-          S.absent = true;
-          S.hull = pr.hull | 0;
+          // the sim's own terminal fold — see above. Typed, not trusted: a
+          // cached js/encounter.js older than this round has no vacateSeat,
+          // and this call sits on the hot path outside any try, so the
+          // transition publish (old script, new client — the lookMs argument)
+          // would hard-freeze the tab; until then the six fields fold inline.
+          const E2 = enc();
+          if (typeof E2.vacateSeat === "function") E2.vacateSeat(pr.seat);
+          else { S.absent = true; S.claimT = 0; S.respawnT = 0; S.hull = 0; S.invuln = 0; S.hitFlash = 0; }
           S.hullMax = pr.hm;
-          S.invuln = 0;
-          S.hitFlash = 0;
-          S.respawnT = 0;
-          S.claimT = 0;
+          S.xp = 0;
+          S.score = 0;
+          S.best = 0;
+          if (Array.isArray(S.owned)) S.owned = S.owned.map(() => 0);
         }
-        continue; // the release latch below stays as it is: a record with
-                  // cl === -1 never cleared it
+        P.vel.x = 0; P.vel.y = 0;
+        P.flame.x = 0; P.flame.y = 0;
+        P.energy = 0;
+        P.energyMax = ENMAX;
+        P.comet = false;
+        continue; // the release latch below stays as it is: a parked record
+                  // never cleared it
       }
       // ...and the bracket's OTHER record for this seat, which may itself be
       // the short one (s1 is the newer end, so a seat that PARKED on this tick;
@@ -1869,7 +1914,7 @@
       // carries no pose, so it reads as "no other pose" — the bracket holds at
       // s0 — rather than lerping a number against undefined
       const p1r = p1by ? p1by.get(pr.seat) : null;
-      const p1 = p1r && p1r.cl !== -1 ? p1r : null;
+      const p1 = p1r && !isParked(p1r) ? p1r : null;
       // the phase-11 carve-out: while the predictor is live, the LOCAL
       // seat's pose/velocity/flame belong to it (clientTick writes them from
       // the predicted kernel + the render offset) — everything else on the
@@ -1944,8 +1989,10 @@
         // ONE screen, and seat 0's record is what a released client's draw
         // reaches once localSeat() folds its null — the same fold releasedHere
         // exists to route around. A snapshot that carries no record for this
-        // seat says nothing, so the latch simply stays.
-        if (pr.seat === mySeat && pr.cl !== -1) released = false;
+        // seat says nothing, so the latch simply stays. No parked test here:
+        // a parked record took the isParked branch at the top of the loop, so
+        // every record that reaches this line is a SEATED one.
+        if (pr.seat === mySeat) released = false;
       }
     }
     // The local seat's AIM fields stay LOCAL — the marker follows the cursor,
@@ -1969,7 +2016,7 @@
     // vacateSeat leaves the seat's ranks in place, so reading it as an empty
     // vector would ring the till on the reclaim's first full record. localSeat()
     // folds a seatless client to 0, so this is every spectator's screen.
-    if (mine && mine.cl !== -1) {
+    if (mine && !isParked(mine)) {
       const ownedSum = (mine.ow || []).reduce((a, b) => a + b, 0);
       if (lastOwnedSum >= 0 && ownedSum > lastOwnedSum && window.Sfx) Sfx.cue("buy", null, undefined, localSeat());
       lastOwnedSum = ownedSum;

@@ -861,7 +861,9 @@
   // terminal field added later cannot be cleared on one path and left stale
   // on the other: that split is a hashed divergence waiting for a four-seat
   // start. A seat already terminal or missing is left alone — the same guard
-  // both callers used to carry themselves.
+  // both callers used to carry themselves. Published (see the surface below):
+  // the net client's decoder folds a parked seat's four-key record through
+  // this same body, so a third caller lives in js/net.js.
   function vacateSeat(s) {
     const S = E.seats[s];
     if (!S || S.absent) return;
@@ -1696,7 +1698,7 @@
   // Every way a missile ends, in one place: the list removal, the burst and
   // the cue can never disagree about which happened. `kind` is the fx look —
   // "enemy" for a detonation on the player, "wall" for the inert endings.
-  function endMissile(i, kind) {
+  function endMissile(i, kind, seat) {
     const m = E.missiles[i];
     E.missiles.splice(i, 1);
     const s = Math.hypot(m.vx, m.vy) || 1; // a UNIT heading, like every other fx
@@ -1705,11 +1707,18 @@
     // one cue per ending, however it ended: the audio table's boom is defined
     // as "a missile ending", and most endings are the player's own bullet
     // killing it — which is why it sits on the shot bus and not on foe.
-    // Seatless ON PURPOSE: the missile record carries no killer and
-    // endMissile(i, kind) takes no seat, so boom stays on the room-wide
-    // throttle bucket; threading a seat through endMissile is the follow-up
-    // if the coalescing is ever heard.
-    emit("boom", m);
+    // `seat` is the seat the ending belongs to, handed in by the three call
+    // sites that have one in scope — the ship struck, the bullet's shooter, the
+    // rewound hit's source — so the cue rides THAT seat's throttle bucket like
+    // hit/clang/kill/blast/wall do (6418a4e), and four players no longer share
+    // one 70 ms bucket (boom's own gap in js/audio.js) for every missile that
+    // comes apart. The two WALL endings (the boundary and the fuse) have only
+    // the missile, hand undefined, and stay on the room-wide bucket — which in
+    // SOLO play means a shoot-down and a fuse-out inside the same 70 ms now
+    // both sound, one on the seat's bucket and one on the room's; intended,
+    // they are two different endings. The audio-order trace pins (tick, kind)
+    // only, so the seat moves no hash.
+    emit("boom", m, undefined, seat);
   }
 
   // Steer, then move, once per tick. The rotation form is provably
@@ -1770,7 +1779,7 @@
         hitPlayer(struck, M.dmg);
         m.x = nx;
         m.y = ny;
-        endMissile(i, "enemy");
+        endMissile(i, "enemy", struck); // the ship it hit is the seat the boom belongs to
         continue;
       }
       m.x = nx;
@@ -1781,10 +1790,11 @@
         // burst sits on the wall the player watched it hit
         m.x = Math.max(0, Math.min(WW, m.x));
         m.y = Math.max(0, Math.min(WH, m.y));
-        endMissile(i, "wall");
+        endMissile(i, "wall"); // no seat in scope — the boom takes the room bucket
       } else if (m.age >= M.life) {
         endMissile(i, "wall"); // a fuse running out is an inert thing coming
-                               // apart — the burst is what confirms a dodge
+                               // apart — the burst is what confirms a dodge;
+                               // no seat in scope here either, the room bucket
       }
     }
   }
@@ -1960,7 +1970,7 @@
         const by = b.py + (b.y - b.py) * bestT;
         b.dead = true;   // consumed exactly once, same as a body hit
         E.missilesShot++; // not a kill: no orb, no XP, no entry in E.kills
-        endMissile(mi, "enemy");
+        endMissile(mi, "enemy", shooter); // the shooter's seat carries the boom
         // the file's standing rule — every player bullet that TERMINATES pays
         // its splash where it stopped, bodies and walls alike — so an
         // interception is not quietly the one shot that forfeits the upgrade.
@@ -2195,7 +2205,7 @@
         const mi = E.missiles.findIndex((m) => m.id === h.id);
         if (mi < 0) continue; // already down or detonated — dropped
         E.missilesShot++;
-        endMissile(mi, "enemy");
+        endMissile(mi, "enemy", h.src); // the rewound hit's source seat carries the boom
         blastAt(h.ix, h.iy, null, h.dmg, h.src);
         continue;
       }
@@ -4365,8 +4375,9 @@
 
   // ...and the THIRD state's line, once the window has lapsed and the seat is
   // parked. It exists because the seat is still RECLAIMABLE and nothing on the
-  // screen said so: an unseated seat draws no ship (drawShip returns early on
-  // absent), keeps no board row (boardRanking filters it) and matched none of
+  // screen said so: an unseated seat draws no ship (game.js's draw loop skips
+  // an absent seat ahead of the glow and the probe, so drawShip is never
+  // reached for one), keeps no board row (boardRanking filters it) and matched none of
   // the card branches, so a solo player who stepped away for 40 s came back to a
   // live field with no ship, no row and no text — while a single click would
   // have dealt them straight back in. The affordance was real and invisible,
@@ -5505,6 +5516,13 @@
       parkSeat,    // parking, for startRound and restartRound's restart cut:
                    // absent with no wipe arm, no toll and no cue — see
                    // parkSeat's own block
+      vacateSeat,  // ...and the ONE terminal write all three share, published
+                   // for the NET CLIENT: js/net.js's decoder takes a parked
+                   // seat's four-key record (v8) through this same function,
+                   // so the six terminal fields are folded by one body on the
+                   // server and on every screen — a seventh added here cannot
+                   // be cleared on the sim's path and left stale on the wire's.
+                   // Pure on the seat record, no rand(), no event, idempotent.
       // phase 15: the pose ring and the rebate, bare, for the suites — a
       // check may STAGE rows exactly as the standing legs stage E.shipPrev,
       // and rebate here lets a leg drive era arithmetic without a socket

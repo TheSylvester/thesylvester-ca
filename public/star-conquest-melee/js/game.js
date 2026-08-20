@@ -2349,13 +2349,12 @@ function drawHitShock(x, y, flash) {
 let SHOW_HULL_DAMAGE = false;
 // THE ENTRY POINT the render loop calls, once per seat. Four states, in the
 // order they matter: down, hit, damaged, pristine.
-function drawShip(x, y, seat) {
-  const H = seatHealth(seat);
-  // an UNSEATED seat draws nothing at all — not even the wreck. A wreck on the
-  // field says "a pilot is coming back to this"; nobody is, so the hull leaves
-  // with the seat. First, ahead of the pristine-hull shortcut, because an
-  // unseated seat's hull is 0 and would otherwise fall through to drawWreck.
-  if (H && H.absent) return;
+// H is the seat's health record — seatHealth(seat) — read ONCE by the draw
+// loop (its only caller) and handed in, because seatHealth allocates a fresh
+// object per call and the loop already needs it for the absent test. That test
+// lives in the loop and nowhere else: an UNSEATED seat never reaches this
+// function, so an `absent` record here would be a caller's bug, not a case.
+function drawShip(x, y, seat, H) {
   // no record to read, or an untouched hull: the original draw, untouched
   if (!H || (H.hull >= H.hullMax && H.flash <= 0)) { drawHull(x, y); return; }
   if (H.hull <= 0) { drawWreck(x, y, H, seat); return; }
@@ -3188,15 +3187,21 @@ function render() {
   // every seat's ship draws; only seat 0 (the local pilot) wears the flame,
   // and a comet-mode seat wears its glow under the hull
   for (const P of players) {
-    // an UNSEATED seat draws nothing — drawShip's own first test — and since v8
-    // its wire record carries no pose at all, so P.ship is whatever the seat
-    // last had. Skipped here, ahead of the glow and the probe, so neither
-    // rides a pose the field does not show — and the probe's entry goes with
-    // it, because drawn.ships is never cleared per frame and a stale entry
-    // would vouch for a ship that drew nothing. No entry is the honest value,
-    // so the array goes SPARSE here: every reader of drawn.ships must test the
-    // entry before it indexes into it (wave1-checks and the rig's dsh() do)
-    const H = seatHealth(P.id);
+    // an UNSEATED seat draws nothing — not even the wreck: a wreck on the
+    // field says "a pilot is coming back to this", nobody is, so the hull
+    // leaves with the seat — and since v8 its wire record carries no pose at
+    // all, so P.ship is whatever the seat last had. THE one absent test of
+    // the draw: here, ahead of the glow and the probe, so neither rides a
+    // pose the field does not show, and drawShip below is simply never
+    // reached for one (it takes this same H and owns no test of its own).
+    // The probe's entry goes with the seat, because drawn.ships is never
+    // cleared per frame and a stale entry would vouch for a ship that drew
+    // nothing. No entry is the honest value, so the array goes SPARSE here,
+    // and every reader of drawn.ships must test the entry before it indexes
+    // into it: the three readers are the wave1 suite's frame legs (guarded
+    // where they index a seat), the latency rig's dsh(), and the probe write
+    // below, which re-creates a missing entry.
+    const H = seatHealth(P.id); // ONE read a frame per seat — drawShip takes it
     if (H && H.absent) { delete drawn.ships[P.id]; continue; }
     // cometView owns the seat's comet STATE — its CONFIRMED phase is the wire
     // flag by construction — while presentedPool hands in the pool FRACTION,
@@ -3209,9 +3214,9 @@ function render() {
     if (!ds) ds = drawn.ships[P.id] = { seat: P.id, x: 0, y: 0 };
     ds.x = vp.x;
     ds.y = vp.y;
-    drawShip(vp.x, vp.y, P.id); // ...and its damage, its hit reaction, or
-                                        // its wreck — see drawShip; the seat id is
-                                        // what lets it read THIS seat's wire record
+    drawShip(vp.x, vp.y, P.id, H); // ...and its damage, its hit reaction, or
+                                   // its wreck — see drawShip; H is THIS seat's
+                                   // wire record, read once above
   }
   ctx.fillStyle = C.bright; // CQ pixel bullets — read off the frame view
   for (const b of FRAME.bullets || G.bullets) {
@@ -3829,6 +3834,16 @@ function syncAimUi() {
       : "Ship playground — mouse motion flies and QWE/ASDZXC aims; left fires; hold right to aim with the visible pointer and engage energy-powered comet mode; Escape pauses"
     : "Ship playground — relative push controls use pointer lock; QWE/ASDZXC flies while the mouse aims; left fires; hold right for energy-powered comet mode; Escape releases pointer lock");
 }
+// the audition readout's gain, guarded: Sfx.state() is js/audio.js's and this
+// file's caller may be skewed against it — a cached OLD audio.js beside this
+// NEW game.js has a state() with no `gain`, and `.toFixed` on undefined throws
+// in showTuner on every tuner paint. The build stamp only helps a tab that
+// re-fetches index.html; the transition publish is the window, so the read is
+// typed rather than trusted.
+function sfxGainText() {
+  const st = window.Sfx && Sfx.state();
+  return st && typeof st.gain === "number" ? st.gain.toFixed(3) : "—";
+}
 function showTuner() {
   const out = (id, t) => { document.getElementById(id).textContent = t; };
   out("vmax-out", VMAX.toFixed(1) + " px/tick · " + Math.round((1000 / TICK) * VMAX) + " px/s");
@@ -3898,7 +3913,7 @@ function showTuner() {
   // line — and the audition row's readout is Sfx.state()'s ready-made string:
   // audio.js formats its own internals, this file only prints them.
   out("sfxvol-out", Math.round(SFXVOL * 100) + "% master · gain " + // the number is audio.js's: state().gain
-    (window.Sfx ? Sfx.state().gain.toFixed(3) : "—"));             // is the one copy of the curve
+    sfxGainText());                                                 // is the one copy of the curve
   out("sfxmute-out", SFXMUTE ? "muted — every cue is dropped" : "sound on");
   out("sfxshot-out", Math.round(SFXSHOT * 100) + "% · fire, wall ticks, hits, kills, the blast");
   out("sfxfoe-out", Math.round(SFXFOE * 100) + "% · enemy tells, spawns, damage taken");
