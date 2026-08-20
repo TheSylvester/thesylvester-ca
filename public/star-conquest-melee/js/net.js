@@ -163,6 +163,134 @@
     } catch { /* a name that cannot be remembered is still a name this session */ }
   }
 
+  // ---- the name editor (CANVAS-side, and deliberately not a DOM input) ------
+  // What this replaces was a real <input> over the canvas, and it could not be
+  // clicked in the DEFAULT aim mode at all. AIMMODE starts "locked", resume()
+  // takes the session's ONE pointer lock and holds it until pause(), and under
+  // a held lock the browser routes every mouse event to the locked element — so
+  // no DOM node is hit-testable. The press was not merely lost either: it fell
+  // through to the canvas handler, became inputFire(), and CLAIMED THE SEAT,
+  // taking away the very card the box rode on. Escape freed the pointer and
+  // landed in pause(), which hid the box. No steady state had that field both
+  // visible and clickable.
+  //
+  // So the editor is canvas state now: a buffer, a flag, and one keydown
+  // listener. js/encounter.js DRAWS it — on the claim card, and on the
+  // scoreboard row this client owns — and js/game.js routes the press through
+  // the drawn cursor, which reaches a gutter panel UNDER a held lock exactly as
+  // the shop's click already does. Nothing here is DOM, so nothing here fights
+  // the lock.
+  //
+  // Two hazards die with the old field. It committed on BLUR, and the blur came
+  // off the per-frame visibility flag — so a wave clear, a granted seat or a
+  // match epoch could commit a half-typed name. And Tab could focus it
+  // invisibly, after which it swallowed the whole keyboard with no cue on
+  // screen. This editor opens and closes on the player's own action (a click on
+  // an affordance, Enter, Escape, a press anywhere else) or on pause(), and
+  // there is nothing here for Tab to land on.
+  //
+  // It lives ABOVE the local/net split because local play has a name too — the
+  // stored one, for seat 0 — and one editor with one commit path is the only
+  // version of this that cannot disagree with itself.
+  let ownName = storedName();
+  let editing = false;
+  let editBuf = "";
+  // set by the net branch below. Null in local play, where a name is stored and
+  // drawn and never sent anywhere.
+  let sendName = null;
+  // CODE POINTS, not UTF-16 units. The cap is the server's cap and the server
+  // counts code points — see cleanName's own slice, and the maxLength note the
+  // deleted input carried, which was wrong for exactly this reason.
+  const cps = (v) => Array.from(v);
+
+  function openNameEdit() {
+    if (editing) return false; // idempotent: a second click on the same row is
+                               // not a reason to throw away what was typed
+    editing = true;
+    editBuf = ownName || ""; // the ACCEPTED name, not the last raw typing — the
+                             // box opens on what the server agreed to
+    return true;
+  }
+  // commit === false is CANCEL: the buffer is dropped and nothing is sent.
+  // Answers whether an edit was actually open, so a caller can tell a close
+  // from a no-op.
+  function closeNameEdit(commit) {
+    if (!editing) return false;
+    editing = false;
+    const next = cleanName(editBuf);
+    editBuf = "";
+    if (!commit || next === ownName) return true;
+    ownName = next;
+    storeName(next); // remembered for the NEXT visit; this visit's copy is the
+                     // one the server sanitizes and fans back out
+    if (sendName) sendName(next);
+    return true;
+  }
+
+  // CAPTURE phase on document, and it stops the bubble on every key it takes.
+  // js/game.js and js/encounter.js both hang their keydown handlers on
+  // `document` in the BUBBLE phase, so stopping here is what keeps W from
+  // thrusting and R from restarting the match while somebody types "Warder".
+  // Their own Net.typing() guards stay: the two are redundant on purpose, and
+  // the old field's leak leg proved redundancy is what survives a refactor.
+  //   Escape is why the stop is not optional. Without it the cancel would run
+  // here and js/game.js's Escape branch would then read typing() as already
+  // false and pause the game off the same keystroke.
+  //   That stop bounds the PAGE's handlers and nothing above them, and the
+  // distinction is worth writing down because it is easy to over-claim. In the
+  // default aim mode the game holds a pointer lock, and a user agent drops that
+  // lock on Escape at its own level: preventDefault cannot refuse it, and
+  // js/game.js's pointerlockchange route pauses on the loss. So under a real
+  // lock Escape DOES cancel the edit and pause, and the pause is harmless —
+  // pause()'s own closeNameEdit finds nothing open, and resume is one click.
+  // The suites cannot observe any of this: a headless page is granted no lock,
+  // so their Escape legs only ever exercise the handler half.
+  //   One listener per page, enforced rather than assumed — the same rule the
+  // deleted input's one-id guard carried, and for the same reason: a page
+  // normally evaluates this file once, but the browser suites re-evaluate it
+  // under one URL after another to pin the ?server= / ?mp opt-in, and every
+  // load that added a second listener would leave one behind for every later
+  // load and every later suite.
+  const onNameKey = (e) => {
+    if (!editing) return;
+    // the pause menu and the dev panel hold real controls, and either a player
+    // or a suite may have one focused — a key aimed at a slider is not a letter
+    // of anybody's name
+    const tag = e.target && e.target.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON") return;
+    if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); closeNameEdit(true); return; }
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeNameEdit(false); return; }
+    if (e.key === "Backspace") {
+      e.preventDefault(); // a Backspace that reaches the page navigates it
+      e.stopPropagation();
+      editBuf = cps(editBuf).slice(0, -1).join("");
+      return;
+    }
+    // a shortcut is not a letter — and this guard is where the canvas editor is
+    // POORER than the <input> it replaced, stated here rather than discovered.
+    // Windows reports AltGr as ctrlKey && altKey, so every AltGr character is
+    // untypable: the accented and Central European sets, and `@` on several
+    // layouts. There is no composition handling either, so an IME cannot enter
+    // a CJK name, and Ctrl+V cannot paste one. cleanName and the server both
+    // still ACCEPT those code points — a name that arrives off the wire draws
+    // fine — so what was lost is the ENTRY path alone, and only on this client.
+    // Fixing it means a hidden input or a composition surface, which is a
+    // design change and not a patch to this line.
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    // ...and neither is "Tab", "F5" or "ArrowLeft": exactly one code point is
+    // what a printable key reports, and an emoji reports one here too
+    if (cps(e.key).length !== 1) return;
+    e.preventDefault();
+    e.stopPropagation();
+    // the cap stops the TYPING, not the commit. Truncating at commit instead
+    // would read as a handful of dropped keystrokes with no explanation.
+    if (cps(editBuf).length >= NAME_MAX) return;
+    editBuf += e.key;
+  };
+  if (window.__nameEditKeys) document.removeEventListener("keydown", window.__nameEditKeys, true);
+  window.__nameEditKeys = onNameKey;
+  document.addEventListener("keydown", onNameKey, true);
+
   if (!url) {
     // local mode: every hook declines, every caller falls through
     window.Net = {
@@ -182,9 +310,15 @@
       // to fan one out, so the stored name answers for seat 0 — this player's
       // own seat, and the only one solo ever has. Every other seat is nameless
       // and the board draws its Player-N fallback, unchanged.
-      seatName: (s) => (s === 0 ? storedName() : null),
-      typing: () => false,     // no field is built without a server to send to
-      showNameField: () => {}, // ...so the render's per-frame call is a no-op
+      seatName: (s) => (s === 0 ? ownName : null),
+      // ...and the EDITOR, which local play does have: the board is drawn here
+      // too, the row is clickable here too, and the name it commits is the one
+      // stored for the next visit. sendName stays null, so the commit stops at
+      // storage — there is no wire to tell.
+      ownName: () => ownName,
+      nameEdit: () => (editing ? editBuf : null),
+      openNameEdit, closeNameEdit,
+      typing: () => editing,
     };
     return;
   }
@@ -483,6 +617,28 @@
     if (!modelFire(K, terms)) return false;
     return spawnCue(K, terms);
   }
+  // ...and the same promise for the EAR. The wire's copy of these two events
+  // is suppressed for this seat in fireEvents below, so this is not a second
+  // sound: it is the same sound, a round trip earlier, on the tick the
+  // player's own click produced it. Only fire and thud travel this way —
+  // they are the only two effects the predictor authors, and every other cue
+  // is the server's alone, with no local antecedent to sound early.
+  //
+  // The two arrive by different roads, and only one of them has a gate. FIRE
+  // rides exactly the gates the TRACER rides and adds none of its own: it is
+  // sounded only where spawnCue actually spawned, so a modelled-but-refused
+  // shot is as silent as it is invisible. THUD has no tracer and no gate — the
+  // flight slice calls it once per wall contact and it sounds, the way the sim
+  // emits one; the recipe's own 90 ms gap is the only thing rate-limiting it.
+  //   Fire carries one residue the tracer does not: the rebase can RETRACT a
+  // promise, and while a popped tracer un-draws itself, nothing can un-play a
+  // sound. The common retraction cancels a cue that is still PENDING and so
+  // never sounded at all (js/net.js's dc < -4 branch takes that path first);
+  // the residue is the just-spawned-tracer case, which leaves a heard pew whose
+  // bullet the rebase withdrew.
+  function ownCue(kind, at, gain) {
+    if (window.Sfx) Sfx.cue(kind, at, gain, mySeat);
+  }
 
   // one predicted kernel tick, in the server's exact per-tick order:
   // drain → energy → integrate, then the autofire pass. `fx.fire` decides
@@ -497,7 +653,11 @@
     PRED_CTX.terms = terms;
     PRED_CTX.keyThrust = () => (terms ? terms.keyThrust !== false : true);
     const fx = cueing
-      ? { fire: () => { specFire(K, terms); }, thud: () => {} }
+      ? { fire: () => { if (specFire(K, terms)) ownCue("fire", K.ship); },
+          // the sink hands the flight slice's own two numbers straight
+          // through — the same world position and pre-bounce magnitude
+          // FLIGHT_FX.thud gives Encounter.emit in the sim
+          thud: (x, y, gain) => { ownCue("thud", { x, y }, gain); } }
       : { fire: () => { modelFire(K, terms); }, thud: () => {} };
     Flight.drainSlice(K, frames, PRED_CTX, fx);
     Flight.energySlice(K, PRED_CTX);
@@ -514,7 +674,11 @@
     // own tick — the server consumes fp counts whatever the grouping.
     if (cueing && pendingAutofireCue) {
       pendingAutofireCue = false;
-      if (K.input.fireHeld) spawnCue(K, terms);
+      // the ear inherits the trail rather than rebuilding it: the sound is
+      // made where the tracer is, so autofire — the mode the player actually
+      // holds the trigger in — sounds on the same honest edge the promise
+      // does, and a shot the trail refuses stays silent in both senses
+      if (K.input.fireHeld && spawnCue(K, terms)) ownCue("fire", K.ship);
     }
     if (AUTOFIRE && K.input.fireHeld && K.cool <= 0) {
       if (modelFire(K, terms) && cueing) pendingAutofireCue = true;
@@ -703,56 +867,12 @@
   document.body.appendChild(banner);
   note("NET connecting to " + url + " …");
 
-  // ---- the name field (DOM, not canvas) -------------------------------------
-  // A real <input>, appended to document.body exactly as the banner above is,
-  // and for the same reason: the draw pass stays untouched. It also dodges four
-  // things a canvas-drawn text box would have had to re-implement or fight —
-  // the global keydown handler in js/game.js, pointer lock, the shop/board hit
-  // test, and the fillText vocabulary the browser suites filter on. Typing into
-  // a DOM node produces no fillText at all, so no existing pixel or card leg
-  // can see this element.
-  //
-  // It rides the CLAIM and SEAT RELEASED cards — js/encounter.js's render calls
-  // showNameField from the one branch that knows a card is up, and js/game.js's
-  // pause() hides it, since a paused screen draws no frame to hide it with.
-  const nameField = document.createElement("input");
-  nameField.id = "netname";
-  nameField.type = "text";
-  nameField.maxLength = NAME_MAX; // a courtesy stop, not the rule: it counts
-                                  // UTF-16 units and the server counts code
-                                  // points, and the server's answer is the only
-                                  // one that reaches a screen
-  nameField.autocomplete = "off";
-  nameField.spellcheck = false;
-  nameField.placeholder = "your name";
-  nameField.setAttribute("aria-label", "your display name");
-  nameField.style.cssText = "position:fixed;left:50%;top:calc(50% + 34px);" +
-    "transform:translateX(-50%);z-index:10;display:none;width:150px;text-align:center;" +
-    "font:400 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;" +
-    "color:#e6e9ef;background:rgba(14,17,25,0.9);border:1px solid #313a4e;" +
-    "border-radius:0;padding:3px 6px;outline:none;";
-  // the canvas fills the viewport (index.html: 100vw/100vh), so 50% of the page
-  // IS the middle of the field, and the offset puts the box under the card's
-  // second line rather than over it
-  nameField.value = storedName() || "";
-  // One id, one element, enforced here rather than assumed. A page normally
-  // evaluates this file once — but the browser suites re-evaluate it under one
-  // URL after another to pin the ?server= / ?mp opt-in, and every load that
-  // appended a second #netname would leave a focusable input behind for every
-  // later load and every later suite to trip over.
-  const staleField = document.getElementById("netname");
-  if (staleField) staleField.remove();
-  document.body.appendChild(nameField);
-
-  // What the server has last been told. It starts as what the hello carried, so
-  // a returning player who opens the card and closes it again sends nothing.
-  let nameSent = storedName();
+  // ---- what the server has last been told -----------------------------------
+  // It starts as what the hello carried, so a returning player who opens the
+  // editor and closes it again sends nothing.
+  let nameSent = ownName;
   let nameSentAt = -1;
   let namePending = false;
-  // The server rate-gates renames at a quarter second and answers a dropped one
-  // with silence, so a fast second edit would vanish with no way to tell. Hold
-  // it here instead and flush when the window opens — 300 ms, a margin over the
-  // server's 250, because the two clocks are not the same clock.
   function pushName() {
     if (!ws || ws.readyState !== 1) return;
     const now = Date.now();
@@ -769,49 +889,14 @@
     // and the server's sanitize reads it as null exactly as it reads junk
     ws.send(JSON.stringify({ v: NET_V, ui: "name", name: nameSent || "" }));
   }
-  function commitName() {
-    const next = cleanName(nameField.value);
-    nameField.value = next || ""; // what was accepted, shown back — the box never
-                                  // keeps text the server would have thrown away
+  // the editor's ONE way out to the wire, and closeNameEdit above is its only
+  // caller — a name reaches the server because a player finished typing it,
+  // never because a card went away. Local play leaves this null.
+  sendName = (next) => {
     if (next === nameSent) return;
     nameSent = next;
-    storeName(next); // remembered for the NEXT visit; this visit's copy is the
-                     // one the server just sanitized and fanned out
     pushName();
-  }
-  // Every one of these stops propagation and NONE of them preventDefault: the
-  // keystroke has to reach the box, it simply must not also reach the ship.
-  // js/game.js and js/encounter.js both hang their handlers on `document`, so
-  // stopping the bubble at the element is what keeps W from thrusting and R
-  // from restarting the match while somebody types "Warder".
-  for (const kind of ["keydown", "keyup", "keypress"]) {
-    nameField.addEventListener(kind, (e) => {
-      e.stopPropagation();
-      if (kind !== "keydown") return;
-      if (e.key === "Enter") { commitName(); nameField.blur(); }
-      else if (e.key === "Escape") { nameField.value = nameSent || ""; nameField.blur(); }
-    });
-  }
-  // ...and the other direction: a click INTO the box must not become a claim
-  // ask. The ask rides the ordinary fire edge — js/net.js's flushInputs asks
-  // `pendingInputs.some((f) => f.fp)`, and `fp` is incremented by inputFire()
-  // off the CANVAS mousedown alone, which a press on this element never
-  // reaches. The stop is here anyway because document-level handlers do see
-  // the bubble.
-  //
-  // MOUSEUP IS DELIBERATELY NOT ON THIS LIST, and it was: `G.leftHeld` is set
-  // by the canvas mousedown and cleared ONLY by the document-level mouseup
-  // (js/game.js), so a left press begun on the field and released over this
-  // box — which sits thirty-four pixels under the card's own text, squarely in
-  // the claim click's neighbourhood — never cleared it. A stranded leftHeld
-  // rides the wire as `fh` and calls fire(0) every tick, so the ship fired
-  // continuously until the next resume(). Letting the release bubble re-opens
-  // nothing: the button-0 branch of that handler does exactly one thing, which
-  // is to clear the flag, and the button-2 branch is all release work too.
-  for (const kind of ["mousedown", "click", "contextmenu", "pointerdown"]) {
-    nameField.addEventListener(kind, (e) => e.stopPropagation());
-  }
-  nameField.addEventListener("blur", commitName);
+  };
 
   // ---- helpers ---------------------------------------------------------------
   const lerp = (a, b, k) => a + (b - a) * k;
@@ -1112,6 +1197,14 @@
     rosMax = maxSeats;
     rosStarted = started;
     seatNames = nextNames;
+    // ...and this client's OWN copy follows the server's answer for its own
+    // seat. The server's sanitize is the only one that reaches a screen, and
+    // the claim card draws from ownName rather than from a row it does not
+    // have — without this it would keep showing what was typed instead of what
+    // was accepted. A `you` that names nobody leaves the last accepted name
+    // standing: a seatless roster is silence about this client, not a clear.
+    if (Number.isInteger(seat) && seat >= 0 && seat < seatNames.length &&
+        seatNames[seat]) ownName = seatNames[seat];
     if (identitySame) { noteIdentity(); return; } // a seat arrived, the door shut, or somebody named themselves
     const namespaceMoved = seat !== mySeat || seatEpoch !== mySeatEpoch;
     const matchMoved = matchEpoch !== myMatchEpoch;
@@ -1827,7 +1920,7 @@
     const mine = s0.players.find((p) => p.seat === localSeat());
     if (mine) {
       const ownedSum = (mine.ow || []).reduce((a, b) => a + b, 0);
-      if (lastOwnedSum >= 0 && ownedSum > lastOwnedSum && window.Sfx) Sfx.cue("buy");
+      if (lastOwnedSum >= 0 && ownedSum > lastOwnedSum && window.Sfx) Sfx.cue("buy", null, undefined, localSeat());
       lastOwnedSum = ownedSum;
     }
 
@@ -1979,7 +2072,27 @@
                                     // half-second's cues silently instead of
                                     // playing a backlog as one burst
       const at = Number.isFinite(e.x) ? { x: e.x, y: e.y } : null;
-      if (window.Sfx) Sfx.cue(e.k, at, e.g);
+      // the local seat's own fire and thud already sounded on the PREDICTED
+      // edge (predTickK's cueing fx), so the wire's copy is the same shot a
+      // round trip later — the very lateness this whole path exists to end.
+      // The conjunction is the same one that gates the cue-authoring pass, so a
+      // predictor that has given up (an unacked burst) or is parked (the seat is
+      // down) authors nothing and this client still hears its own gun.
+      //   But it is READ HERE, at drain time, and the cue it is standing in for
+      // was authored a round trip earlier — so on a tick where the predictor
+      // changed state inside that window the two disagree. Going down costs a
+      // doubled sound, which the recipe gaps largely swallow. Coming back up
+      // costs the opposite: the queued copies of shots taken WHILE it was down
+      // are the only copies there are, and they are dropped — up to the stale
+      // guard's half-second of silence, as a bad link recovers. Latching the
+      // decision on the authoring tick is the honest fix and is deliberately
+      // not attempted here; see S-1qfnge's report.
+      //   Only the Sfx line skips. FX.cue and the comet instrument below are
+      // separate consumers of this same queue — a light flash and a tripwire
+      // reading — and both must still see every event this client is handed.
+      const ownEcho = predOn && !predIdle && e.seat === mySeat &&
+                      (e.k === "fire" || e.k === "thud");
+      if (window.Sfx && !ownEcho) Sfx.cue(e.k, at, e.g, e.seat);
       // ...and the light layer, off the same presented queue: in net mode the
       // local sim never steps, so game.js's drainCues() never runs. It sits
       // ABOVE the null guard because the RESTART MARKER carries no position
@@ -2068,20 +2181,26 @@
     // nothing else knows about. The board's Player-N fallback covers both.
     seatName: (s) => (Number.isInteger(s) && s >= 0 && s < seatNames.length
       ? seatNames[s] : null),
-    // ...and the field itself. showNameField is called once per rendered frame
-    // from js/encounter.js's overlay chain, so it is written as a no-op when
-    // nothing changes — one string compare, no layout read, no allocation.
-    showNameField: (on) => {
-      const want = on ? "block" : "none";
-      if (nameField.style.display === want) return;
-      if (!on && document.activeElement === nameField) nameField.blur(); // commits
-      nameField.style.display = want;
-    },
-    // ...and whether the keyboard currently belongs to the box. js/game.js and
-    // js/encounter.js ask before acting on a key, which covers the one route
-    // the stopPropagation above cannot: focus taken with Tab, and a handler
-    // added later that does not know this element exists.
-    typing: () => document.activeElement === nameField,
+    // ...and THIS client's own name, which is not a roster read: a seatless
+    // client has no row on the board and no entry in `names`, and the claim
+    // card is exactly the screen where a name is worth asking for. It follows
+    // the server's answer for this client's own seat as soon as one arrives
+    // (see the `you` decode), because the server's sanitize is the only one
+    // that reaches a screen.
+    ownName: () => ownName,
+    // ...and the editor over it. nameEdit answers the LIVE buffer while an edit
+    // is open and null while none is — null, not "", because an empty buffer is
+    // a real state (a player clearing a name) and js/encounter.js has to draw a
+    // caret over it rather than fall back to the accepted name.
+    nameEdit: () => (editing ? editBuf : null),
+    // ...and the two levers. js/game.js opens on a click that lands on an
+    // affordance and closes (COMMITTING) on any other press and on pause();
+    // Enter and Escape close from the keydown listener above.
+    openNameEdit, closeNameEdit,
+    // ...and whether the keyboard currently belongs to the editor. js/game.js
+    // and js/encounter.js ask before acting on a key. The listener above stops
+    // the bubble besides — the two guards are redundant on purpose.
+    typing: () => editing,
     // ...and the half of that null the fold destroys: this client, and only
     // this client, has had a seat taken back. Set by the `you` that took it and
     // spent by the first presented snapshot that says the seat is not released

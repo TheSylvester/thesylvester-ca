@@ -2390,11 +2390,11 @@
     if (E.state === "dead") return false; // the match is over — nothing sells
     // a downed seat may browse the shelf; only a live one may spend — the
     // documented choice, surfaced at the phase gate
-    if (S.hull <= 0) { if (window.Sfx) Sfx.cue("denied"); return false; }
-    if (shopMaxed(i, seat)) { if (window.Sfx) Sfx.cue("denied"); return false; }
-    if (row.can && !row.can(seat)) { if (window.Sfx) Sfx.cue("denied"); return false; }
+    if (S.hull <= 0) { if (window.Sfx) Sfx.cue("denied", null, undefined, seat); return false; }
+    if (shopMaxed(i, seat)) { if (window.Sfx) Sfx.cue("denied", null, undefined, seat); return false; }
+    if (row.can && !row.can(seat)) { if (window.Sfx) Sfx.cue("denied", null, undefined, seat); return false; }
     const cost = shopCost(i, seat); // the BUYER's own rank prices the row
-    if (S.xp < cost) { if (window.Sfx) Sfx.cue("denied"); return false; }
+    if (S.xp < cost) { if (window.Sfx) Sfx.cue("denied", null, undefined, seat); return false; }
     S.xp -= cost; // the wallet pays; S.score never moves — spending is not un-scoring
     S.owned[i]++; // the purchase IS the rank — termsFor derives everything else
     if (row.apply) row.apply(S.owned[i], seat); // the rank AFTER the sale, for the rows
@@ -2405,7 +2405,9 @@
     // discontinuity. Unhashed; the RANKS are the hashed truth.
     S.termSeq++;
     emit("termChange", null, undefined, seat, S.termSeq);
-    if (window.Sfx) Sfx.cue("buy");
+    if (window.Sfx) Sfx.cue("buy", null, undefined, seat); // the BUYER's own
+                                 // till — five cues off one shelf must not
+                                 // share one seat's gap
     return true;
   }
 
@@ -4298,6 +4300,17 @@
   // Match-scoped: restart() clears best with the run. (The 7-day board
   // arrives with server persistence in phase 09.)
   const BOARDUI = { w: 170, h: 320 };
+  // The two DRAW CACHES the name affordances are hit-tested against. Neither is
+  // simulation state and neither may go near E: they are the last frame's
+  // geometry, recorded by the draw that produced it so the hit test inverts
+  // exactly the rects a player can see. drawBoard's rows are recomputed every
+  // frame from the ranking (an unseated seat loses its row and the rest
+  // redistribute), and the card's box exists only on the frames the card is up.
+  // game.js gates both clicks on the same conditions it gates the draws on —
+  // panelsOn() && G.started for the board, a rendered card for the box — so a
+  // stale cache is unreachable rather than merely unlikely.
+  let boardRows = [];       // { s, y0, y1 } per drawn row, in BOARDUI space
+  let nameCardRect = null;  // the claim card's name box, in FIELD space
 
   // The SHIP DOWN card's second line, as a string rather than an inline
   // literal — the copy is a CLAIM about the rules, so it has to be pinnable.
@@ -4430,6 +4443,21 @@
     .filter((r) => !r.S.absent)
     .sort((a, b) => b.S.best - a.S.best || a.s - b.s);
 
+  // ...and WHICH of those rows belongs to the reader, or -1 when none does.
+  //   The correction this exists for: boardRanking filters ABSENT SEATS. It
+  // knows nothing about the client reading it, so a seatless client is NOT
+  // filtered out of the board — it sees every seated row, exactly as a
+  // spectator should. What it must not see is one of them called its own.
+  // localSeat() folds a missing grant to seat 0 (js/game.js), which is the
+  // right answer for a VIEW — the camera has to follow something — and the
+  // wrong one for a CLAIM about the reader: drawn off the fold, the board
+  // printed "you" under a stranger's row, painted that stranger's name with
+  // this client's live edit buffer, and offered the stranger's row as a rename
+  // control. seatless() is the half of localSeat() the fold destroys, and this
+  // is the board's copy of the guard the overlay chain already runs.
+  //   -1, not null: it is compared against seat ids, and -1 matches no row.
+  const ownRow = () => (seatless() ? -1 : localSeat());
+
   // The scoreboard, reworked to the user's spec: per seat, TWO STACKED LINES
   // — the name line ("Player1".."PlayerN" by seat id; no name data exists
   // yet) over the score line (boardScoreLine: the standing, and the live run
@@ -4488,9 +4516,12 @@
     // the crown on a leader who just died — under the new death rule the
     // score half of that test would be 0 for the whole respawn timer.
     const king = ranked.length && ranked[0].S.best > 0 ? ranked[0].s : -1;
+    const me = ownRow(); // -1 on a seatless screen: no row is this reader's
+    boardRows.length = 0; // re-recorded below, in the order the rows are drawn
     ranked.forEach((r, i) => {
       const top = pad + i * cellH;
       const alive = seatAlive(r.s);
+      boardRows.push({ s: r.s, y0: top, y1: top + cellH });
       // the seat's own name if it has told anyone one, and the ordinary
       // Player-N string if it has not. The fallback is UNCHANGED on purpose:
       // it is what every default-state pixel leg in the browser suites was
@@ -4500,16 +4531,39 @@
       const named = window.Net && Net.seatName ? Net.seatName(r.s) : null;
       const name = named || "Player" + (r.s + 1);
       const score = boardScoreLine(r.S);
-      ctx.font = "700 " + fit(name, nameH) + "px " + FONT;
+      // ...and while THIS client is renaming itself, its own name line is the
+      // editor: the live buffer with a caret after it, in clay, so the row a
+      // player is typing into is the one thing on the board that is not a
+      // report. It replaces the name rather than sitting beside it, because the
+      // row has no width to spare — fit() is already squeezing to innerW.
+      const mine = r.s === me;
+      const edit = mine && window.Net && Net.nameEdit ? Net.nameEdit() : null;
+      const line = edit === null ? name : edit + "_";
+      ctx.font = "700 " + fit(line, nameH) + "px " + FONT;
       // the LOCAL seat is the bright one — a client granted seat 1 must see
-      // its own row highlighted, exactly as the HUD reads its own seat, and
-      // it reads it through the same accessor (phase 09 left this hardcoded
-      // to seat 0; phase 14 fixed it while repainting the row)
-      ctx.fillStyle = !alive ? C.dim : r.s === localSeat() ? C.bright : "#9aa3b2";
-      ctx.fillText(name, B.w / 2, top + nameH / 2);
+      // its own row highlighted, exactly as the HUD reads its own seat (phase
+      // 09 left this hardcoded to seat 0; phase 14 fixed it while repainting
+      // the row). A seatless screen brightens NOTHING: every row on it is
+      // somebody else's, and the bright fill is this board's oldest claim about
+      // which one is yours.
+      ctx.fillStyle = edit !== null ? C.clay
+        : !alive ? C.dim : mine ? C.bright : "#9aa3b2";
+      ctx.fillText(line, B.w / 2, top + nameH / 2);
       ctx.font = "700 " + fit(score, scoreH) + "px " + FONT;
       ctx.fillStyle = alive ? C.clay : C.dim;
       ctx.fillText(score, B.w / 2, top + nameH + scoreH / 2);
+      // "you" — the row's answer to the one question a brighter fill was being
+      // asked to carry alone. It goes in the row's OWN trailing air (the 0.14
+      // of each cell neither text line spends), not beside the name, so no
+      // existing rect moves and the fit() cap above is untouched. BRIGHT, the
+      // same channel the local row's name already uses: clay is the crown's,
+      // and the crown says who leads, which is a different question.
+      if (mine) {
+        const air = cellH - nameH - scoreH;
+        ctx.font = "700 " + Math.max(6, Math.min(9, Math.floor(air * 0.55))) + "px " + FONT;
+        ctx.fillStyle = C.bright;
+        ctx.fillText("you", B.w / 2, top + nameH + scoreH + air * 0.45);
+      }
       // the crown: a small five-point chevron over the name line, centred on
       // the row and drawn inside the row's own band, so the two text fits
       // above are untouched and no geometry moves. Clay, always — the crown
@@ -4541,6 +4595,72 @@
     ctx.restore(); // puts textAlign and textBaseline back with the rest
   }
 
+  // ...and the board's ONE click target: this client's own row opens the name
+  // editor on it. The board had no targets at all — game.js routed its bar's
+  // presses here and dropped them on the floor — and this is the rename the
+  // owner asked for, reachable MID-MATCH and in the default aim mode, because
+  // a gutter panel is hit-tested through the drawn cursor rather than through
+  // a DOM node the pointer lock has taken away.
+  //   Only this client's own row. Another seat's row is a report, not a
+  // control — and a SEATLESS client owns none of the rows it can see. It is not
+  // filtered off this board (boardRanking filters absent SEATS, not readers);
+  // it simply has no row of its own, so ownRow() answers -1 and every press
+  // here misses. That screen renames from the claim card instead.
+  function boardClick(x, y) {
+    if (!G.running) return false; // a paused board is a picture; the press that
+                                  // lands on it is the one that resumes
+    if (x < 0 || x > BOARDUI.w) return false;
+    const me = ownRow();
+    if (me < 0) return false; // seatless: the rename ask has to be about YOUR
+                              // seat, and this reader holds none
+    const row = boardRows.find((r) => r.s === me && y >= r.y0 && y < r.y1);
+    if (!row) return false;
+    if (window.Net && Net.openNameEdit) Net.openNameEdit();
+    return true; // the RECT was hit, which is a different question from whether
+                 // the editor changed state — see nameCardClick's own block
+  }
+
+  // The claim card's name box, and the hit test that inverts it. The width is
+  // the deleted DOM input's own 150 px, kept to the pixel so the box lands
+  // where a returning player's hand already goes.
+  const NAMEBOX = { w: 150, h: 17 };
+  function drawNameBox(cx, cy) {
+    const edit = window.Net && Net.nameEdit ? Net.nameEdit() : null;
+    const own = window.Net && Net.ownName ? Net.ownName() : null;
+    // an OPEN editor draws its buffer with a caret, even when the buffer is
+    // empty — that is a player clearing a name, and falling back to the
+    // accepted one there would look like the keystrokes were refused
+    const label = edit !== null ? edit + "_" : own || "click to set your name";
+    const x0 = cx - NAMEBOX.w / 2;
+    const y0 = cy - NAMEBOX.h / 2;
+    ctx.fillStyle = "rgba(14, 17, 25, 0.9)";
+    ctx.fillRect(x0, y0, NAMEBOX.w, NAMEBOX.h);
+    ctx.strokeStyle = edit !== null ? C.clay : C.wall; // the border is the only
+    ctx.lineWidth = 1;                                 // "you are typing" cue a
+    ctx.strokeRect(x0 + 0.5, y0 + 0.5, NAMEBOX.w - 1, NAMEBOX.h - 1); // box this
+    ctx.font = "400 10px " + FONT;                     // small can carry
+    ctx.fillStyle = edit !== null || own ? C.bright : C.dim;
+    ctx.fillText(label, cx, cy + 3.5); // alphabetic baseline, like the card lines
+    nameCardRect = { x0, y0, x1: x0 + NAMEBOX.w, y1: y0 + NAMEBOX.h };
+  }
+  // FIELD coordinates, the space the card is drawn in. Answers false whenever
+  // no box was drawn on the last frame, which is every screen that is not the
+  // claim or seat-released card.
+  function nameCardClick(x, y) {
+    const r = nameCardRect;
+    if (!r || x < r.x0 || x > r.x1 || y < r.y0 || y > r.y1) return false;
+    // HANDLED means the press landed on the rect, NOT that the editor changed
+    // state. openNameEdit is deliberately a no-op on an already-open editor —
+    // a second click on the box a player is typing into is not a reason to
+    // throw away what was typed — and forwarding that false told game.js the
+    // press was unhandled, which sent it on to the commit-and-close it uses for
+    // a press ANYWHERE ELSE. Clicking the box twice therefore committed a
+    // half-typed name and handed the keyboard back to the ship, which is the
+    // exact class of defect this editor exists to end.
+    if (window.Net && Net.openNameEdit) Net.openNameEdit();
+    return true;
+  }
+
   // the two logical spaces game.js fits into the gutters — the ONE shape
   // its panelPlace and pointer routing read, so a layout change here moves
   // the fit and the hit test together
@@ -4550,6 +4670,10 @@
   }
 
   function encDrawHud(_c, view) {
+    // the card's name box is re-recorded by the branch that draws it, and by
+    // nothing else — a hit test may never outlive the rect it inverts, and the
+    // idle return below is a screen with no card on it
+    nameCardRect = null;
     if (E.state === "idle") return;
     ctx.save();
     const wt = E.waveTick;
@@ -4640,12 +4764,6 @@
       ctx.lineWidth = 1;
     }
     // --- state overlays ---
-    // ...and the DOM name field that rides them. It is shown from exactly ONE
-    // branch below — the claim / seat-release card — so the flag is set there
-    // and spent once after the chain, rather than by re-deriving the branch
-    // condition a second time and letting the two drift. Net mode owns the
-    // element; local play's Net stub answers this call with nothing at all.
-    let nameFieldOn = false;
     if (E.state === "cleared" && wt - E.clearTick < ECFG.clearHold) {
       const left = ECFG.clearHold - (wt - E.clearTick);
       ctx.globalAlpha = Math.min(1, left / 60); // the banner fades out
@@ -4659,10 +4777,6 @@
       // banner promises the wave encStep now deals itself — no shop screen follows
       ctx.globalAlpha = 1;
     } else if (seatless() || releasedHere(LS)) {
-      // the one screen the field belongs on: this player has no seat of its own
-      // and the card is inviting a click, which is the moment a name is worth
-      // asking for and the only moment the keyboard is not flying a ship
-      nameFieldOn = true;
       // NO SEAT OF ITS OWN — and therefore NO CARD BELOW THIS POINT. Every
       // branch under here reads LS, and LS is localSeatRec(), which falls back
       // to seat 0 so the camera and the HUD column always have a record to
@@ -4708,6 +4822,19 @@
         ctx.fillText(claimRefusedHere() ? spectatorRefusedLine() : spectatorCardLine(),
                      FW / 2, FH / 2 + 12);
       }
+      // ...and the NAME BOX, on both halves of this card. This is the screen a
+      // player reaches before it OWNS a board row to rename from: a seatless
+      // client can see the whole board, it simply holds none of those rows (see
+      // ownRow), so the card is the one place a first name can be asked for —
+      // and the only moment on this screen when the keyboard is not flying a
+      // ship. It sits where the DOM input it
+      // replaces sat, and it is a CANVAS rect: game.js hit-tests it through the
+      // drawn cursor, the only pointer a held lock leaves anybody.
+      drawNameBox(FW / 2, FH / 2 + 34);
+      ctx.font = "400 10px " + FONT;
+      ctx.fillStyle = C.dim;
+      ctx.fillText("click the box to type a name — later, click your own row on the board",
+                   FW / 2, FH / 2 + 56);
     } else if (LS && LS.hull <= 0 && LS.respawnT > 0) {
       // the LOCAL seat is down but coming back — the match runs on around
       // the parked hull, so this is a countdown card, not a freeze screen
@@ -4750,7 +4877,6 @@
       ctx.fillStyle = C.dim;
       ctx.fillText("press R to restart from wave 1 — tuner settings survive", FW / 2, FH / 2 + 12);
     }
-    if (window.Net && Net.showNameField) Net.showNameField(nameFieldOn);
     // --- the hovered row's own panel, over everything it explains ---
     // Last, so it paints over the spawn markers and the warning line if a wave
     // lands while the player is shopping — but never over the status stack or
@@ -4767,9 +4893,12 @@
   // thing on the screen with no picture. The death screen's R is what is left.
   document.addEventListener("keydown", (e) => {
     if (e.repeat) return;
-    // the name field owns the keyboard while it holds focus — an R typed into
-    // "Ranger" must not restart the match. The element stops its own bubble, so
-    // this covers the route that stop cannot: focus taken with Tab.
+    // the name editor owns the keyboard while it is open — an R typed into
+    // "Ranger" must not restart the match. js/net.js's own capture-phase
+    // listener stops the bubble on every key it takes, and this is the second
+    // half of that guard, for a key it declines. Both halves are wanted: the
+    // deleted DOM field's leak leg only reddened when BOTH of its guards were
+    // gone, and that redundancy is what has survived every refactor since.
     if (window.Net && Net.typing && Net.typing()) return;
     if (e.code === "KeyR" && E.state === "dead") {
       e.preventDefault();
@@ -5073,6 +5202,11 @@
     // gutters and the panel transforms; this file owns every rect and every
     // decision made against one — both calls speak LOGICAL PANEL coordinates.
     shopHover, shopClick,
+    // ...and the board's, which is the same contract in the other gutter:
+    // LOGICAL PANEL coordinates in, a handled/not-handled answer out. The card
+    // box speaks FIELD coordinates instead, because that is the space it is
+    // drawn in — game.js converts the drawn cursor into both.
+    boardClick, nameCardClick,
     // ...and the panels themselves: the fixed logical spaces game.js fits
     // into the gutters, and the two draws it runs under those transforms
     panelSpec, drawShopPanel, drawBoard,
@@ -5266,7 +5400,7 @@
       // what the committed event-stream fixtures pinned.
       if (evRec.on) evRec.list.push({ tick: simTick, kind: ev.kind, gain: ev.gain === undefined ? null : ev.gain,
         ...(ev.termSeq !== undefined ? { seat: ev.seat, termSeq: ev.termSeq } : {}) });
-      if (ev.kind !== "termChange" && window.Sfx) Sfx.cue(ev.kind, ev.at, ev.gain);
+      if (ev.kind !== "termChange" && window.Sfx) Sfx.cue(ev.kind, ev.at, ev.gain, ev.seat);
     }
   }
   // the recorder sees only what THIS drain forwards — events the RAF loop
@@ -5368,6 +5502,12 @@
       statusStackRight, // the left edge of that channel, derived from the same
                         // numbers encDrawHud sets the status stack with
       shopHover,      // the hit test, in panel coordinates
+      // the board's own draw cache and the card's box, so a click leg can press
+      // the EXACT rect the last frame drew instead of re-deriving geometry that
+      // would then agree with itself and with nothing on screen. Copies out:
+      // these are live draw state and a check may not hold a handle on them.
+      boardRows: () => boardRows.map((r) => ({ ...r })),
+      nameBoxRect: () => (nameCardRect ? { ...nameCardRect } : null),
       shopClick,      // ...and the click that runs through it
       shopInfo: (seat = localSeat()) => SHOP.map((row, i) => ({ // the SEAT's resolved view —
         // prices/ranks/availability all differ per seat now; the default is

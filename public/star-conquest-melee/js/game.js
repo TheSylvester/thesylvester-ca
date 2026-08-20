@@ -3290,8 +3290,10 @@ function drainCues() {
   if (!window.Encounter) return;
   for (const ev of Encounter.drainEvents()) {
     // termChange is a marker for the wire/predictor, never a cue — the same
-    // skip the encounter's own headless drain keeps
-    if (ev.kind !== "termChange" && window.Sfx) Sfx.cue(ev.kind, ev.at, ev.gain);
+    // skip the encounter's own headless drain keeps. The seat rides along: the
+    // audio layer keys its throttle per seat, and a drain that dropped the
+    // field it is already holding would put four players back on one gap.
+    if (ev.kind !== "termChange" && window.Sfx) Sfx.cue(ev.kind, ev.at, ev.gain, ev.seat);
     // ...and the one VISUAL the drain owes: a seat's hull going up. It rides
     // here rather than inside the sim because it is decoration — the same
     // reason js/net.js spawns its bursts in fireEvents() instead of pretending
@@ -3423,10 +3425,14 @@ function pause() {
   stopLoop();
   syncTuner();
   render();
-  // ...and the name field, which the render above cannot take away: it is shown
-  // and hidden from the overlay chain, and a paused screen draws no further
-  // frames. The resume's first frame puts it back if the card is still up.
-  if (window.Net && Net.showNameField) Net.showNameField(false);
+  // ...and the name editor, which the render above cannot take away: it is
+  // canvas state, and a paused screen draws no further frames to show it with.
+  // It COMMITS rather than cancelling — the player typed those letters, and a
+  // pause is not a retraction. This is the only close a player does not perform
+  // by hand, and it is why nothing else may hide the editor: the old DOM field
+  // committed on every blur, and its blur came off a per-frame visibility flag,
+  // so a wave clear or a granted seat sent half a name.
+  if (window.Net && Net.closeNameEdit) Net.closeNameEdit(true);
 }
 // A lock request can fail (Chrome's ~1.3s post-Escape cooldown, automation,
 // no API at all). Push mode cannot run without it, so only that caller pauses
@@ -3553,16 +3559,35 @@ canvas.addEventListener("mousedown", (e) => {
   }
   // The gutter panels own their own clicks: a click in the shop column buys
   // (or misses) THERE and never falls through to fire() or a pointer-lock
-  // request; the board has no click targets but still eats its bar's clicks.
-  // Locked mode's pointer is the drawn cursor; every other mode converts the
-  // native event. A field click never enters this block at all.
+  // request; the board renames THIS client and eats the rest of its bar's
+  // clicks. Locked mode's pointer is the drawn cursor; every other mode
+  // converts the native event — and the drawn cursor is the whole reason the
+  // name affordances live on the canvas: it is the only pointer that still
+  // works while resume() holds the session's pointer lock.
   {
     const d = lockedMode() ? lcurDevice() : pointerDevice(e.clientX, e.clientY);
     const pp = d && panelAt(d.x, d.y);
     if (pp) {
       if (pp.panel === "shop" && e.button === 0 && window.Encounter) Encounter.shopClick(pp.x, pp.y);
+      // ...and the board has ONE target now: this client's own row opens the
+      // name editor. It still eats the rest of its bar's clicks.
+      else if (pp.panel === "board" && e.button === 0 && window.Encounter) Encounter.boardClick(pp.x, pp.y);
       return;
     }
+    // The claim card's name box is a FIELD target, not a gutter one, so it is
+    // tested here rather than through panelAt — same drawn cursor, same press,
+    // one transform further in. It is tested BEFORE the pointer-lock re-arm and
+    // before inputFire() below, because both of those used to swallow it: a
+    // press aimed at the old DOM box became the seat CLAIM and took the card
+    // away.
+    if (d && e.button === 0 && window.Encounter && Encounter.nameCardClick &&
+        Encounter.nameCardClick((d.x - ox) / scale, (d.y - oy) / scale)) return;
+    // ...and every OTHER press ends an open edit instead of stranding it. The
+    // editor swallows the keyboard while it is open, exactly as the old field
+    // did once Tab had focused it — the difference is that this one can always
+    // be closed by clicking somewhere, which is the gesture a player already
+    // reaches for. It commits, for the same reason pause() does.
+    if (window.Net && Net.closeNameEdit) Net.closeNameEdit(true);
   }
   if (!mouseMode() && lockSupported && !locked()) {
     // steering lost mid-run — this click re-arms it, never fires. Locked mode
@@ -3604,11 +3629,12 @@ const KEY_AIM = {
   KeyW: [0, -1], KeyE: [1, -1], KeyD: [1, 0], KeyC: [1, 1],
   KeyX: [0, 1], KeyS: [0, 1], KeyZ: [-1, 1], KeyA: [-1, 0], KeyQ: [-1, -1],
 };
-// The name field is a DOM input over the canvas (js/net.js). While it holds
-// focus the keyboard belongs to it and not to the ship: the element stops its
-// own events from bubbling, and this is the second half of that guard, for
-// focus taken with Tab or by a handler added later. Local play's Net stub
-// answers false, so nothing here changes off the wire.
+// The name editor is canvas state in js/net.js. While it is open the keyboard
+// belongs to it and not to the ship: its own capture-phase listener stops the
+// bubble on every key it takes, and this is the second half of that guard, for
+// a key it declines and for a handler added later. Both halves are wanted — the
+// deleted DOM field's own leak leg only reddened when BOTH of its guards were
+// gone, and that redundancy is what survived every refactor since.
 const typingName = () => !!(window.Net && Net.typing && Net.typing());
 document.addEventListener("keydown", (e) => {
   if (typingName()) return;
@@ -3645,7 +3671,7 @@ document.addEventListener("keydown", (e) => {
   P.aimed = true;
 });
 document.addEventListener("keyup", (e) => G.keys.delete(e.code));
-// ...and NOT guarded by typingName: a key released while the box has focus must
+// ...and NOT guarded by typingName: a key released while the editor is open must
 // still leave G.keys, or a key held before the click stays held forever. The
 // keydown guard is what keeps anything from entering that set in the first
 // place, so clearing is only ever safe.
@@ -4479,6 +4505,21 @@ Object.assign(window.__test, {
     in0.scur.y = w.y;
     in0.ring.length = 0; // seat 0's ring only — absolute cursor samples from before this teleport are stale
     mirrorLockedCursor();
+  },
+  // ...and the same teleport for a CLIENT point, which setLockedCursor cannot
+  // express: its world argument is clamped to the field rect, and the gutter
+  // panels live OUTSIDE it. A board-click leg has to put the drawn cursor on a
+  // row, and a row is in the right gutter — clampLcur's wider bound is what
+  // makes that a legal cursor position at all. False when the canvas has no
+  // box to convert through.
+  setLockedCursorClient: (cx, cy) => {
+    const d = pointerDevice(cx, cy);
+    if (!d) return false;
+    in0.lcur.x = (d.x - ox) / scale;
+    in0.lcur.y = (d.y - oy) / scale;
+    clampLcur();
+    mirrorLockedCursor();
+    return true;
   },
   // ---- the frame-loop seams -------------------------------------------------
   // frameBody is loop()'s extracted body: a suite drives it with synthetic

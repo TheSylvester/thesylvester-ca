@@ -51,8 +51,27 @@
   let engHold = 0; // an audition owns the engine ramp until this ac time —
                    // frame() must not stomp the test cue's audible bump
 
-  const MAXVOICES = 16; // whole-cue admission budget — a cue starts all of its
+  const MAXVOICES = 32; // whole-cue admission budget — a cue starts all of its
                         // steps or none of them, never half a recipe
+  // ...and the voices each tier must LEAVE for the tiers above it. The table is
+  // keyed by the SPENDER: tier 0 stops at 24 and so hands 8 to tiers 1 and 2,
+  // tier 1 stops at 28 and hands 4 to tier 2, and tier 2 — which nothing
+  // outranks — spends the lot.
+  //   The budget was 16 and was almost certainly never reached: one throttle
+  // covered every seat, so a tick could only ever ask for as many cues as it had
+  // distinct NAMES. (The live count is not per-tick — a voice is held until its
+  // scheduled stop fires onended, so a death carries two of them across the next
+  // half-second of ticks — but the gap gate kept the arrival rate low enough
+  // that the sum stayed far under 16.) Keying the throttle per seat multiplies
+  // the arrivals by the seats in the room, so the budget goes live for the first
+  // time — and a flat cap refuses whichever cue happens to ask last. That is the
+  // wrong cue to lose: death is two voices over half a second and the only sound
+  // in the palette that says the run is over, and it would be refused by the
+  // exact line that refuses a wall tick. The reservation is what buys the
+  // difference — a tier may spend down to its own floor and no further, so the
+  // field's chatter can never starve the five cues that carry what nothing else
+  // does.
+  const RESERVE = { 0: 8, 1: 4, 2: 0 };
   // the engine band is 40–66 Hz, deliberately narrow and deliberately deep:
   // wide enough that speed still reads in the pitch, narrow enough that the
   // hum never becomes a NOTE the ear tracks. The gain pays for the tight
@@ -114,12 +133,30 @@
   const LOG_MAX = 256;
   let played = 0, dropped = 0;
 
-  // per-name wall-clock throttles. Wall-clock (ac.currentTime), not
+  // the SEAT a cue belongs to, and the one sentinel every seatless caller
+  // folds onto. A sentinel rather than a falsy test, because seat 0 is a real
+  // seat: `seat || 0` and a bare `seat | 0` both answer 0 for `undefined`,
+  // which would alias the audition — the one cue in the page that belongs to
+  // no seat — onto whoever is flying seat 0. Finiteness is asked explicitly, so
+  // absent and zero can never be the same answer. The sentinel is a STRING and
+  // not a number for the same reason: every numeric choice is some seat id, and
+  // a key space where "absent" is spelled like a seat is one rename away from
+  // the bug this whole change is about.
+  const NOSEAT = "none";
+  const seatKey = (name, seat) =>
+    name + "#" + (Number.isFinite(seat) ? seat | 0 : NOSEAT);
+
+  // per-name, PER-SEAT wall-clock throttles. Wall-clock (ac.currentTime), not
   // tick-counted, deliberately: the loop legitimately runs up to five sim
   // ticks inside one rAF at one audio instant, and coalescing those into one
-  // sound is precisely what a throttle is FOR. The suites do not need audible
-  // behavior to test — the LOG records every call either way, and the armed
-  // gate keeps them silent regardless.
+  // sound is precisely what a throttle is FOR. Per-seat because coalescing
+  // stops being right the moment the second sound is somebody ELSE's: keyed by
+  // name alone, every seat in a match shared one 45 ms fire gap, and a remote
+  // pew 30 ms before yours ate yours. Measured on the live build: 78 of 78 lost
+  // own-fire cues were stolen by another seat inside the prior gap — 15–23% of
+  // a stock duo's own pews, past 50% in a four-seat melee. The suites do not
+  // need audible behavior to test — the LOG records every call either way, and
+  // the armed gate keeps them silent regardless.
   const lastAt = Object.create(null);
 
   // the live-voice list. live counts started node-chains and onended both
@@ -132,15 +169,22 @@
   // pickup's melody memory — the only cue with any. Successive banked orbs
   // step up an eight-note run instead of playing twenty copies of one blip;
   // the streak advances only on a PLAYED pickup (a throttled one does not, or
-  // the run would skip notes) and resets after 400 ms of silence.
-  let streak = 0;
-  let lastPickupT = -1;
+  // the run would skip notes) and resets after 400 ms of silence. Keyed the
+  // same way the throttle is, and for the same reason: as two module-level
+  // numbers, one player's orbs walked another player's arpeggio, and a run of
+  // eight notes shared by four seats is a run nobody hears the shape of.
+  const streak = Object.create(null);
+  const lastPickupT = Object.create(null);
 
   // ---- the cue table -------------------------------------------------------
   // two primitives, the ancestor's signatures kept:
   //   ["b", f0, f1, dur, type, vol, delay, bus?]  — beep: swept oscillator
   //   ["n", dur, vol, freq, delay, bus?]          — noise: filtered flat grain
-  // gap is the per-name minimum spacing in ms; the optional trailing bus
+  // gap is the minimum spacing in ms between two cues of this name FROM ONE
+  // SEAT (see lastAt above — a remote pew must never eat your own); pri is the
+  // admission tier, 0 for the field's chatter that the ear loses nothing by
+  // losing one of, 2 for the five cues that carry what nothing else carries,
+  // 1 for everything with a cause on screen; the optional trailing bus
   // overrides the cue's bus for that step alone — exactly one cue uses it
   // (test, which exercises all four buses in one press so the sliders balance
   // a MIX rather than a knob). The recipe volumes are the single place a
@@ -150,14 +194,14 @@
     // 45 ms gap (not 70): RAPID LOADER caps near 5.5/s at the stock BCOOL,
     // but BCOOL is a live dev slider, and the gap must clear whatever cadence
     // a retuned page fires at.
-    fire: { bus: "shot", gap: 45, steps: [["b", 880, 380, 0.05, "square", 0.22, 0]] },
+    fire: { bus: "shot", gap: 45, pri: 0, steps: [["b", 880, 380, 0.05, "square", 0.22, 0]] },
     // mass meeting a wall; mag carries the flipped component's pre-bounce
     // speed, so a graze whispers and a slam lands.
-    thud: { bus: "shot", gap: 90, steps: [["b", 110, 62, 0.10, "sine", 0.30, 0],
-                                          ["n", 0.06, 0.18, 700, 0]] },
+    thud: { bus: "shot", gap: 90, pri: 0, steps: [["b", 110, 62, 0.10, "sine", 0.30, 0],
+                                                  ["n", 0.06, 0.18, 700, 0]] },
     // the reference's bounce(), one notch quieter — a dull tick for something
     // inert being struck, never competing with fire.
-    wall: { bus: "shot", gap: 60, steps: [["b", 140, 140, 0.03, "square", 0.10, 0]] },
+    wall: { bus: "shot", gap: 60, pri: 0, steps: [["b", 140, 140, 0.03, "square", 0.10, 0]] },
     // the shot landing on a body that lives: a short falling knock UNDER
     // fire's band, triangle where the guns are square — a volley reads
     // guns-high, landings-low, and the kill still owns the only real note.
@@ -166,94 +210,95 @@
     // the volumes sit near kill's on purpose: hit must survive the player's
     // own fire barrage, and the kill moment still outranks it because the
     // killing landing plays BOTH cues in the same instant.
-    hit: { bus: "shot", gap: 45, steps: [["b", 340, 190, 0.06, "triangle", 0.30, 0],
-                                         ["n", 0.05, 0.20, 1900, 0]] },
+    hit: { bus: "shot", gap: 45, pri: 0, steps: [["b", 340, 190, 0.06, "triangle", 0.30, 0],
+                                                 ["n", 0.05, 0.20, 1900, 0]] },
     // a bullet stopped dead by the anvil's frontal shield. Deliberately the
     // OPPOSITE of hit in every dimension it has: high and metallic square
     // where hit is a low soft knock — one volley into the
     // front of that body teaches the shield by ear, with nothing on screen.
-    clang: { bus: "shot", gap: 45, steps: [["b", 1250, 880, 0.05, "square", 0.20, 0],
-                                           ["n", 0.03, 0.12, 3200, 0]] },
+    clang: { bus: "shot", gap: 45, pri: 0, steps: [["b", 1250, 880, 0.05, "square", 0.20, 0],
+                                                   ["n", 0.03, 0.12, 3200, 0]] },
     // a missile ending, however it ended — shot down, spent on the hull, run
     // into a wall or burnt out. It sits on the SHOT bus and not on foe because
     // most booms in a run are the player's own bullet killing it, and the
     // falling square between kill and killheavy is what places its mass.
-    boom: { bus: "shot", gap: 70, steps: [["b", 230, 80, 0.11, "square", 0.26, 0],
-                                          ["n", 0.09, 0.22, 1100, 0]] },
+    boom: { bus: "shot", gap: 70, pri: 0, steps: [["b", 230, 80, 0.11, "square", 0.26, 0],
+                                                  ["n", 0.09, 0.22, 1100, 0]] },
     // the reference's kill() shape — a falling square plus a burst is a body
     // coming apart.
-    kill: { bus: "shot", gap: 55, steps: [["b", 300, 110, 0.08, "square", 0.30, 0],
-                                          ["n", 0.05, 0.18, 1500, 0]] },
+    kill: { bus: "shot", gap: 55, pri: 1, steps: [["b", 300, 110, 0.08, "square", 0.30, 0],
+                                                  ["n", 0.05, 0.18, 1500, 0]] },
     // the same gesture an octave down and twice as long: pitch is mass, and
     // the charger is the heavy body.
-    killheavy: { bus: "shot", gap: 90, steps: [["b", 190, 70, 0.16, "square", 0.34, 0],
-                                               ["n", 0.13, 0.26, 900, 0]] },
+    killheavy: { bus: "shot", gap: 90, pri: 2, steps: [["b", 190, 70, 0.16, "square", 0.34, 0],
+                                                       ["n", 0.13, 0.26, 900, 0]] },
     // the reference's smart() bomb at a tenth: the splash IS a small smart
     // bomb, and sounding like one teaches what was bought.
-    blast: { bus: "shot", gap: 90, steps: [["b", 150, 50, 0.14, "sawtooth", 0.24, 0],
-                                           ["n", 0.12, 0.28, 1800, 0]] },
+    blast: { bus: "shot", gap: 90, pri: 1, steps: [["b", 150, 50, 0.14, "sawtooth", 0.24, 0],
+                                                   ["n", 0.12, 0.28, 1800, 0]] },
     // a rising saw is "winding up on you"; it starts the tick the lance angle
     // locks, so the sound and the dodge window begin together.
-    charge: { bus: "foe", gap: 60, steps: [["b", 320, 780, 0.16, "sawtooth", 0.14, 0]] },
+    charge: { bus: "foe", gap: 60, pri: 1, steps: [["b", 320, 780, 0.16, "sawtooth", 0.14, 0]] },
     // the reference's laser(), shortened — the confirmation a dodged lance
     // otherwise never gives.
-    zap: { bus: "foe", gap: 80, steps: [["b", 1400, 700, 0.10, "sawtooth", 0.20, 0]] },
+    zap: { bus: "foe", gap: 80, pri: 1, steps: [["b", 1400, 700, 0.10, "sawtooth", 0.20, 0]] },
     // the charge gesture an octave and a half lower and twice as long: the
     // bigger telegraph earns the bigger sound, recognisably one family.
-    windup: { bus: "foe", gap: 90, steps: [["b", 80, 190, 0.34, "sawtooth", 0.20, 0]] },
+    windup: { bus: "foe", gap: 90, pri: 1, steps: [["b", 80, 190, 0.34, "sawtooth", 0.20, 0]] },
     // a lowpassed whoosh with a falling body under it — mass moving, not
     // energy discharging.
-    dash: { bus: "foe", gap: 90, steps: [["n", 0.20, 0.30, 620, 0],
-                                         ["b", 220, 120, 0.16, "triangle", 0.16, 0]] },
+    dash: { bus: "foe", gap: 90, pri: 1, steps: [["n", 0.20, 0.30, 620, 0],
+                                                 ["b", 220, 120, 0.16, "triangle", 0.16, 0]] },
     // the harrier's launch reticle closing: windup's rising saw an octave up,
     // half as long and quieter — unmistakably the same family, from the
     // lighter body. It starts the tick the missile's bearing latches, so the
     // sound and the sidestep window begin together, exactly as charge does.
-    lock: { bus: "foe", gap: 90, steps: [["b", 160, 380, 0.17, "sawtooth", 0.14, 0]] },
+    lock: { bus: "foe", gap: 90, pri: 1, steps: [["b", 160, 380, 0.17, "sawtooth", 0.14, 0]] },
     // the missile leaving the rail: dash's whoosh with the body RISING under
     // it instead of falling — this mass is departing, not arriving.
-    launch: { bus: "foe", gap: 70, steps: [["n", 0.16, 0.26, 900, 0],
-                                           ["b", 180, 430, 0.14, "triangle", 0.18, 0]] },
+    launch: { bus: "foe", gap: 70, pri: 1, steps: [["n", 0.16, 0.26, 900, 0],
+                                                   ["b", 180, 430, 0.14, "triangle", 0.18, 0]] },
     // the reference's spawn(); one cue per GROUP — three darts landing is one
     // event, and the emission site honors that.
-    spawn: { bus: "foe", gap: 120, steps: [["b", 200, 300, 0.08, "triangle", 0.16, 0]] },
+    spawn: { bus: "foe", gap: 120, pri: 0, steps: [["b", 200, 300, 0.08, "triangle", 0.16, 0]] },
     // the only warning that the lone body on the edge is a charger.
-    spawnheavy: { bus: "foe", gap: 120, steps: [["b", 110, 170, 0.16, "triangle", 0.22, 0]] },
+    spawnheavy: { bus: "foe", gap: 120, pri: 1, steps: [["b", 110, 170, 0.16, "triangle", 0.22, 0]] },
     // the fall says something was lost; the player's i-frames gate repeats
     // for free — hitPlayer returns early while graced.
-    hurt: { bus: "foe", gap: 200, steps: [["b", 220, 90, 0.18, "sawtooth", 0.32, 0],
-                                          ["n", 0.12, 0.20, 700, 0]] },
+    hurt: { bus: "foe", gap: 200, pri: 2, steps: [["b", 220, 90, 0.18, "sawtooth", 0.32, 0],
+                                                  ["n", 0.12, 0.20, 700, 0]] },
     // the reference's death() verbatim; the only sound over half a second,
     // which is what makes it read as final.
-    death: { bus: "foe", gap: 800, steps: [["b", 300, 48, 0.55, "sawtooth", 0.50, 0],
-                                           ["n", 0.40, 0.35, 500, 0]] },
-    // the scale replaces f0 with scale[streak] and f1 with f0 × 1.5 — the
-    // cleared-banner orb flood plays a rising arpeggio.
-    pickup: { bus: "ui", gap: 45, scale: [523, 587, 659, 784, 880, 988, 1175, 1319],
+    death: { bus: "foe", gap: 800, pri: 2, steps: [["b", 300, 48, 0.55, "sawtooth", 0.50, 0],
+                                                   ["n", 0.40, 0.35, 500, 0]] },
+    // the scale replaces f0 with the note this SEAT's run is standing on and
+    // f1 with f0 × 1.5 — the cleared-banner orb flood plays a rising arpeggio,
+    // and four players flood four of them (see pickupNote).
+    pickup: { bus: "ui", gap: 45, pri: 1, scale: [523, 587, 659, 784, 880, 988, 1175, 1319],
               steps: [["b", 523, 785, 0.06, "square", 0.26, 0]] },
     // the one FALLING two-note figure in the palette: alarms fall, rewards rise.
-    warn: { bus: "ui", gap: 150, steps: [["b", 660, 660, 0.07, "sine", 0.22, 0],
-                                         ["b", 495, 495, 0.10, "sine", 0.22, 0.08]] },
+    warn: { bus: "ui", gap: 150, pri: 2, steps: [["b", 660, 660, 0.07, "sine", 0.22, 0],
+                                                 ["b", 495, 495, 0.10, "sine", 0.22, 0.08]] },
     // the reference's gateOpen() verbatim — this game's one victory phrase
     // was its ancestor's too.
-    clear: { bus: "ui", gap: 600, steps: [["b", 392, 392, 0.09, "sine", 0.40, 0],
-                                          ["b", 587, 587, 0.11, "sine", 0.40, 0.09],
-                                          ["b", 784, 784, 0.16, "sine", 0.40, 0.20]] },
+    clear: { bus: "ui", gap: 600, pri: 2, steps: [["b", 392, 392, 0.09, "sine", 0.40, 0],
+                                                  ["b", 587, 587, 0.11, "sine", 0.40, 0.09],
+                                                  ["b", 784, 784, 0.16, "sine", 0.40, 0.20]] },
     // two notes of that triad at half the level: a smaller door than a
     // cleared wave, same family.
-    shop: { bus: "ui", gap: 200, steps: [["b", 523, 523, 0.08, "sine", 0.26, 0],
-                                         ["b", 784, 784, 0.12, "sine", 0.26, 0.07]] },
+    shop: { bus: "ui", gap: 200, pri: 1, steps: [["b", 523, 523, 0.08, "sine", 0.26, 0],
+                                                 ["b", 784, 784, 0.12, "sine", 0.26, 0.07]] },
     // the reference's extraShip() tightened — a purchase is a small fanfare.
-    buy: { bus: "ui", gap: 80, steps: [["b", 523, 523, 0.10, "triangle", 0.34, 0],
-                                       ["b", 659, 659, 0.10, "triangle", 0.34, 0.06],
-                                       ["b", 784, 784, 0.14, "triangle", 0.34, 0.12]] },
+    buy: { bus: "ui", gap: 80, pri: 1, steps: [["b", 523, 523, 0.10, "triangle", 0.34, 0],
+                                               ["b", 659, 659, 0.10, "triangle", 0.34, 0.06],
+                                               ["b", 784, 784, 0.14, "triangle", 0.34, 0.12]] },
     // the reference's denied() verbatim. The highest-value cue in the list: a
     // refused purchase previously had no feedback at all.
-    denied: { bus: "ui", gap: 120, steps: [["b", 120, 90, 0.14, "square", 0.36, 0]] },
+    denied: { bus: "ui", gap: 120, pri: 1, steps: [["b", 120, 90, 0.14, "square", 0.36, 0]] },
     // the audition: one press exercises all four buses in 0.42 s, and the eng
     // field bumps the engine — the only way to hear it from the paused panel
     // its slider lives on.
-    test: { bus: "ui", gap: 350, eng: 0.30,
+    test: { bus: "ui", gap: 350, pri: 1, eng: 0.30,
             steps: [["b", 880, 380, 0.05, "square", 0.22, 0, "shot"],
                     ["b", 320, 780, 0.16, "sawtooth", 0.14, 0.09, "foe"],
                     ["b", 523, 523, 0.09, "triangle", 0.30, 0.24, "ui"],
@@ -283,6 +328,27 @@
     busFoe.gain.setTargetAtTime(SFXFOE, now, 0.02);
     busUi.gain.setTargetAtTime(SFXUI, now, 0.02);
   }
+  // the admission arithmetic, as pure math over the live count: cue() calls
+  // this and nothing else decides admission, so the __test seam below asserts
+  // the exact answer cue() would give with no audio device and no gesture, and
+  // the two cannot drift apart because there is only one copy — the same shape
+  // engCalc() gives frame(). "budget" is a cue the FULL cap refuses; "reserved"
+  // is one only its tier's floor refuses. Both are refusals, both are dropped
+  // and logged, and the two names are what make the reservation assertable at
+  // all — a single reason could not tell a starved palette from a busy one.
+  function admit(pri, want, liveNow) {
+    if (liveNow + want <= MAXVOICES - (RESERVE[pri] || 0)) return "ok";
+    return liveNow + want > MAXVOICES ? "budget" : "reserved";
+  }
+  // ...and pickup's note, the same way: the step this seat's run is standing
+  // on and the frequency that step names, with the 400 ms reset folded in.
+  // Pure — the caller banks the step it was given — so the arpeggio's whole
+  // arithmetic is assertable on a page where nothing plays.
+  function pickupNote(scale, step, last, now) {
+    const s = last !== undefined && now - last > 0.4 ? 0 : step;
+    return { step: s, freq: scale[Math.min(s, scale.length - 1)] };
+  }
+
   // one voice comes apart in one place: budget back, nodes disconnected. The
   // indexOf guard makes it idempotent — onended and the stale sweep can both
   // reach the same voice without double-decrementing live.
@@ -373,13 +439,17 @@
   // world coordinates, read for attenuation only and never mutated; mag is an
   // optional 0..1 volume factor (only thud passes one — the flipped
   // component's pre-bounce speed, floored so even a graze is a sound and not
-  // a rounding error). Returns true only if voices actually started; every
-  // caller discards the return — it exists for __test.
+  // a rounding error); seat is the seat the event BELONGS to, optional and
+  // trailing exactly as it is on the simulation's own emit(kind, at, gain,
+  // seat, termSeq) — the throttle and the melody memory are keyed by it, and a
+  // caller with no seat behind it (the audition, a screen cue) simply omits it
+  // and lands on the seatless sentinel. Returns true only if voices actually
+  // started; every caller discards the return — it exists for __test.
   //
   // the gates run in this exact order, and the order is load-bearing: mute
   // sits ABOVE the context checks precisely so a headless suite with no
   // context at all can still observe the mute gate through the log.
-  function cue(name, at, mag) {
+  function cue(name, at, mag, seat) {
     try {
       const rec = CUES[name];
       if (!rec) return log(name, false, "unknown");
@@ -389,7 +459,8 @@
       if (ac.state !== "running") return log(name, false, "suspended");
       if (!armed) return log(name, false, "unarmed");
       const now = ac.currentTime;
-      const last = lastAt[name];
+      const key = seatKey(name, seat);
+      const last = lastAt[key];
       if (last !== undefined && (now - last) * 1000 < rec.gap) return log(name, false, "gap");
       let k = Number.isFinite(mag) ? Math.max(0.15, Math.min(1, mag)) : 1;
       if (at && Number.isFinite(at.x) && Number.isFinite(at.y)) {
@@ -408,7 +479,8 @@
       const liveSteps = rec.steps.filter(
         (s) => busLevel((s[0] === "b" ? s[7] : s[5]) || rec.bus) > 0);
       if (!liveSteps.length) return log(name, false, "bus");
-      if (live + liveSteps.length > MAXVOICES) return log(name, false, "budget");
+      const adm = admit(rec.pri, liveSteps.length, live);
+      if (adm !== "ok") return log(name, false, adm);
       // a cue whose loudest step lands at or under the envelope floor would
       // schedule voices nobody can hear — skip it whole, same as too far
       let peak = 0;
@@ -416,11 +488,13 @@
       if (peak <= 0.001) return log(name, false, "far");
       applyLevels(now); // the knobs are live — an admitted cue plays at the
                         // sliders' CURRENT values, not last frame's
-      // pickup's melody memory resolves before any step schedules
-      let scaleF = 0;
+      // pickup's melody memory resolves before any step schedules — this
+      // seat's run, never the room's
+      let scaleF = 0, scaleStep = 0;
       if (rec.scale) {
-        if (lastPickupT >= 0 && now - lastPickupT > 0.4) streak = 0;
-        scaleF = rec.scale[Math.min(streak, rec.scale.length - 1)];
+        const note = pickupNote(rec.scale, streak[key] || 0, lastPickupT[key], now);
+        scaleStep = note.step;
+        scaleF = note.freq;
       }
       let started = false;
       for (const s of liveSteps) {
@@ -437,9 +511,9 @@
       if (!started) return log(name, false, "failed"); // every constructor
                         // refused (rung 8/9) — lastAt is NOT stamped, so the
                         // next attempt is not throttled against a silence
-      lastAt[name] = now;
+      lastAt[key] = now;
       played++;
-      if (rec.scale) { streak++; lastPickupT = now; }
+      if (rec.scale) { streak[key] = scaleStep + 1; lastPickupT[key] = now; }
       // the audition's engine bump: ramp up and back, and hold frame() off
       // the param until the ramp is over — the only thing that makes the
       // engine audible from the paused dev panel, where its slider lives.
@@ -704,7 +778,18 @@
                    cut: 120, q: 1.1, freq: ENG_F0 };
         }
       },
-      resetThrottles: () => { for (const k in lastAt) delete lastAt[k]; streak = 0; lastPickupT = -1; },
+      // the three decisions cue() makes below the context gates, as the very
+      // functions it calls — a page with no audio device can never drive a cue
+      // past "idle", so this seam is the only way those rungs are assertable
+      // at all, and being the single copy is what keeps the assertion honest
+      key: seatKey,
+      admit,
+      note: pickupNote,
+      resetThrottles: () => {
+        for (const k in lastAt) delete lastAt[k];
+        for (const k in streak) delete streak[k];
+        for (const k in lastPickupT) delete lastPickupT[k];
+      },
     },
   });
 })();
