@@ -3071,7 +3071,7 @@
         E.groups.every((g) => g.spawned)) {
       E.state = "cleared";
       E.clearTick = E.waveTick;
-      emit("clear", players[0].ship, undefined, 0); // the run's one victory phrase
+      emit("clear", null, undefined, 0); // the run's one victory phrase — positionless: it is a ROOM fact, and att() measured from a far seat's own ship would silence it
     }
     // every seat's settled position, one record per seat — see E.shipPrev
     E.shipPrev = players.map((pl) => ({ x: pl.ship.x, y: pl.ship.y }));
@@ -4538,7 +4538,7 @@
     const n = Math.max(1, ranked.length);
     const cellH = (B.h - pad * 2) / n;
     const nameH = cellH * 0.34;  // the name line...
-    const scoreH = cellH * 0.52; // ...under the larger score line, with the rest as air
+    const scoreH = cellH * 0.52; // ...over the larger score line, with the rest as air BETWEEN them
     // the largest font px that keeps `text` inside innerW, capped at maxPx.
     // The headless DOM stub's measureText answers undefined (render is a
     // no-op there), so the metrics read is guarded — the fallback only ever
@@ -4577,6 +4577,9 @@
       // report. It replaces the name rather than sitting beside it, because the
       // row has no width to spare — fit() is already squeezing to innerW.
       const mine = r.s === me;
+      // the air band, reserved on EVERY row — see the "you" comment below for
+      // why a row that draws no marker still has to leave the gap
+      const air = cellH - nameH - scoreH;
       const edit = mine && window.Net && Net.nameEdit ? Net.nameEdit() : null;
       const line = edit === null ? name : edit + "_";
       ctx.font = "700 " + fit(line, nameH) + "px " + FONT;
@@ -4589,21 +4592,27 @@
       ctx.fillStyle = edit !== null ? C.clay
         : !alive ? C.dim : mine ? C.bright : "#9aa3b2";
       ctx.fillText(line, B.w / 2, top + nameH / 2);
-      ctx.font = "700 " + fit(score, scoreH) + "px " + FONT;
-      ctx.fillStyle = alive ? C.clay : C.dim;
-      ctx.fillText(score, B.w / 2, top + nameH + scoreH / 2);
       // "you" — the row's answer to the one question a brighter fill was being
-      // asked to carry alone. It goes in the row's OWN trailing air (the 0.14
-      // of each cell neither text line spends), not beside the name, so no
-      // existing rect moves and the fit() cap above is untouched. BRIGHT, the
-      // same channel the local row's name already uses: clay is the crown's,
-      // and the crown says who leads, which is a different question.
+      // asked to carry alone. It sits in the air band BETWEEN the name line and
+      // the score line (the 0.14 of each cell neither text line spends), so it
+      // reads as a caption on the NAME above it and not on the number below:
+      // drawn under the score, the owner read it as labelling the score.
+      // The band is reserved on every row, not only on this one, BECAUSE the
+      // marker is drawn on one row only. Reserve it under `mine` alone and the
+      // local row's score would drop by that band while the others held, and
+      // the column of numbers would go ragged. Here every score moves down
+      // together and only the local row fills the gap. The fit() caps and both
+      // rect widths are untouched. BRIGHT, the same channel the local row's
+      // name already uses: clay is the crown's, and the crown says who leads,
+      // which is a different question.
       if (mine) {
-        const air = cellH - nameH - scoreH;
         ctx.font = "700 " + Math.max(6, Math.min(9, Math.floor(air * 0.55))) + "px " + FONT;
         ctx.fillStyle = C.bright;
-        ctx.fillText("you", B.w / 2, top + nameH + scoreH + air * 0.45);
+        ctx.fillText("you", B.w / 2, top + nameH + air * 0.5);
       }
+      ctx.font = "700 " + fit(score, scoreH) + "px " + FONT;
+      ctx.fillStyle = alive ? C.clay : C.dim;
+      ctx.fillText(score, B.w / 2, top + nameH + air + scoreH / 2);
       // the crown: a small five-point chevron over the name line, centred on
       // the row and drawn inside the row's own band, so the two text fits
       // above are untouched and no geometry moves. Clay, always — the crown

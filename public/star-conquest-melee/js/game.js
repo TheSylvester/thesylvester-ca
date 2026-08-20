@@ -200,9 +200,29 @@ let ENRECH = 0.25;  // RECHARGER, per rank: the same deal for ENREGEN (slider, e
 let SFXVOL = 0.65;   // master, 0..1 — audio.js applies SFXVOL^1.6 × MASTER_TRIM (0.5 today, one copy, in js/audio.js), the ancestor's own curve
 let SFXMUTE = false; // the hard switch: a muted page allocates no voices at all, it does not gain them to zero
 let SFXSHOT = 1;     // bus trim — fire, wall ticks, hits, kills, the blast splash
-let SFXFOE = 1;      // bus trim — lance and lunge tells, spawns, damage taken, death
+let SFXFOE = 0.7;    // bus trim — lance and lunge tells, spawns, damage taken, death.
+                     // 0.7, owner-tuned 2026-08-20 on the live build: at 1.0 the foe bus was
+                     // the dominant driver of the soft-clip knee in a telegraph-heavy wave
+                     // (putting it back to 100% reproduced the ducking with the engine
+                     // already at 50%), and 0.7 is where damage feedback still reads
 let SFXUI = 1;       // bus trim — orb pickups, wave alarms and banners, the shop
-let SFXENG = 1;      // engine hum trim — the hum tracks G.flame, so this trims what the flame sounds like; 0 is off
+let SFXENG = 0.5;    // engine hum trim — the hum tracks G.flame, so this trims what the flame sounds like; 0 is off.
+                     // 0.5 rode along with the foe trim above (second-order, not sufficient
+                     // alone): the hum is a PERMANENT floor straight into the ceiling while
+                     // the flame is lit, so halving it buys headroom on every burst
+// SFXVARY: the five REPEAT cues (fire, hit, wall, clang, kill) take a small,
+// deterministic pitch and level jitter per admitted cue (±4 % on f0/f1, ±10 %
+// on vol) from audio.js's own LCG — never Math.random(), never the sim's
+// seeded rand() — so a barrage of identical pews reads as many shots, not one
+// sample looping. The authored phrases (clear, buy, denied, warn, death) are
+// never varied. A toggle rather than a slider: the A/B by ear is on/off.
+let SFXVARY = true;
+// SFXPAN: stereo WIDTH, 0..1 — not an on/off. A shot or foe cue pans by its
+// world-x offset from the local ship (audio.js: linear over ±520 px, saturating,
+// × this width), ui cues and the engine stay centred. 0.6 keeps the loud side
+// under 1.35× the mono level at the rail; 0 is today's mono mix. A slider
+// because the owner tunes width by ear on the live build, as the foe trim was.
+let SFXPAN = 0.6;
 // SFXLOOK, ms: every cue envelope is anchored this far AHEAD of ac.currentTime.
 // Firefox's clock is a main-thread snapshot that does not advance inside a
 // task, and its timeline does not re-anchor a past event to the render head —
@@ -212,6 +232,39 @@ let SFXENG = 1;      // engine hum trim — the hum tracks G.flame, so this trim
 // the read to [0, 1000] ms (its LOOK_MAX), so a typo costs at most a second of
 // lead, not a silent page.
 let SFXLOOK = 20;
+// The two lets a PLAYER sets — SFXVOL and SFXMUTE — are remembered across
+// reloads; the bus trims and the engine are dev-panel knobs and are not. Same
+// idiom as js/net.js's name store: dotted keys, a read whose whole body is a
+// try (Safari private mode, file://, site data blocked — storage can throw
+// outright, and a volume is the least important thing on the screen), a write
+// that swallows the same way, and a VALIDATING pass so a corrupt value never
+// reaches the lets: the volume is snapped to the slider's own 0.05 step with
+// round(v × 20) / 20 — NOT round(v / 0.05) × 0.05, which lands 0.35000000000000003
+// and would disagree with the range input's sanitized "0.35" — and the mute is
+// the literal "1"/"0" and nothing else.
+const SFXVOL_KEY = "scmelee.sfxvol";
+const SFXMUTE_KEY = "scmelee.sfxmute";
+function storedVol() {
+  try {
+    const raw = window.localStorage.getItem(SFXVOL_KEY);
+    if (typeof raw !== "string" || raw.trim() === "") return 0.65; // absent, or an empty string that Number() would read as 0
+    const v = Number(raw);
+    if (!Number.isFinite(v)) return 0.65;
+    return Math.round(Math.max(0, Math.min(1, v)) * 20) / 20;
+  } catch { return 0.65; }
+}
+function storedMute() {
+  try {
+    const raw = window.localStorage.getItem(SFXMUTE_KEY);
+    return raw === "1" ? true : false; // "0", absent and garbage all read unmuted
+  } catch { return false; }
+}
+function storeAudio() {
+  try {
+    window.localStorage.setItem(SFXVOL_KEY, String(SFXVOL));
+    window.localStorage.setItem(SFXMUTE_KEY, SFXMUTE ? "1" : "0");
+  } catch { /* a volume that cannot be remembered is still the volume this session */ }
+}
 let INVERT = true;      // swap right-button roles — off: hold right to aim; on: mouse aims until right is held to fly
 const AIM_R = 16;       // push-model offset clamp radius, px
 const MIN_FIRE_V = 0.25; // cq-scale refuses to fire below this ship speed — the original's rule
@@ -3919,6 +3972,9 @@ function showTuner() {
   out("sfxfoe-out", Math.round(SFXFOE * 100) + "% · enemy tells, spawns, damage taken");
   out("sfxui-out", Math.round(SFXUI * 100) + "% · pickups, waves, the shop");
   out("sfxeng-out", Math.round(SFXENG * 100) + "% engine hum · follows the flame");
+  out("sfxvary-out", SFXVARY ? "on · fire, hit, wall, clang, kill jitter ±4 % pitch, ±10 % level"
+                             : "off · every repeat cue byte-identical");
+  out("sfxpan-out", Math.round(SFXPAN * 100) + "% width · shots and foes pan, ui and the engine stay centred");
   out("sfxtest-out", window.Sfx ? Sfx.state().line : "no audio module — the page is silent");
   showEnemyTuner(); // the generated tab rides every refresh path the authored readouts do
 }
@@ -4111,12 +4167,40 @@ bind("energy-rech", (v) => { ENRECH = v; }).value = String(ENRECH);
 // besides the start click. cue("test") carries a 350 ms gap of its own, so
 // sweeping a slider ticks about three times a second, not once per input event.
 function audition() { if (window.Sfx) { Sfx.unlock(); Sfx.cue("test"); } }
-bind("sfxvol", (v) => { SFXVOL = v; audition(); }).value = String(SFXVOL);
-bind("sfxmute", (v) => { SFXMUTE = v; audition(); }).checked = SFXMUTE;
+// The stored values land on the lets BEFORE the binds below copy them into
+// the dev controls, so a reload shows the remembered volume everywhere at once.
+SFXVOL = storedVol();
+SFXMUTE = storedMute();
+// One pair of setters owns master and mute — the pause menu's slider and
+// button, the dev panel's two rows and a console CALL of a setter all
+// converge here, so the four controls can never disagree about the state.
+// (A raw console write of the let itself bypasses them, exactly as it always
+// bypassed the dev binds — the panel repaints on its next input event.) syncAudioUi() is the
+// SILENT half (DOM from the lets, no audition, no persist): it is also what
+// load calls once, because calling a setter at load would Sfx.unlock() with no
+// gesture and falsify the "idle — audio starts on the first click" line.
+const volumeEl = document.getElementById("volume");
+const mutebtn = document.getElementById("mutebtn");
+function syncAudioUi() {
+  volumeEl.value = String(SFXVOL);
+  document.getElementById("sfxvol").value = String(SFXVOL);
+  document.getElementById("sfxmute").checked = SFXMUTE;
+  mutebtn.textContent = SFXMUTE ? "unmute" : "mute";
+  mutebtn.setAttribute("aria-pressed", SFXMUTE ? "true" : "false");
+}
+function setMasterVol(v) { SFXVOL = v; syncAudioUi(); storeAudio(); showTuner(); audition(); }
+function setMute(b) { SFXMUTE = !!b; syncAudioUi(); storeAudio(); showTuner(); audition(); }
+bind("sfxvol", (v) => { setMasterVol(v); });
+bind("sfxmute", (v) => { setMute(v); });
+bind("volume", (v) => { setMasterVol(v); });
+mutebtn.addEventListener("click", () => setMute(!SFXMUTE)); // a button never fires "input" — "click", like every button here
+syncAudioUi(); // the load-time paint of all four controls from the (possibly stored) lets
 bind("sfxshot", (v) => { SFXSHOT = v; audition(); }).value = String(SFXSHOT);
 bind("sfxfoe", (v) => { SFXFOE = v; audition(); }).value = String(SFXFOE);
 bind("sfxui", (v) => { SFXUI = v; audition(); }).value = String(SFXUI);
 bind("sfxeng", (v) => { SFXENG = v; audition(); }).value = String(SFXENG);
+bind("sfxvary", (v) => { SFXVARY = v; audition(); }).checked = SFXVARY;
+bind("sfxpan", (v) => { SFXPAN = v; audition(); }).value = String(SFXPAN);
 document.getElementById("sfxtest").addEventListener("click", audition); // "click", like reseed
 document.getElementById("reseed").addEventListener("click", () => {
   SEED = (Math.random() * 0x100000000) >>> 0;
@@ -4242,6 +4326,13 @@ window.__test = { G, players, cam, step: clientStep, setCamMode, render, WW, WH,
   // fit/collapse answers, and the inverse conversion that lets a check click
   // a REAL card centre through the real mousedown listener
   setPanels: (v) => { PANELS = !!v; },
+  // the remembered volume: read() is what a reload would apply (validated,
+  // defaulted), clear() drops both keys so a suite's drives never leak into
+  // the next page load on the same origin
+  audioStore: {
+    read: () => ({ vol: storedVol(), mute: storedMute() }),
+    clear: () => { try { window.localStorage.removeItem(SFXVOL_KEY); window.localStorage.removeItem(SFXMUTE_KEY); } catch {} },
+  },
   panelsOn, panelCompact, panelAt, panelToClient,
   panelPlaceFor: (panel) => {
     if (!window.Encounter || !Encounter.panelSpec) return null;

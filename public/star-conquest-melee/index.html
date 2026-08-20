@@ -24,6 +24,12 @@
                /* left:50% halves shrink-to-fit space — max-content re-widens; wrap still saves narrow windows */
                width: max-content; max-width: 100vw; flex-wrap: wrap; justify-content: center; }
   #pausemenu .menutitle { letter-spacing: 0.14em; }
+  /* the player-facing volume: one slider and one mute button on the menu row
+     itself — master and mute only, the bus trims stay on the dev panel. The
+     slider is short on purpose: it is a menu control, not a tuner row, and the
+     row must keep its shrink-to-fit width on a narrow window */
+  #pausemenu .menuvol { letter-spacing: 0.14em; }
+  #pausemenu input[type=range] { width: 110px; accent-color: #d97757; margin: 0; }
   /* the dev screen is a real panel: its own ground over the letterbox, and a
      fixed width so switching tabs never re-measures and re-centers the frame.
      1180px is the floor for the two-column tabs: weapons needs 536+28+571 of
@@ -75,6 +81,11 @@
   <span class="menutitle">ready</span>
   <button id="devbtn" type="button">dev options</button>
   <button id="fsbtn" type="button">fullscreen</button>
+  <!-- the player's volume: master + mute, persisted by game.js (setMasterVol /
+       setMute own the state; syncAudioUi() writes these from the lets) -->
+  <label class="menuvol" for="volume">volume</label>
+  <input id="volume" type="range" min="0" max="1" step="0.05">
+  <button id="mutebtn" type="button" aria-pressed="false">mute</button>
   <button id="resumebtn" type="button">start</button>
 </div>
 <div id="devpanel">
@@ -461,6 +472,16 @@
           <output id="sfxeng-out" for="sfxeng"></output>
         </div>
         <div class="row">
+          <label for="sfxvary">variation</label>
+          <span class="slot"><input id="sfxvary" type="checkbox"></span>
+          <output id="sfxvary-out" for="sfxvary"></output>
+        </div>
+        <div class="row">
+          <label for="sfxpan">stereo width</label>
+          <input id="sfxpan" type="range" min="0" max="1" step="0.05">
+          <output id="sfxpan-out" for="sfxpan"></output>
+        </div>
+        <div class="row">
           <label for="sfxtest">audition</label>
           <span class="slot"><button id="sfxtest" type="button">play a cue</button></span>
           <output id="sfxtest-out" for="sfxtest"></output>
@@ -472,11 +493,11 @@
     <section class="tabsec" data-tab="enemies" hidden><div id="enemies-body"></div></section>
   </div>
 </div>
-<script>window.BUILD="e5a1726";</script>
-<script src="js/game.js?v=e5a1726"></script>
-<script src="js/encounter.js?v=e5a1726"></script>
-<script src="js/audio.js?v=e5a1726"></script>
-<script src="js/net.js?v=e5a1726"></script>
-<script src="js/fx.js?v=e5a1726"></script>
+<script>window.BUILD="e7c20b0";</script>
+<script src="js/game.js?v=e7c20b0"></script>
+<script src="js/encounter.js?v=e7c20b0"></script>
+<script src="js/audio.js?v=e7c20b0"></script>
+<script src="js/net.js?v=e7c20b0"></script>
+<script src="js/fx.js?v=e7c20b0"></script>
 </body>
 </html>

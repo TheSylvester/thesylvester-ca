@@ -47,8 +47,15 @@
   // the permanent graph, built once inside the first successful unlock().
   // master carries the volume curve; the ceiling is a pure safety stage and
   // never a mixer — it sits BEFORE the master trim on purpose, so its drive
-  // is a property of the mix and a ≤1 trim downstream can never re-clip; the
-  // three buses are the only mixing structure there is, one per slider.
+  // is a property of the mix and a ≤1 trim downstream can never re-clip. FOUR
+  // contributors sum into it, not three: the three buses (one per slider) and
+  // the ENGINE, which bypasses the buses entirely (engOsc → engFilt → engDyn →
+  // engWatch → ceiling) and is trimmed by SFXENG alone. The engine is the one
+  // PERMANENT contributor — up to ENG_GAIN 0.17 (engCalc scales it by the
+  // flame's drive, so 0.17 is the full-thrust ceiling) whenever the flame is
+  // lit — a floor under every burst the buses carry, which is why the
+  // S-4ew0wr mix pass halved its default: headroom bought under the bursts
+  // pays on every peak.
   //   The ceiling is a WaveShaper soft clip (softClipCurve below): linear to
   // 0.8, a tanh knee above it, never past 1.0. It is MEMORYLESS — it has no
   // detector, no attack, no release, so it cannot pump — and it is the same
@@ -107,6 +114,12 @@
   // build stamp only helps a tab that re-fetches index.html; the transition
   // publish — old page, new script, or the reverse — is exactly the window.
   const lookMs = () => (typeof SFXLOOK === "number" ? SFXLOOK : 20);
+  // ...and the same typed read for every tuner let this file grew AFTER the
+  // lookahead: a stale game.js across a deploy must fall to the shipped
+  // default, never throw. SFXVARY is the variation toggle (on).
+  const varyOn = () => (typeof SFXVARY === "boolean" ? SFXVARY : true);
+  // SFXPAN is the stereo width (0.6), clamped to [0, 1] on the read.
+  const panWidth = () => (typeof SFXPAN === "number" ? Math.max(0, Math.min(1, SFXPAN)) : 0.6);
   // the ceiling's transfer function — pure math, one copy, so a headless check
   // can assert it: linear to T, then a tanh knee that approaches but never
   // reaches ±1. The node samples it on [-1, 1] (odd length, so x = 0 maps to
@@ -185,6 +198,25 @@
     const k = 1 - (d - NEAR) / (FAR - NEAR);
     return k * k;
   }
+  // stereo PAN — the camera never rotates, so the world-x offset from the
+  // listener (the same ship att() measures from) maps straight to pan: linear,
+  // saturating at ±PAN_FULL, scaled by the width slider. PAN_FULL is 2 × NEAR,
+  // "about a viewport" by att()'s own comment — a body at the far edge of the
+  // screen sits at the rail, a body behind it is no wider. One subtraction and
+  // one clamp per cue, computed once in cue() beside att(). A positionless cue
+  // pans 0. Which voices pan is decided per STEP on the resolved bus: shot and
+  // foe pan, ui (and the engine, which never passes through here) stay
+  // centred — a banner or a till has no place in the world.
+  //   NOT a PannerNode and NOT HRTF, both refused: a native distance model never
+  // reaches exactly zero, and att() === 0 is the free cull that stops a distant
+  // event allocating any node at all; a convolution per voice is a cost the
+  // palette's 32-voice budget has no room for. A StereoPannerNode per voice
+  // (see the step players for the √2) is the whole mechanism.
+  const PAN_FULL = 520;
+  function pan(at) {
+    const dx = at.x - localPlayer().ship.x;
+    return Math.max(-1, Math.min(1, dx / PAN_FULL)) * panWidth();
+  }
 
   // the noise table: four mono half-second buffers of FLAT white noise, built
   // once at the context's real sample rate, filled from hash32 — game.js's
@@ -198,6 +230,33 @@
   const NOISE_SEED = 0xA53C9D11;
   const NOISE = [];
   let nix = 0;
+
+  // cue VARIATION — the five repeat cues (flagged `vary` in the table:
+  // fire, hit, wall, clang, kill) take a small pitch and level jitter so a
+  // barrage reads as many shots rather than one sample looping. Per CUE, not
+  // per step: hit's knock and its noise burst must move together or the two
+  // halves drift apart into two sounds. The draw comes from the noise table's
+  // own generator — hash32 seeded off NOISE_SEED, then the LCG — advanced by
+  // its own plain counter (vix): NEVER nix (the noise-buffer pick would then
+  // phase-lock to the jitter), NEVER the sim's seeded rand() (one stolen draw
+  // moves every group anchor in a replay — section G of the audio checks pins
+  // exactly that), and no Math.random() at init or at cue time. The counter
+  // advances only when a varied cue reaches the step loop, so a refused cue
+  // (gap, far, bus, budget) costs no draw and the sequence is a pure function
+  // of the admitted sequence. The authored phrases — clear, buy, denied, warn,
+  // death — are excluded by name: they are tuned figures, not repeats.
+  const VARY_PITCH = 0.04; // ±4 % on f0 and f1 — under a semitone (5.9 %), so the family still reads
+  const VARY_VOL = 0.10;   // ±10 % on every step's vol — under 1 dB, felt as life, not as a mix move
+  const VARY_NONE = { pitch: 1, vol: 1 }; // the shared no-op, never mutated
+  let vix = 0;
+  function varyAt(i) {
+    let h = hash32(i, 0, 0, NOISE_SEED);
+    h = (Math.imul(h, 1664525) + 1013904223) >>> 0;
+    const u1 = h / 0x100000000;
+    h = (Math.imul(h, 1664525) + 1013904223) >>> 0;
+    const u2 = h / 0x100000000;
+    return { pitch: 1 + (u1 * 2 - 1) * VARY_PITCH, vol: 1 + (u2 * 2 - 1) * VARY_VOL };
+  }
 
   // the cue LOG — the testable heart of the layer. cue() appends one entry at
   // EVERY return point, {name, played, why, t}, whether or not a context even
@@ -269,14 +328,14 @@
     // 45 ms gap (not 70): RAPID LOADER caps near 5.5/s at the stock BCOOL,
     // but BCOOL is a live dev slider, and the gap must clear whatever cadence
     // a retuned page fires at.
-    fire: { bus: "shot", gap: 45, pri: 0, steps: [["b", 880, 380, 0.05, "square", 0.22, 0]] },
+    fire: { bus: "shot", gap: 45, pri: 0, vary: true, steps: [["b", 880, 380, 0.05, "square", 0.22, 0]] },
     // mass meeting a wall; mag carries the flipped component's pre-bounce
     // speed, so a graze whispers and a slam lands.
     thud: { bus: "shot", gap: 90, pri: 0, steps: [["b", 110, 62, 0.10, "sine", 0.30, 0],
                                                   ["n", 0.06, 0.18, 700, 0]] },
     // the reference's bounce(), one notch quieter — a dull tick for something
     // inert being struck, never competing with fire.
-    wall: { bus: "shot", gap: 60, pri: 0, steps: [["b", 140, 140, 0.03, "square", 0.10, 0]] },
+    wall: { bus: "shot", gap: 60, pri: 0, vary: true, steps: [["b", 140, 140, 0.03, "square", 0.10, 0]] },
     // the shot landing on a body that lives: a short falling knock UNDER
     // fire's band, triangle where the guns are square — a volley reads
     // guns-high, landings-low, and the kill still owns the only real note.
@@ -285,13 +344,13 @@
     // the volumes sit near kill's on purpose: hit must survive the player's
     // own fire barrage, and the kill moment still outranks it because the
     // killing landing plays BOTH cues in the same instant.
-    hit: { bus: "shot", gap: 45, pri: 0, steps: [["b", 340, 190, 0.06, "triangle", 0.30, 0],
+    hit: { bus: "shot", gap: 45, pri: 0, vary: true, steps: [["b", 340, 190, 0.06, "triangle", 0.30, 0],
                                                  ["n", 0.05, 0.20, 1900, 0]] },
     // a bullet stopped dead by the anvil's frontal shield. Deliberately the
     // OPPOSITE of hit in every dimension it has: high and metallic square
     // where hit is a low soft knock — one volley into the
     // front of that body teaches the shield by ear, with nothing on screen.
-    clang: { bus: "shot", gap: 45, pri: 0, steps: [["b", 1250, 880, 0.05, "square", 0.20, 0],
+    clang: { bus: "shot", gap: 45, pri: 0, vary: true, steps: [["b", 1250, 880, 0.05, "square", 0.20, 0],
                                                    ["n", 0.03, 0.12, 3200, 0]] },
     // a missile ending, however it ended — shot down, spent on the hull, run
     // into a wall or burnt out. It sits on the SHOT bus and not on foe because
@@ -301,7 +360,7 @@
                                                   ["n", 0.09, 0.22, 1100, 0]] },
     // the reference's kill() shape — a falling square plus a burst is a body
     // coming apart.
-    kill: { bus: "shot", gap: 55, pri: 1, steps: [["b", 300, 110, 0.08, "square", 0.30, 0],
+    kill: { bus: "shot", gap: 55, pri: 1, vary: true, steps: [["b", 300, 110, 0.08, "square", 0.30, 0],
                                                   ["n", 0.05, 0.18, 1500, 0]] },
     // the same gesture an octave down and twice as long: pitch is mass, and
     // the charger is the heavy body.
@@ -312,14 +371,22 @@
     blast: { bus: "shot", gap: 90, pri: 1, steps: [["b", 150, 50, 0.14, "sawtooth", 0.24, 0],
                                                    ["n", 0.12, 0.28, 1800, 0]] },
     // a rising saw is "winding up on you"; it starts the tick the lance angle
-    // locks, so the sound and the dodge window begin together.
-    charge: { bus: "foe", gap: 60, pri: 1, steps: [["b", 320, 780, 0.16, "sawtooth", 0.14, 0]] },
+    // locks, so the sound and the dodge window begin together. 0.32 (from
+    // 0.14) is the S-4ew0wr telegraph trade: at the 0.7 foe trim the tell must
+    // land NEAR the player's own 0.22 gun (0.32 × 0.7 = 0.224 effective) or a
+    // barrage buries the one sound that buys the dodge — paid for INSIDE the
+    // bus by cutting zap, measured flat on the audio-duck e4 dart wave.
+    charge: { bus: "foe", gap: 60, pri: 1, steps: [["b", 320, 780, 0.16, "sawtooth", 0.32, 0]] },
     // the reference's laser(), shortened — the confirmation a dodged lance
-    // otherwise never gives.
-    zap: { bus: "foe", gap: 80, pri: 1, steps: [["b", 1400, 700, 0.10, "sawtooth", 0.20, 0]] },
+    // otherwise never gives. 0.12 (from 0.20) is the other half of the trade:
+    // the beam already firing is information that arrives too late to act on,
+    // so it funds the telegraphs above it; 0.10 is its floor — the confirm
+    // must stay audible.
+    zap: { bus: "foe", gap: 80, pri: 1, steps: [["b", 1400, 700, 0.10, "sawtooth", 0.12, 0]] },
     // the charge gesture an octave and a half lower and twice as long: the
-    // bigger telegraph earns the bigger sound, recognisably one family.
-    windup: { bus: "foe", gap: 90, pri: 1, steps: [["b", 80, 190, 0.34, "sawtooth", 0.20, 0]] },
+    // bigger telegraph earns the bigger sound, recognisably one family —
+    // 0.36 keeps it charge + 0.04 through the trade.
+    windup: { bus: "foe", gap: 90, pri: 1, steps: [["b", 80, 190, 0.34, "sawtooth", 0.36, 0]] },
     // a lowpassed whoosh with a falling body under it — mass moving, not
     // energy discharging.
     dash: { bus: "foe", gap: 90, pri: 1, steps: [["n", 0.20, 0.30, 620, 0],
@@ -328,7 +395,7 @@
     // half as long and quieter — unmistakably the same family, from the
     // lighter body. It starts the tick the missile's bearing latches, so the
     // sound and the sidestep window begin together, exactly as charge does.
-    lock: { bus: "foe", gap: 90, pri: 1, steps: [["b", 160, 380, 0.17, "sawtooth", 0.14, 0]] },
+    lock: { bus: "foe", gap: 90, pri: 1, steps: [["b", 160, 380, 0.17, "sawtooth", 0.32, 0]] }, // 0.32 with charge — same trade, same read
     // the missile leaving the rail: dash's whoosh with the body RISING under
     // it instead of falling — this mass is departing, not arriving.
     launch: { bus: "foe", gap: 70, pri: 1, steps: [["n", 0.16, 0.26, 900, 0],
@@ -466,8 +533,22 @@
   // is try/caught so a constructor failing under memory pressure disconnects
   // its partial nodes and reports false — a half-built cue cannot strand
   // budget, because live counts only chains that actually started.
-  function startBeep(f0, f1, dur, type, vol, delay, busNode) {
-    let o = null, g = null;
+  //   panArg is the trailing pan, a number for a shot/foe step and null for a
+  // ui step (or a browser with no StereoPannerNode): a number puts one
+  // StereoPannerNode between the envelope gain and the bus, pushed into nodes
+  // AFTER index 0 (sweepStale stops nodes[0]) so release() disconnects it.
+  //   THE √2. StereoPannerNode is equal-power: at pan 0 each channel carries
+  // cos(π/4) = 0.707 of the input, where today's mono voice up-mixes to L = R
+  // = x at full level. Without compensation every panned cue lands 3 dB
+  // quieter per channel than the mix that was tuned, while the engine (mono,
+  // up-mixed) and the ui bus do not — the tuned ratios would be silently
+  // invalidated. So a panned voice's envelope starts at vol × √2: at pan 0
+  // the per-channel level is IDENTICAL to today, across the arc the power is
+  // constant, and at the rail of width 0.6 (θ = 72°) the loud side peaks at
+  // √2 · sin 72° = 1.35×. The audio-duck harness's e4 measures what that 1.35×
+  // costs at the ceiling's knee per channel — see the oversample comment.
+  function startBeep(f0, f1, dur, type, vol, delay, busNode, panArg) {
+    let o = null, g = null, p = null;
     try {
       const t = ac.currentTime + anchorAt(lookMs(), delay);
       o = ac.createOscillator();
@@ -475,12 +556,20 @@
       o.type = type;
       o.frequency.setValueAtTime(Math.max(f0, 1), t);
       o.frequency.exponentialRampToValueAtTime(Math.max(f1, 1), t + dur);
-      g.gain.setValueAtTime(Math.max(0.001, vol), t);
-      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-      o.connect(g).connect(busNode);
+      if (typeof panArg === "number" && typeof ac.createStereoPanner === "function") {
+        p = ac.createStereoPanner();
+        p.pan.value = panArg;
+        g.gain.setValueAtTime(Math.max(0.001, vol * Math.SQRT2), t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+        o.connect(g).connect(p).connect(busNode);
+      } else {
+        g.gain.setValueAtTime(Math.max(0.001, vol), t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+        o.connect(g).connect(busNode);
+      }
       o.start(t);
       o.stop(t + dur + 0.02);
-      const v = { nodes: [o, g], end: t + dur + 0.02 };
+      const v = { nodes: p ? [o, g, p] : [o, g], end: t + dur + 0.02 };
       voices.push(v);
       live++;
       o.onended = () => release(v);
@@ -488,13 +577,14 @@
     } catch {
       try { if (o) o.disconnect(); } catch {}
       try { if (g) g.disconnect(); } catch {}
+      try { if (p) p.disconnect(); } catch {}
       return false;
     }
   }
-  function startNoise(dur, vol, freq, delay, busNode) {
+  function startNoise(dur, vol, freq, delay, busNode, panArg) {
     if (!NOISE.length) return false; // an exotic sample rate emptied the
                                      // table — noise steps skip, beeps still play
-    let src = null, f = null, g = null;
+    let src = null, f = null, g = null, p = null;
     try {
       const t = ac.currentTime + anchorAt(lookMs(), delay);
       src = ac.createBufferSource();
@@ -503,12 +593,20 @@
       f.type = "lowpass";
       f.frequency.value = freq;
       g = ac.createGain();
-      g.gain.setValueAtTime(Math.max(0.001, vol), t);
-      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-      src.connect(f).connect(g).connect(busNode);
+      if (typeof panArg === "number" && typeof ac.createStereoPanner === "function") {
+        p = ac.createStereoPanner();
+        p.pan.value = panArg;
+        g.gain.setValueAtTime(Math.max(0.001, vol * Math.SQRT2), t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+        src.connect(f).connect(g).connect(p).connect(busNode);
+      } else {
+        g.gain.setValueAtTime(Math.max(0.001, vol), t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+        src.connect(f).connect(g).connect(busNode);
+      }
       src.start(t);
       src.stop(t + dur + 0.02);
-      const v = { nodes: [src, f, g], end: t + dur + 0.02 };
+      const v = { nodes: p ? [src, f, g, p] : [src, f, g], end: t + dur + 0.02 };
       voices.push(v);
       live++;
       src.onended = () => release(v);
@@ -517,6 +615,7 @@
       try { if (src) src.disconnect(); } catch {}
       try { if (f) f.disconnect(); } catch {}
       try { if (g) g.disconnect(); } catch {}
+      try { if (p) p.disconnect(); } catch {}
       return false;
     }
   }
@@ -550,10 +649,12 @@
       const last = lastAt[key];
       if (last !== undefined && (now - last) * 1000 < rec.gap) return log(name, false, "gap");
       let k = Number.isFinite(mag) ? Math.max(0.15, Math.min(1, mag)) : 1;
+      let p = 0; // the pan — 0 for a positionless cue; the ui gate is per step, below
       if (at && Number.isFinite(at.x) && Number.isFinite(at.y)) {
         const a = att(at);
         if (a === 0) return log(name, false, "far"); // nothing was allocated
         k *= a;
+        p = pan(at);
       }
       // the bus gate reads each step's EFFECTIVE bus — the per-step override
       // when one carries one, the recipe's bus otherwise, the same resolution
@@ -583,16 +684,25 @@
         scaleStep = note.step;
         scaleF = note.freq;
       }
+      // the variation draw, once per admitted cue (see varyAt) — the pitch
+      // factor rides the beep's f0/f1 (the scale-driven pickup is not varied
+      // and keeps its note), the level factor rides every step's vol
+      const v = rec.vary && varyOn() ? varyAt(vix++) : VARY_NONE;
       let started = false;
       for (const s of liveSteps) {
+        // the step's bus tag is resolved ONCE: it picks the bus node and gates
+        // the pan — a ui step gets null (no panner, the mono path exactly as
+        // before), a shot or foe step the cue's pan
         if (s[0] === "b") {
-          const busNode = busFor(s[7] || rec.bus);
-          const f0 = rec.scale ? scaleF : s[1];
-          const f1 = rec.scale ? scaleF * 1.5 : s[2];
-          if (startBeep(f0, f1, s[3], s[4], s[5] * k, s[6] || 0, busNode)) started = true;
+          const tag = s[7] || rec.bus;
+          const f0 = (rec.scale ? scaleF : s[1]) * v.pitch;
+          const f1 = (rec.scale ? scaleF * 1.5 : s[2]) * v.pitch;
+          if (startBeep(f0, f1, s[3], s[4], s[5] * k * v.vol, s[6] || 0, busFor(tag),
+                        tag === "ui" ? null : p)) started = true;
         } else {
-          const busNode = busFor(s[5] || rec.bus);
-          if (startNoise(s[1], s[2] * k, s[3], s[4] || 0, busNode)) started = true;
+          const tag = s[5] || rec.bus;
+          if (startNoise(s[1], s[2] * k * v.vol, s[3], s[4] || 0, busFor(tag),
+                         tag === "ui" ? null : p)) started = true;
         }
       }
       if (!started) return log(name, false, "failed"); // every constructor
@@ -656,20 +766,28 @@
           master.connect(a.destination);
           ceiling = a.createWaveShaper();
           ceiling.curve = softClipCurve();
-          ceiling.oversample = "none"; // memoryless and cheap. At the default
-                                       // sliders the four-seat melee REACHES the
-                                       // 0.8 knee and barely passes it (0.65–0.88
-                                       // pre-master across the six post-fix
-                                       // harness runs); a
-                                       // knee that shallow takes ≤ 0.05 dB off
-                                       // isolated peak samples and its harmonic
-                                       // products sit far below the palette's own
-                                       // square/saw content — nothing worth
-                                       // oversampling. A mix-level raise (S-4ew0wr
-                                       // unit 3) is the event that must revisit
-                                       // this: the master sits DOWNSTREAM of the
-                                       // ceiling, so a master re-level cannot drive
-                                       // it harder — only bus and cue levels can
+          ceiling.oversample = "none"; // memoryless and cheap — and the S-4ew0wr
+                                       // unit-3 mix pass RE-MEASURED it (the revisit
+                                       // the old comment demanded): at the new
+                                       // defaults (SFXFOE 0.7, SFXENG 0.5) the
+                                       // four-seat e2 melee peaks 0.62–0.69
+                                       // pre-master against 0.82 before the trim —
+                                       // UNDER the 0.8 knee now, where the old
+                                       // defaults just reached it. The in-bus
+                                       // telegraph trade (charge/lock 0.14 → 0.32,
+                                       // windup 0.20 → 0.36, paid for by zap
+                                       // 0.20 → 0.12) spent none of that headroom:
+                                       // the telegraph-heavy e4 dart wave measures
+                                       // knee engagement 0 % both before and after
+                                       // the trade (pre-master peak 0.42–0.44 trim-
+                                       // only vs 0.41–0.42 traded), and with pan
+                                       // 0.6 the louder channel still peaks 0.43,
+                                       // engagement 0 % per channel. So the knee is
+                                       // now pure insurance and oversampling it
+                                       // buys nothing. The master still sits
+                                       // DOWNSTREAM, so only bus and cue levels can
+                                       // ever drive it — a future raise re-runs
+                                       // the audio-duck e2/e4 pair before it ships
           ceiling.connect(master);
           busShot = a.createGain(); busShot.gain.value = SFXSHOT; busShot.connect(ceiling);
           busFoe = a.createGain(); busFoe.gain.value = SFXFOE; busFoe.connect(ceiling);
@@ -864,7 +982,8 @@
       clearLog: () => { LOG.length = 0; },
       names: () => Object.keys(CUES),
       recipe: (n) => CUES[n],                // the table itself — read, never copied
-      levels: () => ({ SFXVOL, SFXMUTE, SFXSHOT, SFXFOE, SFXUI, SFXENG, SFXLOOK: lookMs() }),
+      levels: () => ({ SFXVOL, SFXMUTE, SFXSHOT, SFXFOE, SFXUI, SFXENG, SFXLOOK: lookMs(),
+                       SFXVARY: varyOn(), SFXPAN: panWidth() }),
       look: lookMs,                          // the read the step players make — the skew fallback, assertable
       // the ceiling's transfer function (the math the curve is sampled from —
       // the node clamps past ±1, see softClipAt) and the master trim, as the
@@ -877,6 +996,12 @@
       stats: () => ({ played, dropped, live }),
       armed: () => armed,                    // the user-activation gate, readable
       att: (x, y) => att({ x, y }),          // the rolloff, assertable as pure math
+      pan: (x, y) => pan({ x, y }),          // the stereo position, the same way
+      // the variation draw as the pure function cue() calls, and the names it
+      // applies to — the bounds, the determinism and the exclusion list are
+      // all assertable on a page where nothing plays
+      vary: varyAt,
+      varied: () => Object.keys(CUES).filter((n) => CUES[n].vary),
       // THE calc frame() uses — the same function, not a copy of it — off live
       // G, so a check can assert the hum-is-the-flame invariant and the whole
       // afterburner with no audio device and no gesture
