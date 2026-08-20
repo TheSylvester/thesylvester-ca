@@ -3188,6 +3188,16 @@ function render() {
   // every seat's ship draws; only seat 0 (the local pilot) wears the flame,
   // and a comet-mode seat wears its glow under the hull
   for (const P of players) {
+    // an UNSEATED seat draws nothing — drawShip's own first test — and since v8
+    // its wire record carries no pose at all, so P.ship is whatever the seat
+    // last had. Skipped here, ahead of the glow and the probe, so neither
+    // rides a pose the field does not show — and the probe's entry goes with
+    // it, because drawn.ships is never cleared per frame and a stale entry
+    // would vouch for a ship that drew nothing. No entry is the honest value,
+    // so the array goes SPARSE here: every reader of drawn.ships must test the
+    // entry before it indexes into it (wave1-checks and the rig's dsh() do)
+    const H = seatHealth(P.id);
+    if (H && H.absent) { delete drawn.ships[P.id]; continue; }
     // cometView owns the seat's comet STATE — its CONFIRMED phase is the wire
     // flag by construction — while presentedPool hands in the pool FRACTION,
     // predicted for the local net seat, so the halo sizes off the stick and
