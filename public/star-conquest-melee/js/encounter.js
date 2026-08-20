@@ -270,7 +270,14 @@
                                           // fully in the wallet before its shop opens
     spawnGap: 48,            // px outside the camera rectangle
     minPlayerDist: 90,       // an enemy never appears closer to the player
-    clearHold: 210,          // ticks the WAVE CLEAR banner holds
+    clearHold: 480,          // ticks of inter-wave break. NOT the banner's life:
+                             // the WAVE CLEAR card retires on its own 210-tick
+                             // clock (bannerHold), so the celebration and the
+                             // break are two different numbers — retune this one
+                             // and the card does not stretch with it. Sweep
+                             // floor: the orb magnet needs ~206 ticks to bank
+                             // the world diagonal, so 480 leaves 274 ticks of
+                             // margin where 210 left 4.
   };
 
   // The post-wave shop catalog — data-driven rows, so WSAD ENGINE CONTROLS and
@@ -2411,9 +2418,11 @@
   }
 
   // ---- transitions -------------------------------------------------------
-  // active → cleared (banner holds clearHold while the orb sweep banks the
-  // field) → warning, dealt by encStep itself. No state freezes for a shop:
-  // the panel is live at every moment of play, so a purchase is just buy().
+  // active → cleared (the break runs clearHold ticks while the orb sweep
+  // banks the field; the CLEAR card retires earlier, on bannerHold() =
+  // min(210, clearHold)) → warning, dealt by encStep itself. No state
+  // freezes for a shop: the panel is live at every moment of play, so a
+  // purchase is just buy().
 
   // one purchase against seat `seat`'s wallet — callable at any moment of
   // play: buying mid-flight is the panel shop's whole point. Returns whether
@@ -3064,9 +3073,10 @@
     // A wave clears only when the queue is empty AND the field is empty AND no
     // ordnance is still in the air — still an explicit simplification of Nova
     // Drift's timer-driven overlapping scheduler. The missile term is what
-    // keeps the banner and its orb sweep from running under a live seeker: a
-    // dead harrier's last missile is still the wave. The banner holds clearHold
-    // ticks while the sweep banks the orbs, then the check above opens the shop.
+    // keeps the break and its orb sweep from running under a live seeker: a
+    // dead harrier's last missile is still the wave. The break runs clearHold
+    // ticks while the sweep banks the orbs — the CLEAR card retires earlier,
+    // on bannerHold() = min(210, clearHold) — then the elevator deals.
     if (E.state === "active" && E.enemies.length === 0 && E.missiles.length === 0 &&
         E.groups.every((g) => g.spawned)) {
       E.state = "cleared";
@@ -3985,6 +3995,12 @@
     overlayPx: 15, overlayDrop: 8,
   };
 
+  // The WAVE CLEAR card's own life, in ticks. A function, not a snapshot:
+  // __test.cfg IS ECFG, so a hold explored at runtime must reach this too.
+  // The Math.min makes the dangerous direction impossible — a retune below
+  // 210 shortens the card with the break, a retune above never lengthens it.
+  const bannerHold = () => Math.min(210, ECFG.clearHold);
+
   // The top-left status stack's right edge, in FIELD px, derived from the exact
   // numbers encDrawHud sets that column with: the WAVE header at 10 px, the
   // hull pip row and the ENERGY bar under it — the bar is the wider of those
@@ -4273,6 +4289,7 @@
     ctx.fillStyle = C.clay; // the wallet — the number every click is decided against
     ctx.fillText("XP " + localSeatRec().xp, L.w - 8, P.headerBase);
     const down = !seatAlive(localSeat()); // a downed local seat browses; nothing sells
+    let anyBuyable = false; // feeds the hint's warm colour after the loop
     SHOP.forEach((row, i) => {
       const c = L.cards[i];
       const maxed = shopMaxed(i);
@@ -4280,11 +4297,18 @@
                                               // leaves the shelf stays, greyed
       const cost = shopCost(i);
       const buyable = !down && !maxed && offered && localSeatRec().xp >= cost;
+      if (buyable) anyBuyable = true;
       const hot = E.shopHover === i;
       ctx.fillStyle = hot ? "#161b28" : C.fieldBg; // the card lifts under the pointer
       ctx.fillRect(c.x, c.y, c.w, c.h);
       ctx.lineWidth = 1;
-      ctx.strokeStyle = hot ? (buyable ? C.clay : C.dim) : (buyable ? C.dim : C.wall);
+      // during the break an unhovered affordable card warms to bright — not to
+      // clay, which would erase the hover step exactly when clicks are wanted.
+      // Keyed on the discrete state, never a clock: two renders in one tick
+      // must paint identical bytes for the gutter pixel probes.
+      const warm = E.state === "cleared";
+      ctx.strokeStyle = hot ? (buyable ? C.clay : C.dim)
+                            : (buyable ? (warm ? C.bright : C.dim) : C.wall);
       ctx.strokeRect(c.x + 0.5, c.y + 0.5, c.w - 1, c.h - 1);
       // the card's interior lays out FROM the plan: the icon takes whatever
       // the planned type leaves it, and each baseline below follows from the
@@ -4321,7 +4345,9 @@
       const B = shopHintLine(P, L);
       ctx.textAlign = "center";
       ctx.font = "400 " + P.detailPx + "px " + FONT;
-      ctx.fillStyle = C.dim;
+      // a broke player's panel does not warm — telling someone with no money
+      // to shop is nagging
+      ctx.fillStyle = (E.state === "cleared" && anyBuyable) ? C.clay : C.dim;
       ctx.fillText(B.text, L.w / 2, B.base);
     }
     ctx.restore();
@@ -4803,6 +4829,20 @@
       ctx.fillText("HOSTILES INBOUND", FW / 2, 30);
       ctx.globalAlpha = 1;
     }
+    // The break countdown takes the same slot — "warning" and "cleared" are
+    // exclusive states, so the two lines can never print together, and
+    // HOVERUI.top = 40 already clears this baseline by construction. Outside
+    // the state-overlay chain below on purpose: the countdown is a fact about
+    // the room, so it neither hides a seat's card nor is hidden by one, and a
+    // spectator sees it too. The wt >= E.clearTick term kills the one net
+    // straddle frame per deal where a lerped waveTick would read over the hold.
+    if (E.state === "cleared" && wt >= E.clearTick && wt - E.clearTick < ECFG.clearHold) {
+      const left = ECFG.clearHold - (wt - E.clearTick);
+      ctx.textAlign = "center";
+      ctx.font = "700 11px " + FONT;
+      ctx.fillStyle = left <= 180 ? C.clay : C.dim; // the last three seconds warm up
+      ctx.fillText("NEXT WAVE IN " + Math.ceil(left / 60), FW / 2, 30);
+    }
     // --- hit feedback: a border flash while the hit registers ---
     if (LS.hitFlash > 0) {
       ctx.strokeStyle = C.clay;
@@ -4813,8 +4853,8 @@
       ctx.lineWidth = 1;
     }
     // --- state overlays ---
-    if (E.state === "cleared" && wt - E.clearTick < ECFG.clearHold) {
-      const left = ECFG.clearHold - (wt - E.clearTick);
+    if (E.state === "cleared" && wt - E.clearTick < bannerHold()) {
+      const left = bannerHold() - (wt - E.clearTick);
       ctx.globalAlpha = Math.min(1, left / 60); // the banner fades out
       ctx.textAlign = "center";
       ctx.font = "700 15px " + FONT;
@@ -4822,8 +4862,11 @@
       ctx.fillText("WAVE " + E.wave + " CLEAR", FW / 2, FH / 2 - 8);
       ctx.font = "400 10px " + FONT;
       ctx.fillStyle = C.dim;
-      ctx.fillText("salvage sweeping in · next wave standing by", FW / 2, FH / 2 + 12); // the
-      // banner promises the wave encStep now deals itself — no shop screen follows
+      ctx.fillText("take a breath · the shop is open", FW / 2, FH / 2 + 12); // the
+      // card is the celebration and retires at bannerHold's 210, freeing these
+      // two slots for SHIP DOWN and the rest of the chain; the break itself
+      // runs to ECFG.clearHold, and the countdown at the top of the field
+      // carries the rest of the story
       ctx.globalAlpha = 1;
     } else if (seatless() || releasedHere(LS)) {
       // NO SEAT OF ITS OWN — and therefore NO CARD BELOW THIS POINT. Every
