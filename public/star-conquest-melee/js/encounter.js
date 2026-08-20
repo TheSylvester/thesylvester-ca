@@ -93,7 +93,7 @@
       band: 20,
       backSpeed: 1.2,        // retreat speed when the player crowds it
       sepR: 40,              // separation radius — the bigger body claims more room
-      engage: 260,           // a rested charger plants inside this player distance
+      engage: 240,           // a rested charger plants inside this player distance
       windup: 50,            // plant ticks — the dash line locks at windup START
       dashSpeed: 7,          // px/tick along the locked line, constant across waves
       dashTicks: 26,         //   so is the duration — dodge difficulty stays fair
@@ -104,22 +104,28 @@
     // The standoff carrier — the roster's RANGE axis. Its retreat speed is
     // HIGHER than its approach speed, which is the whole read: crowding a
     // harrier makes it run instead of trade, so the answer to it is to close
-    // the 240 px ring, not to duel across it. It never rams by intent.
+    // the 185 px ring, not to duel across it. It never rams by intent.
     harrier: {
       r: 8, hp: 4,
-      maxSpeed: 1.3,         // approach — slower than the ship by a wide margin
+      maxSpeed: 1.80,        // approach — still slower than the 2.0 ship
       steer: 0.05,
-      prefer: 240,           // the ring it holds: half the 512 px screen away
+      prefer: 185,           // the ring it holds
       band: 30,
-      backSpeed: 1.6,        // ...and it backs off FASTER than it closes
+      backSpeed: 1.85,       // ...and it backs off FASTER than it closes. 1.85 is
+                             // the smallest step on the panel's 0.05 grid that
+                             // holds retreat above the raised 1.80 approach, and
+                             // it keeps the widest chase margin under the 2.0 ship.
       sepR: 46,
-      engage: 270,           // dart 130, charger 260, harrier 270 — still the
-                             // roster's range king, but only just: it was 320,
-                             // which opened locks from off screen, and play
-                             // testing read that as cheap. 270 keeps the lock
-                             // inside the view in ordinary framing, and 260 is
-                             // the hard floor — at or under it the charger
-                             // reaches as far and the standoff identity dies.
+      engage: 200,           // dart 130, harrier 200, charger 240 — the harrier is
+                             // NO LONGER the gate king. The standoff identity now
+                             // rides the THREAT ENVELOPE, not the plant gate:
+                             // harrier 200 + missile reach 260 = 460 px, against
+                             // the charger's 240 + dash 182 (7 × 26) = 422. The
+                             // range archetype keeps the crown by 38 px. The floor
+                             // is therefore whatever holds engage + reach above
+                             // 422 and engage above the dart's 130 — with reach at
+                             // 260 that is engage 163; 200 is the playtested value
+                             // and leaves 37 px over the envelope floor.
       lockon: 45,            // 0.75 s of plant — the research's floor is ~25 ticks,
                              // the time the player needs to develop the lateral
                              // break that beats a missile; below it the first
@@ -127,23 +133,28 @@
       cooldown: 150,         // ticks between launches — statsFor shortens it, floor 90
       orbDrop: 2,
     },
-    // The seeker missile. speed × life = 540 px of reach, past the 512 px
-    // field the owner asked it to cross, and `turn` is what keeps that speed
-    // fair. The quantity that decides a dodge is NOT the turn radius — a
-    // 3×-speed pursuer beats a circling target at any radius — it is the total
-    // HEADING AUTHORITY the fuse can spend: (life − arm − decay/2) × turn ≈ 72°.
-    // That is the number tuned, by simulating this exact loop against a player
-    // holding a full-speed break, launched from every distance the harrier
-    // fires at (the ring-to-engage band — 210–270 px since the engage pull-in;
-    // originally tuned over 240–400, and the wave1 suite re-runs the break
-    // fight over the LIVE band, so a retune here is re-proven, not assumed):
+    // The seeker missile. speed × life = 260 px of reach. It NO LONGER crosses
+    // the 512 px field: the reach is now cut to the launcher, and must clear the
+    // harrier's engage of 200 by AT LEAST 40 px — 260 clears it by 60 — so a
+    // missile fired at the gate still arrives with margin and one fired at
+    // nothing dies well short of the far wall. `turn` is what keeps the speed
+    // fair. The quantity that decides a dodge is NOT the turn radius — a faster
+    // pursuer beats a circling target at any radius — it is the total HEADING
+    // AUTHORITY the fuse can spend: (life − arm − decay/2) × turn, which the
+    // shorter fuse drops from ≈72° to ≈44°. The table below is the original
+    // tuning, taken at life 90 over the then-live band; the current values are
+    // re-proven, not assumed, because the wave1 suite re-runs the break fight
+    // over the LIVE band every run (now the ring-to-engage band, 155–200 px;
+    // it was 210–270 before this retune, and 240–400 when first tuned):
     //   turn 0.030 (108°) — the break is HIT at every range. Not minor homing.
     //   turn 0.022 ( 79°) — the break wins, with no margin.
     //   turn 0.020 ( 72°) — the break wins from a standstill too, and survives
     //                       half a second of hesitation; a HALF-committed 45°
     //                       break is still hit, and so is running away, which
     //                       is exactly the shape a homing threat should have.
-    // So the counter is a committed lateral break, decided early — or, for the
+    // Running away is the one line of that table the shorter fuse repeals: see
+    // the note on `speed`. So the counter is a committed lateral break, decided
+    // early — or a straight full-speed run — or, for the
     // confident, a jink held until the last 60 px, which beats it at any of
     // these values. The margin is wide enough that AFTERBURNER, which RAISES
     // the player's own turn radius as v²/a, cannot invert the fight.
@@ -151,9 +162,15 @@
     // difficulty stays fair forever and only the launcher's hp and cadence grow.
     missile: {
       r: 3.5, hp: 1,         // r + SHIP_R = 10.5 px of hit radius; one bullet kills it
-      speed: 6.0,            // px/tick — 360 px/s, 3× the ship's top speed: running is
-                             // never the answer, which is the point of a seeker
-      life: 90,              // 1.5 s
+      speed: 4.00,           // px/tick — 240 px/s, 2× the ship's top speed. Running IS
+                             // now an answer: measured against this loop, a straight
+                             // full-speed run escapes by 105–150 px at afterburner
+                             // rank 0 and by 249–264 px at rank 1. The owner accepted
+                             // that. What the values still guarantee, and what the
+                             // wave1 suite pins: a PARKED player is hit across the
+                             // whole band, and a committed lateral break — the
+                             // intended counter — misses by 131–138 px.
+      life: 65,              // ~1.08 s
       turn: 0.020,           // rad/tick — 69°/s; R = 300 px, ~20× the ship's own 16.7
       arm: 12,               // ballistic at launch: the straight opening segment is
                              // what makes the bearing readable before it bends
@@ -161,9 +178,12 @@
                              // the fuse tell and the anti-orbit fix in one
       dmg: 1,
       trail: 14,             // the trail IS the UI for the turn radius; a bare dot
-                             // travelling 6 px/tick reads as a teleport
-      max: 6,                // a guard, not a mechanic: 3 harriers at one missile per
-                             // 150 ticks with a 90-tick life cannot reach 6 in flight
+                             // travelling 4 px/tick reads as a teleport
+      max: 6,                // a guard, not a mechanic: a harrier's cadence is its
+                             // cooldown (150, floor 90) plus lockon 45, so even at the
+                             // deepest wave 135 ticks separate launches against a
+                             // 65-tick life — no harrier ever has two of its own in
+                             // flight, and 3 of them cannot reach 6
     },
     // The radar variants — the aim-attack archetypes' predictive siblings.
     // Base attacks punish a still player; a predicted attack punishes CONSTANT
@@ -1406,8 +1426,9 @@
       const cm = Math.hypot(cdx, cdy) || 1;
       spawnImpactFx(e.x - (cdx / cm) * e.r, e.y - (cdy / cm) * e.r, cdx / cm, cdy / cm, "enemy");
       // inside the claim block on purpose: the claim IS the damage edge, so a
-      // sustained overlap sounds once per CONTACTCD window, never per tick
-      emit("hit", e);
+      // sustained overlap sounds once per CONTACTCD window, never per tick.
+      // The seat is the rammer's — the throttle keys it like fire's
+      emit("hit", e, undefined, seat);
     }
     return playerHit;
   }
@@ -1497,8 +1518,8 @@
       e.vx += (tx - e.vx) * P.steer;
       e.vy += (ty - e.vy) * P.steer;
       if (e.cd > 0) e.cd--;
-      // the range comes off the body's own stats — dart 130, charger 260,
-      // harrier 270 — and a type whose engage is 0 (the anvil, the husk, the
+      // the range comes off the body's own stats — dart 130, harrier 200,
+      // charger 240 — and a type whose engage is 0 (the anvil, the husk, the
       // shards) has no attack mode to enter at any distance
       else if (tgt && P.engage > 0 && dist <= P.engage) {
         // a radar variant behaves as its base archetype everywhere but the
@@ -1683,13 +1704,17 @@
                                                        // back off the direction of travel
     // one cue per ending, however it ended: the audio table's boom is defined
     // as "a missile ending", and most endings are the player's own bullet
-    // killing it — which is why it sits on the shot bus and not on foe
+    // killing it — which is why it sits on the shot bus and not on foe.
+    // Seatless ON PURPOSE: the missile record carries no killer and
+    // endMissile(i, kind) takes no seat, so boom stays on the room-wide
+    // throttle bucket; threading a seat through endMissile is the follow-up
+    // if the coalescing is ever heard.
     emit("boom", m);
   }
 
   // Steer, then move, once per tick. The rotation form is provably
   // speed-preserving and has no angle-wrap seam: homing changes HEADING only,
-  // which is what keeps a 6 px/tick body readable.
+  // which is what keeps a 4 px/tick body readable.
   function stepMissiles() {
     const M = ECFG.missile;
     for (let i = E.missiles.length - 1; i >= 0; i--) {
@@ -1723,7 +1748,7 @@
       const nx = m.x + m.vx;
       const ny = m.y + m.vy;
       // swept contact against BOTH motions, exactly as the lance and the dash
-      // do it: neither a 6 px/tick missile nor a top-slider ship may tunnel
+      // do it: neither a 4 px/tick missile nor a top-slider ship may tunnel
       let struck = -1; // the seat the warhead met, or -1
       const rr = m.r + SHIP_R;
       // delivery over EVERY living ship, ascending — the first one on the
@@ -1800,8 +1825,9 @@
     }
     spawnImpactFx(x, y, 0, -1, "blast", R); // visual only — sized to the radius the sim just used
     // below the R <= 0 return, which is what makes this cue mean "the
-    // upgrade you bought went off" and never a phantom at rank 0
-    emit("blast", { x, y });
+    // upgrade you bought went off" and never a phantom at rank 0. The seat is
+    // the splash's source, so two seats' blasts do not share one throttle
+    emit("blast", { x, y }, undefined, attacker);
   }
 
   // The comet ram against another PLAYER. A new collision family: contactEvent
@@ -1968,7 +1994,7 @@
         if (hit.stats.arc > 0 && Math.abs(angDiff(Math.atan2(iy - hit.y, ix - hit.x), hit.face)) <= hit.stats.arc) {
           b.dead = true;
           spawnImpactFx(ix, iy, b.vx / bm, b.vy / bm, "wall");
-          emit("clang", hit); // pitched and short, obviously not
+          emit("clang", hit, undefined, shooter); // pitched and short, obviously not
                               // the hit click — the shield is
                               // learnable by ear in one volley
           blastAt(ix, iy, hit, b.dmg, shooter); // hit, not null: everything else in reach
@@ -1981,8 +2007,8 @@
         b.dead = true; // consumed exactly once — the game sweep removes it
         E.hitsDealt++;
         spawnImpactFx(ix, iy, b.vx / bm, b.vy / bm, "enemy");
-        emit("hit", hit); // the landing, not the kill — reapDead
-                          // owns the one canonical kill sound
+        emit("hit", hit, undefined, shooter); // the landing, not the kill —
+                          // reapDead owns the one canonical kill sound
         blastAt(ix, iy, hit, b.dmg, shooter); // the splash lands where the bullet stopped
       }
     }
@@ -2149,7 +2175,7 @@
         // mirror the live branch.
         if (e.stats.arc > 0 && Math.abs(angDiff(Math.atan2(h.iy - e.y, h.ix - e.x), e.face)) <= e.stats.arc) {
           spawnImpactFx(h.ix, h.iy, h.dx, h.dy, "wall");
-          emit("clang", e);
+          emit("clang", e, undefined, h.src);
           blastAt(h.ix, h.iy, e, h.dmg, h.src);
           continue;
         }
@@ -2161,7 +2187,7 @@
         e.lastAtk = h.src;
         E.hitsDealt++;
         spawnImpactFx(h.ix, h.iy, h.dx, h.dy, "enemy");
-        emit("hit", e);
+        emit("hit", e, undefined, h.src);
         blastAt(h.ix, h.iy, e, h.dmg, h.src);
         continue;
       }
@@ -2281,8 +2307,11 @@
       // the ONE canonical kill site — bullet, blast and contact deaths all
       // arrive here, so no path can sound a body twice. BEFORE the orb loop,
       // which consumes rand(): the emit reads nothing and reorders nothing,
-      // and keeping it above the draws makes that obvious at a glance.
-      emit(HEAVY[e.type] ? "killheavy" : "kill", e);
+      // and keeping it above the draws makes that obvious at a glance. The
+      // seat is the last one that damaged the body — -1 when none has (all but
+      // unreachable: every damage site stamps lastAtk before reapDead runs),
+      // and the audio layer keys that as its own single "kill#-1" bucket.
+      emit(HEAVY[e.type] ? "killheavy" : "kill", e, undefined, e.lastAtk);
       for (let k = 0; k < e.orbDrop; k++) { // 1 a dart or a shard, 2 a charger or a
                                             // harrier, 3 an anvil, 1 the husk itself —
                                             // whose three shards make the burst pay 4
@@ -3167,7 +3196,7 @@
     if (e.mode === "lockon") {
       const p = 1 - e.t / H.lockon;
       const reach = ECFG.missile.speed * ECFG.missile.life * 0.35; // a slice of the
-      // 540 px reach — the whole flight drawn as a line would read as a beam
+      // 260 px reach — the whole flight drawn as a line would read as a beam
       ctx.strokeStyle = C.clay;
       ctx.globalAlpha = 0.15 + 0.5 * p;
       ctx.lineWidth = 1;
@@ -3321,7 +3350,7 @@
                       radarHarrier: drawRadarHarrier };
 
   // the missile, and the trail that is the actual UI for it: a bare dot moving
-  // 6 px/tick reads as a teleport, while a tapering 14-sample tail shows the
+  // 4 px/tick reads as a teleport, while a tapering 14-sample tail shows the
   // turn radius the player has to beat. Newest sample is brightest and widest,
   // and the live position closes the tail so there is never a gap at the tip.
   function drawMissiles(list) {

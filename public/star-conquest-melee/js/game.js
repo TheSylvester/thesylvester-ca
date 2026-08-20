@@ -195,13 +195,23 @@ let ENRECH = 0.25;  // RECHARGER, per rank: the same deal for ENREGEN (slider, e
 // js/audio.js reads every one of these LIVE at cue time and every frame — the
 // same deal encounter.js has with BDMG and CONTACTCD: that module owns the
 // synthesis, this file owns the numbers, and a page without js/audio.js still
-// has a complete, harmless audio tab whose sliders drive nothing.
-let SFXVOL = 0.65;   // master, 0..1 — audio.js applies SFXVOL^1.6 × 0.4, the ancestor's own curve
+// has a complete, harmless audio tab whose sliders drive nothing (the master
+// readout prints the layer's own gain when audio.js is loaded, "—" when it is not).
+let SFXVOL = 0.65;   // master, 0..1 — audio.js applies SFXVOL^1.6 × MASTER_TRIM (0.5 today, one copy, in js/audio.js), the ancestor's own curve
 let SFXMUTE = false; // the hard switch: a muted page allocates no voices at all, it does not gain them to zero
 let SFXSHOT = 1;     // bus trim — fire, wall ticks, hits, kills, the blast splash
 let SFXFOE = 1;      // bus trim — lance and lunge tells, spawns, damage taken, death
 let SFXUI = 1;       // bus trim — orb pickups, wave alarms and banners, the shop
 let SFXENG = 1;      // engine hum trim — the hum tracks G.flame, so this trims what the flame sounds like; 0 is off
+// SFXLOOK, ms: every cue envelope is anchored this far AHEAD of ac.currentTime.
+// Firefox's clock is a main-thread snapshot that does not advance inside a
+// task, and its timeline does not re-anchor a past event to the render head —
+// so a cue authored mid-frame loses its head: measured −8 dB on 73 % of fire
+// cues at 0, clean at 15. Chrome needs none and pays the 20 ms. No slider —
+// the console is the A/B surface (type SFXLOOK = 0 and listen); audio.js clamps
+// the read to [0, 1000] ms (its LOOK_MAX), so a typo costs at most a second of
+// lead, not a silent page.
+let SFXLOOK = 20;
 let INVERT = true;      // swap right-button roles — off: hold right to aim; on: mouse aims until right is held to fly
 const AIM_R = 16;       // push-model offset clamp radius, px
 const MIN_FIRE_V = 0.25; // cq-scale refuses to fire below this ship speed — the original's rule
@@ -2723,7 +2733,9 @@ function flushWallFx() {
   for (const q of fxWall) {
     if (q.b.dead) continue;
     spawnImpactFx(q.x, q.y, q.dx, q.dy, "wall");
-    if (window.Encounter) Encounter.emit("wall", q); // q carries x/y — the same contact point as the spark
+    if (window.Encounter) Encounter.emit("wall", q, undefined, bulletSeat(q.b)); // q carries x/y — the same
+                                                     // contact point as the spark — and the bullet, whose
+                                                     // seat keys the throttle the way fire's does
   }
   fxWall.length = 0;
 }
@@ -3875,7 +3887,8 @@ function showTuner() {
   // checkbox states a STATE, not a rule, so unlike autofire it earns a live
   // line — and the audition row's readout is Sfx.state()'s ready-made string:
   // audio.js formats its own internals, this file only prints them.
-  out("sfxvol-out", Math.round(SFXVOL * 100) + "% master · gain " + (Math.pow(SFXVOL, 1.6) * 0.4).toFixed(3));
+  out("sfxvol-out", Math.round(SFXVOL * 100) + "% master · gain " + // the number is audio.js's: state().gain
+    (window.Sfx ? Sfx.state().gain.toFixed(3) : "—"));             // is the one copy of the curve
   out("sfxmute-out", SFXMUTE ? "muted — every cue is dropped" : "sound on");
   out("sfxshot-out", Math.round(SFXSHOT * 100) + "% · fire, wall ticks, hits, kills, the blast");
   out("sfxfoe-out", Math.round(SFXFOE * 100) + "% · enemy tells, spawns, damage taken");

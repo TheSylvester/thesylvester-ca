@@ -13,11 +13,18 @@
 // Three rules carry the design. CUES ARE DROPPED, NEVER QUEUED: a deferred
 // cue arrives after the event it describes, and a queue is a bank of voices
 // waiting to fire all at once the moment a suspended context wakes — one
-// rule covers every failure mode. THE HUM IS THE FLAME: the engine voice
-// reads the local seat's flame through drawFlame's own curve and its own 1.5 px visibility
-// floor, so the engine is audible on exactly the frames the flame is drawn
-// and the ear and the eye cannot disagree about how hard the ship is
-// burning. THE ARMED GATE IS USER ACTIVATION, NOT CONTEXT STATE: headless
+// rule covers every failure mode. (The SFXLOOK lookahead every envelope is
+// anchored at — anchorAt(), clamped to LOOK_MAX — is not a queue and does not
+// bend the rule: the cue's nodes are created and start()ed in the same call,
+// nothing waits in JS, and a context that is suspended when the cue is
+// authored was already refused at the suspended gate — the offset lives
+// inside the audio clock, where a few ms of lead is what keeps the envelope's
+// head from landing in the render's past. See the step players.) THE HUM IS
+// THE FLAME: the engine voice reads the local seat's flame through drawFlame's
+// own curve and its own 1.5 px visibility floor, so the engine is audible on
+// exactly the frames the flame is drawn and the ear and the eye cannot
+// disagree about how hard the ship is burning. THE ARMED GATE IS USER
+// ACTIVATION, NOT CONTEXT STATE: headless
 // automation can hand a suite a RUNNING AudioContext with no gesture at all,
 // and a synthetic ui.resume() never carries activation — so no voice is ever
 // scheduled until a REAL gesture has reached unlock(), which is what keeps
@@ -38,11 +45,22 @@
   let armed = false; // a real user gesture has reached unlock() — see above
 
   // the permanent graph, built once inside the first successful unlock().
-  // master carries the volume curve; the limiter is a pure safety ceiling and
+  // master carries the volume curve; the ceiling is a pure safety stage and
   // never a mixer — it sits BEFORE the master trim on purpose, so its drive
   // is a property of the mix and a ≤1 trim downstream can never re-clip; the
   // three buses are the only mixing structure there is, one per slider.
-  let master = null, limiter = null;
+  //   The ceiling is a WaveShaper soft clip (softClipCurve below): linear to
+  // 0.8, a tanh knee above it, never past 1.0. It is MEMORYLESS — it has no
+  // detector, no attack, no release, so it cannot pump — and it is the same
+  // arithmetic in every engine. It replaced a DynamicsCompressor (-6 dB
+  // threshold, 12:1) that was anything but the same: Firefox's node still runs
+  // WebKit's sidechain pre-emphasis, which Chromium removed, so the square and
+  // saw palette drove its detector hard and the whole mix ducked under bursts
+  // — measured on a four-seat melee, reduction p50 −2.6 dB / p95 −5.6 dB in
+  // Firefox against −0.04 dB in Chrome, and the death cue 5–7 dB quieter. A
+  // memoryless knee cannot differ between browsers, which is the only property
+  // a safety ceiling needs.
+  let master = null, ceiling = null;
   let busShot = null, busFoe = null, busUi = null;
   // the engine — the one persistent voice: saw → lowpass → drive gain →
   // dead-man watch. Created and start()ed once, never stopped or re-created:
@@ -53,6 +71,44 @@
 
   const MAXVOICES = 32; // whole-cue admission budget — a cue starts all of its
                         // steps or none of them, never half a recipe
+  // the master trim: master.gain = SFXVOL^1.6 × MASTER_TRIM (the ancestor's own
+  // curve, printed beside the slider by game.js). 0.5, not the 0.4 the
+  // compressor era carried: the Chrome compressor added ≈+2 dB of makeup on
+  // every solo cue (fire 0.054 live vs 0.042 bypassed), and the ceiling adds
+  // none, so the trim absorbs it and Chrome's level does not move. The mix
+  // level as a whole is a separate, eared decision.
+  const MASTER_TRIM = 0.5;
+  // the lookahead's ceiling, ms. SFXLOOK is a console-typed let; a huge value
+  // would schedule every voice seconds ahead and hold the MAXVOICES budget
+  // until those ends pass — the page goes silent for that long. 1 s is far
+  // above any lookahead that could ever be wanted and far below "the page
+  // went quiet". anchorAt is the ONE copy of the clamp the step players use:
+  // SFXLOOK ms → [0, LOOK_MAX] (NaN, Infinity and negatives read 0) → seconds,
+  // plus the step's own delay — pure math, so a headless check can assert it.
+  const LOOK_MAX = 1000;
+  const anchorAt = (look, delay) =>
+    (Number.isFinite(look) ? Math.min(LOOK_MAX, Math.max(0, look)) : 0) / 1000 + delay;
+  // the ceiling's transfer function — pure math, one copy, so a headless check
+  // can assert it: linear to T, then a tanh knee that approaches but never
+  // reaches ±1. The node samples it on [-1, 1] (odd length, so x = 0 maps to
+  // exactly 0) and clamps its input to that span, so past ±1 the NODE holds
+  // the endpoint value while the function keeps creeping toward ±1 — both
+  // under 1.0, which is the only claim the ceiling makes.
+  const softClipAt = (x, T = 0.8) => {
+    const ax = Math.abs(x);
+    return ax <= T ? x : Math.sign(x) * (T + (1 - T) * Math.tanh((ax - T) / (1 - T)));
+  };
+  function softClipCurve(n = 4097) {
+    const c = new Float32Array(n);
+    for (let i = 0; i < n; i++) c[i] = softClipAt((i / (n - 1)) * 2 - 1);
+    return c;
+  }
+  // the master curve as pure math — one copy. sliderGain is what the volume
+  // slider's position is worth (game.js prints it as state().gain beside the
+  // slider, so the readout cannot drift from the node); masterGain is what the
+  // node actually carries, which is that or 0 under the mute switch.
+  const sliderGain = () => Math.pow(SFXVOL, 1.6) * MASTER_TRIM;
+  const masterGain = () => (SFXMUTE ? 0 : sliderGain());
   // ...and the voices each tier must LEAVE for the tiers above it. The table is
   // keyed by the SPENDER: tier 0 stops at 24 and so hands 8 to tiers 1 and 2,
   // tier 1 stops at 28 and hands 4 to tier 2, and tier 2 — which nothing
@@ -323,7 +379,7 @@
   // every admitted cue and again every frame. setTargetAtTime throughout,
   // never an exponential ramp, because these params legitimately hold 0.
   function applyLevels(now) {
-    master.gain.setTargetAtTime(SFXMUTE ? 0 : Math.pow(SFXVOL, 1.6) * 0.4, now, 0.02);
+    master.gain.setTargetAtTime(masterGain(), now, 0.02);
     busShot.gain.setTargetAtTime(SFXSHOT, now, 0.02);
     busFoe.gain.setTargetAtTime(SFXFOE, now, 0.02);
     busUi.gain.setTargetAtTime(SFXUI, now, 0.02);
@@ -374,6 +430,18 @@
   // ---- the step players ----------------------------------------------------
   // the envelope is the ancestor's, verbatim: setValueAtTime straight into an
   // exponential ramp — no attack stage; the click IS the chiptune transient.
+  //   Every envelope is anchored SFXLOOK ms AHEAD of ac.currentTime — t =
+  // ac.currentTime + anchorAt(SFXLOOK, delay), clamped to LOOK_MAX — and the
+  // whole step derives from that one t, so the envelope moves as a piece. The
+  // lead exists for Firefox: its currentTime is a main-thread snapshot that
+  // does not advance inside a task, its start()/automation messages reach the
+  // graph only at the end of the task, and its timeline evaluates a ramp from
+  // the ORIGINAL t0 rather than re-anchoring a past event to the render head
+  // as Chromium does. A cue authored mid-frame therefore lost as many device
+  // periods of its head as the frame took — measured −8 dB on 73 % of fire
+  // cues at 0 ms of lead under a 7 ms frame task, clean at 15 ms. Chrome loses
+  // nothing either way and pays the 20 ms. The gap stamp (lastAt) stays on the
+  // raw now — the throttle measures when cues were ASKED for, not scheduled.
   // Every gain that touches an exponential ramp is floored at 0.001, because
   // exponentialRampToValueAtTime(0) throws a RangeError (measured). Each body
   // is try/caught so a constructor failing under memory pressure disconnects
@@ -382,7 +450,7 @@
   function startBeep(f0, f1, dur, type, vol, delay, busNode) {
     let o = null, g = null;
     try {
-      const t = ac.currentTime + delay;
+      const t = ac.currentTime + anchorAt(SFXLOOK, delay);
       o = ac.createOscillator();
       g = ac.createGain();
       o.type = type;
@@ -409,7 +477,7 @@
                                      // table — noise steps skip, beeps still play
     let src = null, f = null, g = null;
     try {
-      const t = ac.currentTime + delay;
+      const t = ac.currentTime + anchorAt(SFXLOOK, delay);
       src = ac.createBufferSource();
       src.buffer = NOISE[nix++ % NOISE.length];
       f = ac.createBiquadFilter();
@@ -565,18 +633,28 @@
         try {
           a = new AudioContext();
           master = a.createGain();
-          master.gain.value = SFXMUTE ? 0 : Math.pow(SFXVOL, 1.6) * 0.4;
+          master.gain.value = masterGain();
           master.connect(a.destination);
-          limiter = a.createDynamicsCompressor();
-          limiter.threshold.value = -6;
-          limiter.knee.value = 6;
-          limiter.ratio.value = 12;
-          limiter.attack.value = 0.003;
-          limiter.release.value = 0.25;
-          limiter.connect(master);
-          busShot = a.createGain(); busShot.gain.value = SFXSHOT; busShot.connect(limiter);
-          busFoe = a.createGain(); busFoe.gain.value = SFXFOE; busFoe.connect(limiter);
-          busUi = a.createGain(); busUi.gain.value = SFXUI; busUi.connect(limiter);
+          ceiling = a.createWaveShaper();
+          ceiling.curve = softClipCurve();
+          ceiling.oversample = "none"; // memoryless and cheap. At the default
+                                       // sliders the four-seat melee REACHES the
+                                       // 0.8 knee and barely passes it (0.65–0.88
+                                       // pre-master across the six post-fix
+                                       // harness runs); a
+                                       // knee that shallow takes ≤ 0.05 dB off
+                                       // isolated peak samples and its harmonic
+                                       // products sit far below the palette's own
+                                       // square/saw content — nothing worth
+                                       // oversampling. A mix-level raise (S-4ew0wr
+                                       // unit 3) is the event that must revisit
+                                       // this: the master sits DOWNSTREAM of the
+                                       // ceiling, so a master re-level cannot drive
+                                       // it harder — only bus and cue levels can
+          ceiling.connect(master);
+          busShot = a.createGain(); busShot.gain.value = SFXSHOT; busShot.connect(ceiling);
+          busFoe = a.createGain(); busFoe.gain.value = SFXFOE; busFoe.connect(ceiling);
+          busUi = a.createGain(); busUi.gain.value = SFXUI; busUi.connect(ceiling);
           engOsc = a.createOscillator();
           engOsc.type = "sawtooth"; // the harmonics are the point: small
                                     // speakers cannot voice a 40 Hz fundamental,
@@ -596,7 +674,7 @@
           engDyn.gain.value = 0; // silent until frame() drives it off the flame
           engWatch = a.createGain();
           engWatch.gain.value = 1;
-          engOsc.connect(engFilt).connect(engDyn).connect(engWatch).connect(limiter);
+          engOsc.connect(engFilt).connect(engDyn).connect(engWatch).connect(ceiling);
           engOsc.start();
           ac = a; // assigned LAST — a throw above leaves the ac binding null,
                   // and the catch closes the context it belonged to
@@ -611,7 +689,7 @@
             const p = a && a.close();
             if (p && typeof p.catch === "function") p.catch(() => {});
           } catch {}
-          master = limiter = busShot = busFoe = busUi = null;
+          master = ceiling = busShot = busFoe = busUi = null;
           engOsc = engFilt = engDyn = engWatch = null;
           ac = null;
           dead = true;
@@ -734,7 +812,7 @@
         line = "idle — audio starts on the first click";
         ctxs = "none";
       } else if (ac.state === "running") {
-        line = "running · master " + (SFXMUTE ? 0 : Math.pow(SFXVOL, 1.6) * 0.4).toFixed(3);
+        line = "running · master " + masterGain().toFixed(3);
         ctxs = "running";
       } else if (ac.state === "closed") {
         line = "closed";
@@ -743,10 +821,13 @@
         line = "suspended — click the field to wake it";
         ctxs = ac.state;
       }
-      return { line, ctx: ctxs, armed, voices: live, played, dropped };
+      // gain is the slider's worth as pure math, whatever the context's state
+      // and mute aside (mute has its own readout) — game.js prints it beside
+      // the volume slider, so the readout and the node share one curve
+      return { line, ctx: ctxs, armed, voices: live, played, dropped, gain: sliderGain() };
     } catch {
       return { line: "unavailable — this browser has no audiocontext",
-               ctx: "unavailable", armed: false, voices: 0, played, dropped };
+               ctx: "unavailable", armed: false, voices: 0, played, dropped, gain: 0 };
     }
   }
 
@@ -764,7 +845,15 @@
       clearLog: () => { LOG.length = 0; },
       names: () => Object.keys(CUES),
       recipe: (n) => CUES[n],                // the table itself — read, never copied
-      levels: () => ({ SFXVOL, SFXMUTE, SFXSHOT, SFXFOE, SFXUI, SFXENG }),
+      levels: () => ({ SFXVOL, SFXMUTE, SFXSHOT, SFXFOE, SFXUI, SFXENG, SFXLOOK }),
+      // the ceiling's transfer function (the math the curve is sampled from —
+      // the node clamps past ±1, see softClipAt) and the master trim, as the
+      // pure math unlock() and applyLevels() use — assertable with no context
+      curveAt: softClipAt,
+      trim: () => MASTER_TRIM,
+      // the envelope anchor as the step players compute it — the clamp is the
+      // only part of the lookahead a page with no gesture can ever observe
+      anchor: (look, delay) => anchorAt(look, delay),
       stats: () => ({ played, dropped, live }),
       armed: () => armed,                    // the user-activation gate, readable
       att: (x, y) => att({ x, y }),          // the rolloff, assertable as pure math
