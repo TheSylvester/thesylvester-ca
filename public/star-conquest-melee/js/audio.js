@@ -437,11 +437,17 @@
     // the reference's denied() verbatim. The highest-value cue in the list: a
     // refused purchase previously had no feedback at all.
     denied: { bus: "ui", gap: 120, pri: 1, steps: [["b", 120, 90, 0.14, "square", 0.36, 0]] },
-    // denied's smaller sibling, for the comet RETRACT (noteCometRetract, the
-    // one authoritative "refused ask" in both modes): the same falling square
-    // shape but shorter and at well under denied's level, so it reads as a
-    // quiet "no" about the pilot's own pool rather than the shop's hard buzz.
-    refuse: { bus: "ui", gap: 200, pri: 1, steps: [["b", 110, 78, 0.10, "square", 0.22, 0]] },
+    // the comet REFUSAL, fired at the PRESS EDGE (js/game.js's cometPresTick,
+    // with noteCometRetract as the late backstop). It is now the ONLY answer a
+    // refused ask gets — the windup ring and the retract collapse were removed
+    // — so it has to be heard, not merely present. It used to sit at 110→78 Hz
+    // at 0.22 for 0.10 s: a falling square below the range a laptop or monitor
+    // speaker reproduces at all, which is why the owner could not hear it.
+    // Two octaves up into a register that plays, 60 % longer, and ABOVE
+    // denied's 0.36 — this cue answers the pilot's own pool, and the pool is
+    // what they are staring at. `gap: 200` is unchanged and is what stops a
+    // mashed button from machine-gunning it.
+    refuse: { bus: "ui", gap: 200, pri: 1, steps: [["b", 320, 180, 0.16, "square", 0.40, 0]] },
     // the audition: one press exercises all four buses in 0.42 s, and the eng
     // field bumps the engine — the only way to hear it from the paused panel
     // its slider lives on.

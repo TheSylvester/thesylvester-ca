@@ -1462,22 +1462,13 @@
       if (predOn && !predIdle && mySeat !== null) {
         const terms = predTerms();
         if (f.rh && !prevRh) {
-          // the comet CUE answers the EXACT arm rule on predicted state: a
-          // running comet continues while the pool holds, a new one needs
-          // the floor — counted at the press edge, shown by the halo. The
-          // sim's `press` term needs no copy here, but only because this
-          // block runs solely under the f.rh && !prevRh press edge above, and
-          // on such a tick the drained rise latches the sim's press too — so
-          // the two rules agree AT THIS GATE while the predictor is running
-          // continuously. Nothing more is claimed: away from the edge this
-          // block does not run at all, and across an idle gap (death) the
-          // frames still go upstream but never through here, so a press made
-          // inside the gap is the sim's alone — hardSnap re-seeds prevRh from
-          // the live want so the first frame after the gap is classified
-          // against the level the sim's bank holds, not a frozen pre-death
-          // reading. These are telemetry counters; the halo reads predK.
-          const armed = predK.energy > 0 && predK.energy >= predK.energyMax * ENARM;
-          if (predK.comet ? predK.energy > 0 : armed) spec.cometCueShown += 1;
+          // the comet CUE answers THE arm rule — js/game.js's Flight.cometOn,
+          // the one copy the sim and the HUD dim also call — on predicted
+          // state. `press` is passed `true` because this block runs only at
+          // the f.rh && !prevRh edge above, so a fresh press is a fact at this
+          // gate rather than a term to re-derive. These are telemetry
+          // counters; the halo reads predK.
+          if (Flight.cometOn(predK.comet, predK.energy, predK.energyMax, true)) spec.cometCueShown += 1;
           else spec.cometRefused += 1;
         }
         prevRh = f.rh ? 1 : 0;

@@ -4793,21 +4793,24 @@
     ctx.lineWidth = 1;
     ctx.strokeRect(8.5, 31.5, ebW, 4);
     if (ebF > 0) {
-      // a seat below the re-arm floor and not in a CONFIRMED comet is LOCKED
-      // OUT, not merely low — the dimmer fill is what makes "why won't it
-      // turn on" answerable from the screen, and the notch below says where
-      // the line is. Only CP_LIVE lifts the dim: a RUNNING comet is exempt
-      // (it holds to dry on the level, so a low pool is not a lockout), but a
-      // WINDUP over a locked-out pool stays DIM — the seat cannot arm, and a
-      // bar that went full-bright exactly then was lying. The dim answers the
-      // POOL alone: above the floor the bar is bright because a fresh CLICK
-      // arms instantly (the click-again rule). A refused WINDUP is answered
-      // by the retract cue and the ring collapse; a button still held after
-      // the pool refills gets no further answer BY DESIGN — the owner's rule
-      // is that a held button is not an ask, the next click is. The phase
-      // comes off the ONE presentation owner the halo, the light layer and
-      // the wake read (game.js's cometView).
-      ctx.globalAlpha = cometView(localSeat(), EB).phase !== CP_LIVE && ebF < ENARM ? 0.4 : 1;
+      // the bar is BRIGHT exactly when a fresh click right now would arm, and
+      // DIM when it would be refused — asked of THE arm rule itself
+      // (js/game.js's Flight.cometOn), the same function the sim's energySlice
+      // and the predictor's press-edge cue call, so "why won't it turn on" can
+      // never be answered one way by the screen and another by the click. The
+      // `press` argument is `true` because that is the question: not whether
+      // the seat is arming, but whether it COULD. A RUNNING comet is exempt
+      // (it holds to dry on the level, so a low pool is not a lockout), which
+      // is what the running argument carries; a WINDUP over a locked-out pool
+      // stays DIM, because the seat cannot arm and a bar that went full-bright
+      // exactly then was lying. A button still held after the pool refills
+      // gets no further answer BY DESIGN — the owner's rule is that a held
+      // button is not an ask, the next click is, and the refusal cue answers
+      // that click at the click. The phase comes off the ONE presentation
+      // owner the halo, the light layer and the wake read (cometView), and the
+      // pool off EB, the presented read this row already made.
+      ctx.globalAlpha = Flight.cometOn(cometView(localSeat(), EB).phase === CP_LIVE,
+        EB.en, EB.enMax, true) ? 1 : 0.4;
       ctx.fillStyle = C.clay;
       ctx.fillRect(9, 32, Math.max(1, (ebW - 1) * ebF), 3);
       ctx.globalAlpha = 1;

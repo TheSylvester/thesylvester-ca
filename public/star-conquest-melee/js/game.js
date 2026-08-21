@@ -500,8 +500,17 @@ function presentedPool(s) {
 // a pilot watched a solid burn while the server had not yet started negating
 // damage — and every "I took damage in comet" report the lab round chased was
 // that skew, not a hole in the gate (the gate is airtight: the negation in
-// js/encounter.js returns before any hit is registered). The windup shows the
-// ASK as an ask, and the flash marks the moment the wire says yes.
+// js/encounter.js returns before any hit is registered). CP_LIVE, and only
+// CP_LIVE, wears the halo, and the flash marks the moment the wire says yes.
+//
+// CP_WIND HAS NO INK. It used to draw a windup ring here and a faint core in
+// the light layer; the owner cut both — the ring beside the halo it was asking
+// for read as confusing rather than as an ask. The state itself stays, and
+// three things read it: the comet lab's lead instrument (asks/confirms/
+// leadMin/leadMax), the hurtWind counter that separates prediction skew from a
+// real sim defect, and the refusal CUE below, which fires on the CP_OFF →
+// CP_WIND transition. cometView still hands out `wind`, because the engine's
+// ENG_BURN_WIND swell in js/audio.js is audio, not ink.
 //
 // Render-side by construction: nothing here is read by the sim, nothing here
 // is hashed, and the clock is a TICK COUNTER advanced once per PLAYED tick
@@ -511,9 +520,11 @@ function presentedPool(s) {
 // render() calls inside one tick still paint identical bytes (the law at
 // HULL_SEED below).
 const CP_OFF = 0, CP_WIND = 1, CP_LIVE = 2;
-const COMET_WIND_TICKS = 6;  // ticks the flare takes to reach full extension —
-                             // 100 ms at the 60 Hz sim clock, which is the
-                             // shortest flare an eye reliably reads as motion
+const COMET_WIND_TICKS = 6;  // ticks the windup takes to reach full extension —
+                             // 100 ms at the 60 Hz sim clock. It sized the ring
+                             // that used to draw from it; with that ink gone it
+                             // is the ramp on cometView's `wind`, which is the
+                             // engine swell's own curve (js/audio.js)
 const COMET_FLASH_TICKS = 7; // ...and the confirm flash's decay, ~117 ms: long
                              // enough to register, short enough that it cannot
                              // be mistaken for the burn itself
@@ -521,18 +532,16 @@ const COMET_WIND_HOLD = 30;  // the RELEASE WINDOW — half a second. A press th
                              // pool cannot pay for is never confirmed and the
                              // button may stay down forever, so a windup with
                              // no confirm inside this retracts and does not
-                             // flare again until the button lifts. Well clear
+                             // ask again until the button lifts. Well clear
                              // of the worst lag budget this repo measures
                              // (~250 ms unplayable), so a slow round trip
                              // retracts nothing a fast one would have shown.
-const COMET_REFUSE_TICKS = 10; // the RETRACT's own visual — the windup ring
-                             // collapses back onto the hull over ~167 ms
-                             // instead of vanishing, so a refused ask has a
-                             // cue of its own (the owner's request: subtle,
-                             // and NOT the halo). Decays whatever the button
-                             // does next; presentation only, never hashed.
-const COMET_PRES = [];       // seat -> { phase, t, spent, refuse }
-const CP_NONE = { phase: CP_OFF, t: 0, spent: false, refuse: 0 }; // the shared answer for a
+                             // It is no longer the moment the pilot HEARS the
+                             // refusal — the press edge answers that — only the
+                             // backstop for a refusal the client could not
+                             // predict. See noteCometRetract.
+const COMET_PRES = [];       // seat -> { phase, t, spent, cued }
+const CP_NONE = { phase: CP_OFF, t: 0, spent: false, cued: false }; // the shared answer for a
                              // seat with no record — never written, never
                              // allocated per call
 // The seat's presentation record, GUARDED: pre-start a granted seat id can
@@ -551,13 +560,12 @@ function cometPres(s) { return COMET_PRES[s] || CP_NONE; }
 // SOLO POPS TOO, and that is not an oversight. `conf` is tested before `want`
 // below, and in solo energyStep() settles players[0].comet inside the very
 // step that read the want — so the machine reaches CP_LIVE on the first tick
-// and a solo press books as a pop, never as a windup. The windup is a
-// NET-MODE cue by construction: it exists to show the four-tick gap between a
-// prediction and its confirmation, and solo has no such gap. A solo flare
-// would be a fake 100 ms of "asking" drawn over an ask the sim had already
-// answered — a decision about feel, not about honesty, and one for the owner
-// rather than for this lane. The single solo case that DOES flare is a
-// refused press, where nothing ever confirms and the retract is the truth.
+// and a solo press books as a pop, never as a windup. CP_WIND is a NET-MODE
+// state by construction: it exists to hold the four-tick gap between a
+// prediction and its confirmation, and solo has no such gap. The one solo
+// press that DOES enter CP_WIND is a REFUSED one, where nothing ever confirms
+// — and that press is exactly the one this machine now answers, with the
+// refusal cue on the transition itself.
 // THE MACHINE CLOCK. The instrument below stamps its episodes with this, and
 // simTick cannot serve: simTick increments only in step(), which a net client
 // never runs (frameBody calls Net.clientTick() instead), so a simTick stamp
@@ -583,11 +591,7 @@ function cometPresTick() {
   for (const P of players) {
     const s = P.id;
     let r = COMET_PRES[s];
-    if (!r) r = COMET_PRES[s] = { phase: CP_OFF, t: 0, spent: false, refuse: 0 };
-    // the collapse decays FIRST, independent of the button: a refusal's ring
-    // must finish dying whether the pilot releases, keeps holding, or presses
-    // again — the stamps below re-fill it on a fresh refusal
-    if (r.refuse > 0) r.refuse--;
+    if (!r) r = COMET_PRES[s] = { phase: CP_OFF, t: 0, spent: false, cued: false };
     const conf = !!P.comet;   // the WIRE flag on a net client, the sim's own
                               // flag in solo — the authority either way
     const want = me !== null && s === me && ask;
@@ -598,16 +602,46 @@ function cometPresTick() {
       if (r.phase === CP_LIVE) {
         // the burn ended under a held button — a dry pool, a death, a wipe.
         // `spent` is what stops the very next tick from flaring again while
-        // the pool trickles back up under the same press. The same "you do
-        // not have it" moment as the timed retract below, so it books the
-        // collapse too.
-        r.phase = CP_OFF; r.t = 0; r.spent = true; r.refuse = COMET_REFUSE_TICKS;
+        // the pool trickles back up under the same press.
+        //
+        // DELIBERATELY SILENT, and do not "fix" it: this is not a refused ask,
+        // it is the burn ENDING. Every comet run on a pool the pilot holds to
+        // dry passes through here, so a cue on this branch would beep at the
+        // end of every single run. The refusal cue belongs to the ASK below.
+        r.phase = CP_OFF; r.t = 0; r.spent = true;
       } else if (r.phase === CP_WIND) {
         r.t++;
-        if (r.t >= COMET_WIND_HOLD) { r.phase = CP_OFF; r.t = 0; r.spent = true; r.refuse = COMET_REFUSE_TICKS; noteCometRetract(s); }
-      } else if (!r.spent) { r.phase = CP_WIND; r.t = 0; noteCometAsk(s); }
+        if (r.t >= COMET_WIND_HOLD) { r.phase = CP_OFF; r.t = 0; r.spent = true; noteCometRetract(s); }
+      } else if (!r.spent) {
+        r.phase = CP_WIND; r.t = 0; noteCometAsk(s);
+        // the refusal answers at the CLICK, not ~500 ms later at the retract.
+        // This one line is exact in solo and PREDICTED in net for the same
+        // reason: presentedPool hands back the sim's own pool in solo and the
+        // predictor's in net, so the cue rides the same clock as every visual
+        // on the screen. A predicted refusal the server contradicts costs ONE
+        // wrong cue; the old rule cost half a second of silence on EVERY
+        // refused click. noteCometRetract is the backstop for the other
+        // direction — see `cued` there.
+        //
+        // Reached ONLY on the local granted seat: `want` above already carries
+        // `me !== null && s === me`, so this pool read happens once per press
+        // edge and never once per seat per tick. That is not an optimisation,
+        // it is the law at the top of this block — the machine allocates
+        // nothing per seat per tick and reads no wall clock, and a
+        // presentedPool call for four seats every tick would break the first
+        // half of it.
+        const p = presentedPool(s);
+        if (!Flight.cometOn(false, p.en, p.enMax, true)) {
+          if (window.Sfx) Sfx.cue("refuse", null, undefined, s);
+          r.cued = true;
+        }
+      }
     } else {
-      r.phase = CP_OFF; r.t = 0; r.spent = false; // the button is up: the next press may flare
+      // the button is up: the next press may flare — and it may CUE, which is
+      // why the latch clears with the spent flag rather than only at the
+      // retract. Miss this and the retract's backstop dies silently after the
+      // session's first refusal, since `cued` would stand true forever.
+      r.phase = CP_OFF; r.t = 0; r.spent = false; r.cued = false;
     }
   }
 }
@@ -618,21 +652,21 @@ function cometPresTick() {
 //   f     — the presented pool fraction, 0..1
 //   r     — the HALO RADIUS: SHIP_R + COMETAOE * f, the arithmetic
 //           tests/wave1-checks.js section 15 pins, unchanged and now shared
-//   wind  — the windup's extension, 0..1; 0 unless the phase is CP_WIND
+//   wind  — the windup's extension, 0..1; 0 unless the phase is CP_WIND.
+//           AUDIO-ONLY now: the windup ring that used to draw from this was
+//           removed at the owner's call (the ink read as confusing), but the
+//           engine's ENG_BURN_WIND swell in js/audio.js reads it and the
+//           refusal round's whole point is MORE audio feedback, not less. So
+//           the term stays a value with no ink attached to it.
 //   flash — the confirm flash, 1 on the tick the wire agreed and decaying to
 //           0 across COMET_FLASH_TICKS; 0 unless the phase is CP_LIVE
-//   refuse — the retract collapse, 1 on the tick the ask was refused and
-//           decaying to 0 across COMET_REFUSE_TICKS; only ever non-zero for
-//           the local granted seat, because only its record can retract.
-//           The audio engine reads `burn` off phase/wind alone, untouched.
 function cometView(s, pool) {
   const r = cometPres(s);
   const p = pool || presentedPool(s);
   const f = p.enMax > 0 ? Math.max(0, Math.min(1, p.en / p.enMax)) : 0;
   return { phase: r.phase, f, r: SHIP_R + COMETAOE * f,
     wind: r.phase === CP_WIND ? Math.min(1, (r.t + 1) / COMET_WIND_TICKS) : 0,
-    flash: r.phase === CP_LIVE ? Math.max(0, 1 - r.t / COMET_FLASH_TICKS) : 0,
-    refuse: r.refuse > 0 ? r.refuse / COMET_REFUSE_TICKS : 0 };
+    flash: r.phase === CP_LIVE ? Math.max(0, 1 - r.t / COMET_FLASH_TICKS) : 0 };
 }
 // ---- the comet INSTRUMENT -------------------------------------------------
 // The page's own answer to "how far did the ask lead the confirm, and did
@@ -715,12 +749,17 @@ function noteCometConfirm(s) {
 }
 function noteCometRetract(s) {
   if (s !== grantedSeat()) return;
-  // the refusal's own CUE, at the ONE authoritative "refused ask" event in
-  // both modes — the buy() denial idiom. The alternative, cueing at the
-  // predicted press edge (js/net.js's spec.cometRefused), answers ~500 ms
-  // sooner but on a PREDICTED rule the server can contradict; the retract is
-  // the truth, so the cue waits for it. REFUSED, and recorded here.
-  if (window.Sfx) Sfx.cue("refuse", null, undefined, s);
+  // THE EDGE ANSWERS, THE RETRACT BACKSTOPS. cometPresTick cues at the press
+  // edge off the presented pool, which is the answer the pilot actually wants
+  // — immediate, and right in every case the client can see. This branch is
+  // the other case: a press the client predicted was fine and the authority
+  // then refused by never confirming it. Nothing on this screen knew that
+  // until the release window ran out, so the cue lands late rather than not at
+  // all. `cued` is what keeps the two from doubling up — set at the edge,
+  // cleared when the button lifts (cometPresTick's button-up branch), so one
+  // press is worth at most one cue, whichever end of it answers.
+  const r = cometPres(s);
+  if (!r.cued && window.Sfx) Sfx.cue("refuse", null, undefined, s);
   COMET_LOG.retracts++;
   clogClose(-1, -1);
 }
@@ -916,6 +955,25 @@ const Flight = {
     // the flag: the energy slice is what decides whether the pool can pay.
     if (lastRh >= 0) b.cometWant = lastRh === 1;
   },
+  // ---- THE ARM RULE, and the only copy -----------------------------------
+  // running = the seat's settled or presented comet flag; en/enMax = the pool
+  // it is judged against; press = a fresh edge. A running comet holds to dry
+  // on the LEVEL; a new one needs the floor AND the click — the owner's
+  // click-again rule, which is why a held button over a refilling pool is not
+  // an ask. The `en > 0` term is what stops an ENARM of 0 from letting a
+  // bone-dry pool re-arm every tick forever.
+  //
+  // It lives on Flight because three consumers must answer it identically and
+  // they used to carry three copies: the sim's energySlice below (the truth),
+  // js/net.js's predicted press-edge cue, and js/encounter.js's energy-bar
+  // lockout dim. Adding a term to the sim's copy alone left the HUD bright
+  // while clicks did nothing — that divergence is what collapsed them here.
+  // Pure arithmetic over its arguments: it reads no state, so the render-side
+  // callers cost nothing and the sim's call is hashed exactly as the inline
+  // expression it replaces was.
+  cometOn(running, en, enMax, press) {
+    return running ? en > 0 : (en > 0 && en >= enMax * ENARM && press);
+  },
   // ---- pass B: the per-seat ENERGY body -----------------------------------
   // The one place a comet WANT becomes a comet. The input layer only ever
   // states what the button is doing (input.cometWant); this decides whether
@@ -935,16 +993,12 @@ const Flight = {
     if (!ctx.alive) {
       K.comet = false; // a corpse spends nothing and rams nothing...
     } else {
-      // the arm rule: a RUNNING comet holds to dry on the LEVEL (the held
-      // bit), but a NEW one needs the floor AND a fresh PRESS EDGE — the
-      // owner's rule: a refused ask is "not considered active when held
-      // down"; a pilot cannot hold right-click and wait for the pool to come
-      // up, they must click again. The `K.energy > 0` term inside `armed` is
-      // what stops an ENARM of 0 from letting a bone-dry pool re-arm every
-      // single tick forever.
+      // the WANT is the held bit and nothing else; Flight.cometOn above is the
+      // arm rule itself, and this is its one authoritative call site — the HUD
+      // dim and the predictor's cue read the same function so they cannot
+      // disagree with the sim about whether a click would arm.
       const want = K.input.cometWant;
-      const armed = K.energy > 0 && K.energy >= K.energyMax * ENARM;
-      K.comet = want && (K.comet ? K.energy > 0 : (armed && press));
+      K.comet = want && Flight.cometOn(K.comet, K.energy, K.energyMax, press);
     }
     if (K.comet) {
       // flat time price plus the optional thrust-scaled term, so a coasting
@@ -2179,37 +2233,14 @@ function drawCometGlow(P, cv, vp = P.ship) {
   // cometView owns both the fraction and the radius now — the same record the
   // light layer, the wake and the HUD read, so no consumer carries its own
   // copy of this arithmetic any more.
+  // CONFIRMED state only — the caller's gate says so and this body assumes it.
+  // There were two other branches here, a windup ring and a retract collapse,
+  // and the owner cut both: the refusal ink was unnecessary and actively
+  // confusing beside the halo it sat next to. The ASK is answered by SOUND now
+  // (js/audio.js's `refuse` cue, fired at the press edge from cometPresTick),
+  // which is a channel the halo cannot crowd. The phases themselves stay —
+  // the lab's lead instrument, hurtWind and the cue's own gate all read them.
   const v = cv || cometView(P.id);
-  if (v.phase === CP_OFF && v.refuse > 0) {
-    // THE RETRACT — the refusal, drawn as a refusal. The same 1 px clay
-    // stroke as the windup, but falling: the ring collapses from the halo it
-    // asked for back onto the hull and fades out, instead of vanishing on
-    // the retract tick. Nothing else — no fill, no halo, no new colour — so
-    // it cannot be mistaken for either of the states it sits between. Only
-    // while the phase is OFF: a fresh windup or a confirm outranks the decay.
-    ctx.globalAlpha = 0.28 * v.refuse;
-    ctx.strokeStyle = C.clay;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(vp.x, vp.y, SHIP_R + (v.r - SHIP_R) * v.refuse, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
-    return;
-  }
-  if (v.phase === CP_WIND) {
-    // THE WINDUP — the ask, drawn as an ask. A thin ring inflating toward the
-    // halo's own radius, and nothing else: no fill, no tail, so it can never
-    // be mistaken for the burn. It is a STROKE in the flat layer, which is
-    // what keeps the cue readable with the light layer off entirely.
-    ctx.globalAlpha = 0.18 + 0.3 * v.wind;
-    ctx.strokeStyle = C.clay;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(vp.x, vp.y, SHIP_R + (v.r - SHIP_R) * v.wind, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
-    return;
-  }
   ctx.arc(vp.x, vp.y, v.r, 0, Math.PI * 2);
   ctx.fill();
   if (v.flash > 0) {
@@ -3338,10 +3369,10 @@ function render() {
     // exists off the authority
     const cv = cometView(P.id, presentedPool(P.id));
     const vp = FRAME.ships[P.id] || P.ship; // the frame's pose for this seat
-    if (cv.phase || cv.refuse > 0) drawCometGlow(P, cv, vp); // the glow rides the frame
-                                            // pose too; after a retract the phase is
-                                            // CP_OFF (0), so the collapse needs its
-                                            // own term or it would never draw
+    if (cv.phase === CP_LIVE) drawCometGlow(P, cv, vp); // the glow rides the frame pose
+                                            // too. CONFIRMED only: the windup and the
+                                            // retract have no ink any more, so this is
+                                            // back to the one phase that draws
     let ds = drawn.ships[P.id]; // the probe: record the exact pose the call gets
     if (!ds) ds = drawn.ships[P.id] = { seat: P.id, x: 0, y: 0 };
     ds.x = vp.x;
@@ -4442,8 +4473,7 @@ window.__test = { G, players, cam, step: clientStep, setCamMode, render, WW, WH,
   // constants ride along so a check names them instead of copying 0/1/2.
   cometPres, cometView, cometPresTick,
   cometPhases: () => ({ off: CP_OFF, wind: CP_WIND, live: CP_LIVE,
-    windTicks: COMET_WIND_TICKS, flashTicks: COMET_FLASH_TICKS, hold: COMET_WIND_HOLD,
-    refuseTicks: COMET_REFUSE_TICKS }),
+    windTicks: COMET_WIND_TICKS, flashTicks: COMET_FLASH_TICKS, hold: COMET_WIND_HOLD }),
   cometLog: () => ({ ...COMET_LOG, ring: COMET_LOG.ring.map((e) => ({ ...e })) }),
   cometLogReset: () => {
     COMET_LOG.asks = COMET_LOG.confirms = COMET_LOG.retracts = COMET_LOG.pops = 0;

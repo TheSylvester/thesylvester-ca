@@ -554,12 +554,12 @@
       if (cv.phase === CP_LIVE) {
         blob(vp.x, vp.y, cv.r * 1.5, PAL.clay, 0.5 * g1);
         blob(vp.x, vp.y, SHIP_R + 4, PAL.bright, (0.22 + 0.5 * cv.flash) * g1);
-      } else if (cv.phase === CP_WIND) {
-        // the WINDUP is an ASK, not a burn: a faint core that swells with the
-        // flare and no warm halo at all, so the confirmed state stays the only
-        // thing on this screen that looks like a comet
-        blob(vp.x, vp.y, SHIP_R + 4, PAL.bright, 0.12 * cv.wind * g1);
       }
+      // there was a CP_WIND branch here — a faint core swelling with the flare.
+      // It went with the flat layer's windup ring at the owner's call: the ask
+      // is answered by SOUND now (js/audio.js's `refuse` cue at the press edge,
+      // and the engine's own ENG_BURN_WIND swell, which still reads cv.wind),
+      // so the confirmed burn is the only thing on this screen that lights.
       blob(vp.x, vp.y, SHIP_R * 2.8, PAL.clay, 0.4 * g1);
       blob(vp.x, vp.y, SHIP_R * 1.5, PAL.clay, 0.22 * g1);
       blob(vp.x, vp.y, Math.min(3, 2.2 * gl), PAL.bright, 0.5 * g1);
