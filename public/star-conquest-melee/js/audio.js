@@ -212,7 +212,7 @@
   // event allocating any node at all; a convolution per voice is a cost the
   // palette's 32-voice budget has no room for. A StereoPannerNode per voice
   // (see the step players for the √2) is the whole mechanism.
-  const PAN_FULL = 520;
+  const PAN_FULL = 2 * NEAR; // the stated invariant IS the code — retune NEAR and the rail follows
   function pan(at) {
     const dx = at.x - localPlayer().ship.x;
     return Math.max(-1, Math.min(1, dx / PAN_FULL)) * panWidth();
@@ -437,6 +437,11 @@
     // the reference's denied() verbatim. The highest-value cue in the list: a
     // refused purchase previously had no feedback at all.
     denied: { bus: "ui", gap: 120, pri: 1, steps: [["b", 120, 90, 0.14, "square", 0.36, 0]] },
+    // denied's smaller sibling, for the comet RETRACT (noteCometRetract, the
+    // one authoritative "refused ask" in both modes): the same falling square
+    // shape but shorter and at well under denied's level, so it reads as a
+    // quiet "no" about the pilot's own pool rather than the shop's hard buzz.
+    refuse: { bus: "ui", gap: 200, pri: 1, steps: [["b", 110, 78, 0.10, "square", 0.22, 0]] },
     // the audition: one press exercises all four buses in 0.42 s, and the eng
     // field bumps the engine — the only way to hear it from the paused panel
     // its slider lives on.
@@ -670,9 +675,25 @@
       const adm = admit(rec.pri, liveSteps.length, live);
       if (adm !== "ok") return log(name, false, adm);
       // a cue whose loudest step lands at or under the envelope floor would
-      // schedule voices nobody can hear — skip it whole, same as too far
+      // schedule voices nobody can hear — skip it whole, same as too far. The
+      // estimate is the level the step players below actually SCHEDULE: the
+      // step's vol × k, × √2 for a step that will get a panner (every
+      // non-ui step, when the context has one — the same condition
+      // startBeep/startNoise test, and the same Math.max(0.001, …) floor
+      // they clamp the envelope's start at), and × the vary factor's UPPER
+      // bound when this cue varies. The bound, not the draw: the draw is
+      // taken AFTER admission (vix advances only for cues that reach the
+      // step loop — the sequence comment above), and a cull must err toward
+      // playing — a cue is dropped here only if even its loudest possible
+      // outcome sits at the floor, never for a draw that might have been
+      // audible.
+      const panComp = typeof ac.createStereoPanner === "function" ? Math.SQRT2 : 1;
+      const varyHi = rec.vary && varyOn() ? 1 + VARY_VOL : 1;
       let peak = 0;
-      for (const s of liveSteps) peak = Math.max(peak, (s[0] === "b" ? s[5] : s[2]) * k);
+      for (const s of liveSteps) {
+        const tag = (s[0] === "b" ? s[7] : s[5]) || rec.bus;
+        peak = Math.max(peak, (s[0] === "b" ? s[5] : s[2]) * k * varyHi * (tag === "ui" ? 1 : panComp));
+      }
       if (peak <= 0.001) return log(name, false, "far");
       applyLevels(now); // the knobs are live — an admitted cue plays at the
                         // sliders' CURRENT values, not last frame's

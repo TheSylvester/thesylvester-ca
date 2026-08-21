@@ -359,6 +359,21 @@ function makePlayer(id) {
                         // (energyStep) is what turns this into the seat's real, hashed
                         // `comet` flag; a seat with an empty pool wants the comet and does
                         // not get it.
+      cometPress: 0, // THIS TICK's comet press EDGE — 1 while a false→true rise of
+                     // the held bit has been seen (drainSlice's frame walk, or
+                     // setRightHeld at the DOM edge) and not yet spent. Input
+                     // transport, NEVER hashed, exactly like claimPress above: the
+                     // edge derives from the `rh` LEVEL already on every frame, so
+                     // no new wire field and no new frame key. Unlike claimPress it
+                     // is CONSUMED inside energySlice itself — the read-then-zero is
+                     // the slice's first statement, BEFORE the liveness test, so a
+                     // click made while the seat is down is deliberately SPENT and
+                     // cannot arm the comet at respawn off a stale press (claimPress
+                     // keeps its corpse-press because that press IS the feature).
+                     // Consuming in the slice, not at end-of-step, also makes sim,
+                     // server and predictor identical with no new clear site.
+                     // dropTickInput clears it too: a press made under a frozen
+                     // overlay must not survive to the first unfrozen tick.
     },
   };
 }
@@ -510,8 +525,14 @@ const COMET_WIND_HOLD = 30;  // the RELEASE WINDOW — half a second. A press th
                              // of the worst lag budget this repo measures
                              // (~250 ms unplayable), so a slow round trip
                              // retracts nothing a fast one would have shown.
-const COMET_PRES = [];       // seat -> { phase, t, spent }
-const CP_NONE = { phase: CP_OFF, t: 0, spent: false }; // the shared answer for a
+const COMET_REFUSE_TICKS = 10; // the RETRACT's own visual — the windup ring
+                             // collapses back onto the hull over ~167 ms
+                             // instead of vanishing, so a refused ask has a
+                             // cue of its own (the owner's request: subtle,
+                             // and NOT the halo). Decays whatever the button
+                             // does next; presentation only, never hashed.
+const COMET_PRES = [];       // seat -> { phase, t, spent, refuse }
+const CP_NONE = { phase: CP_OFF, t: 0, spent: false, refuse: 0 }; // the shared answer for a
                              // seat with no record — never written, never
                              // allocated per call
 // The seat's presentation record, GUARDED: pre-start a granted seat id can
@@ -562,7 +583,11 @@ function cometPresTick() {
   for (const P of players) {
     const s = P.id;
     let r = COMET_PRES[s];
-    if (!r) r = COMET_PRES[s] = { phase: CP_OFF, t: 0, spent: false };
+    if (!r) r = COMET_PRES[s] = { phase: CP_OFF, t: 0, spent: false, refuse: 0 };
+    // the collapse decays FIRST, independent of the button: a refusal's ring
+    // must finish dying whether the pilot releases, keeps holding, or presses
+    // again — the stamps below re-fill it on a fresh refusal
+    if (r.refuse > 0) r.refuse--;
     const conf = !!P.comet;   // the WIRE flag on a net client, the sim's own
                               // flag in solo — the authority either way
     const want = me !== null && s === me && ask;
@@ -573,11 +598,13 @@ function cometPresTick() {
       if (r.phase === CP_LIVE) {
         // the burn ended under a held button — a dry pool, a death, a wipe.
         // `spent` is what stops the very next tick from flaring again while
-        // the pool trickles back up under the same press.
-        r.phase = CP_OFF; r.t = 0; r.spent = true;
+        // the pool trickles back up under the same press. The same "you do
+        // not have it" moment as the timed retract below, so it books the
+        // collapse too.
+        r.phase = CP_OFF; r.t = 0; r.spent = true; r.refuse = COMET_REFUSE_TICKS;
       } else if (r.phase === CP_WIND) {
         r.t++;
-        if (r.t >= COMET_WIND_HOLD) { r.phase = CP_OFF; r.t = 0; r.spent = true; noteCometRetract(s); }
+        if (r.t >= COMET_WIND_HOLD) { r.phase = CP_OFF; r.t = 0; r.spent = true; r.refuse = COMET_REFUSE_TICKS; noteCometRetract(s); }
       } else if (!r.spent) { r.phase = CP_WIND; r.t = 0; noteCometAsk(s); }
     } else {
       r.phase = CP_OFF; r.t = 0; r.spent = false; // the button is up: the next press may flare
@@ -594,13 +621,18 @@ function cometPresTick() {
 //   wind  — the windup's extension, 0..1; 0 unless the phase is CP_WIND
 //   flash — the confirm flash, 1 on the tick the wire agreed and decaying to
 //           0 across COMET_FLASH_TICKS; 0 unless the phase is CP_LIVE
+//   refuse — the retract collapse, 1 on the tick the ask was refused and
+//           decaying to 0 across COMET_REFUSE_TICKS; only ever non-zero for
+//           the local granted seat, because only its record can retract.
+//           The audio engine reads `burn` off phase/wind alone, untouched.
 function cometView(s, pool) {
   const r = cometPres(s);
   const p = pool || presentedPool(s);
   const f = p.enMax > 0 ? Math.max(0, Math.min(1, p.en / p.enMax)) : 0;
   return { phase: r.phase, f, r: SHIP_R + COMETAOE * f,
     wind: r.phase === CP_WIND ? Math.min(1, (r.t + 1) / COMET_WIND_TICKS) : 0,
-    flash: r.phase === CP_LIVE ? Math.max(0, 1 - r.t / COMET_FLASH_TICKS) : 0 };
+    flash: r.phase === CP_LIVE ? Math.max(0, 1 - r.t / COMET_FLASH_TICKS) : 0,
+    refuse: r.refuse > 0 ? r.refuse / COMET_REFUSE_TICKS : 0 };
 }
 // ---- the comet INSTRUMENT -------------------------------------------------
 // The page's own answer to "how far did the ask lead the confirm, and did
@@ -683,6 +715,12 @@ function noteCometConfirm(s) {
 }
 function noteCometRetract(s) {
   if (s !== grantedSeat()) return;
+  // the refusal's own CUE, at the ONE authoritative "refused ask" event in
+  // both modes — the buy() denial idiom. The alternative, cueing at the
+  // predicted press edge (js/net.js's spec.cometRefused), answers ~500 ms
+  // sooner but on a PREDICTED rule the server can contradict; the retract is
+  // the truth, so the cue waits for it. REFUSED, and recorded here.
+  if (window.Sfx) Sfx.cue("refuse", null, undefined, s);
   COMET_LOG.retracts++;
   clogClose(-1, -1);
 }
@@ -728,7 +766,7 @@ function noteCometCue(kind, seat, tickMatched = true) {
 // K is the kernel-state subset of a player record:
 //   ship{x,y} vel{x,y} aimAngle aimOff{x,y} aimed cool comet
 //   energy energyMax enIdle thrustAcc{x,y} flame{x,y}
-//   input{ scur{x,y}, fireHeld, cometWant }
+//   input{ scur{x,y}, fireHeld, fireDelta, claimPress, cometWant, cometPress }
 // Tonight every call operates IN PLACE on the real player object — K IS P, so
 // this refactor moves code and changes nothing. The point of the boundary is
 // that phase 11b can hand the same slices a DETACHED K and replay a seat.
@@ -833,6 +871,16 @@ const Flight = {
     const b = K.input;
     let lastRh = -1; // -1 = nothing drained this tick — the flag then persists,
                      // exactly the held-input semantics fireHeld keeps
+    // the comet PRESS EDGE, seeded from the PRE-drain want: a rise anywhere in
+    // the walked sequence — frames[0] against the standing want, every later
+    // frame against its predecessor — latches cometPress for energySlice. A
+    // same-tick press+release cannot arm under EITHER grouping: by the time
+    // the slice runs, the LEVEL term (cometWant) is already false again, which
+    // matches today; the edge derivation only matters when the press's rh: 1
+    // is still standing at slice time. This drain-path edge serves the WIRE
+    // and the fixture producers (pushInputFrame drives this walk directly);
+    // setRightHeld's DOM-time latch serves both solo modes.
+    let prevRh = b.cometWant ? 1 : 0;
     for (let k = 0; k < frames.length; k++) {
       const a = frames[k];
       b.scur.x = a.cx;
@@ -859,6 +907,8 @@ const Flight = {
       }
       b.fireHeld = a.fh;
       lastRh = a.rh ? 1 : 0;
+      if (lastRh && !prevRh) b.cometPress = 1;
+      prevRh = lastRh;
     }
     // AFTER the entries applied: the seat's comet WANT takes the LAST drained
     // frame's rh — so a catch-up tick lands on the newest button state, and a
@@ -872,6 +922,11 @@ const Flight = {
   // the seat's pool can pay for it. It is the ONLY writer of K.comet inside
   // the sim: a client that gated its own button would fly a free comet.
   energySlice(K, ctx) {
+    // the press latch is CONSUMED first, before the liveness test below — a
+    // click made while the seat is down is spent here and cannot arm the
+    // comet at respawn off a stale press (see the declaration in makePlayer)
+    const press = K.input.cometPress === 1;
+    K.input.cometPress = 0;
     // the SEAT's own RECHARGER rank sets its regen — off ctx.terms, so one
     // seat's purchase can never speed another's recharge
     const m = ctx.terms;
@@ -880,13 +935,16 @@ const Flight = {
     if (!ctx.alive) {
       K.comet = false; // a corpse spends nothing and rams nothing...
     } else {
-      // the DERIVED arm rule, with no latch field to keep in sync: a RUNNING
-      // comet holds until the pool is dry, a NEW one may only start at or above
-      // the floor. The `K.energy > 0` term inside `armed` is what stops an ENARM
-      // of 0 from letting a bone-dry pool re-arm every single tick forever.
+      // the arm rule: a RUNNING comet holds to dry on the LEVEL (the held
+      // bit), but a NEW one needs the floor AND a fresh PRESS EDGE — the
+      // owner's rule: a refused ask is "not considered active when held
+      // down"; a pilot cannot hold right-click and wait for the pool to come
+      // up, they must click again. The `K.energy > 0` term inside `armed` is
+      // what stops an ENARM of 0 from letting a bone-dry pool re-arm every
+      // single tick forever.
       const want = K.input.cometWant;
       const armed = K.energy > 0 && K.energy >= K.energyMax * ENARM;
-      K.comet = want && (K.comet ? K.energy > 0 : armed);
+      K.comet = want && (K.comet ? K.energy > 0 : (armed && press));
     }
     if (K.comet) {
       // flat time price plus the optional thrust-scaled term, so a coasting
@@ -1463,6 +1521,8 @@ function dropTickInput() {
     b.claimPress = 0; // a press made under a frozen overlay is discarded with the
                       // ring it would have ridden in on — the shop's own click is
                       // not a request to be dealt back into the field
+    b.cometPress = 0; // ...and so is a comet press: the edge must not survive
+                      // to the first unfrozen tick (transport only, like the rest)
     b.ring.length = 0;
   }
 }
@@ -2120,6 +2180,22 @@ function drawCometGlow(P, cv, vp = P.ship) {
   // light layer, the wake and the HUD read, so no consumer carries its own
   // copy of this arithmetic any more.
   const v = cv || cometView(P.id);
+  if (v.phase === CP_OFF && v.refuse > 0) {
+    // THE RETRACT — the refusal, drawn as a refusal. The same 1 px clay
+    // stroke as the windup, but falling: the ring collapses from the halo it
+    // asked for back onto the hull and fades out, instead of vanishing on
+    // the retract tick. Nothing else — no fill, no halo, no new colour — so
+    // it cannot be mistaken for either of the states it sits between. Only
+    // while the phase is OFF: a fresh windup or a confirm outranks the decay.
+    ctx.globalAlpha = 0.28 * v.refuse;
+    ctx.strokeStyle = C.clay;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(vp.x, vp.y, SHIP_R + (v.r - SHIP_R) * v.refuse, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
   if (v.phase === CP_WIND) {
     // THE WINDUP — the ask, drawn as an ask. A thin ring inflating toward the
     // halo's own radius, and nothing else: no fill, no tail, so it can never
@@ -3262,7 +3338,10 @@ function render() {
     // exists off the authority
     const cv = cometView(P.id, presentedPool(P.id));
     const vp = FRAME.ships[P.id] || P.ship; // the frame's pose for this seat
-    if (cv.phase) drawCometGlow(P, cv, vp); // the glow rides the frame pose too
+    if (cv.phase || cv.refuse > 0) drawCometGlow(P, cv, vp); // the glow rides the frame
+                                            // pose too; after a retract the phase is
+                                            // CP_OFF (0), so the collapse needs its
+                                            // own term or it would never draw
     let ds = drawn.ships[P.id]; // the probe: record the exact pose the call gets
     if (!ds) ds = drawn.ships[P.id] = { seat: P.id, x: 0, y: 0 };
     ds.x = vp.x;
@@ -3555,6 +3634,21 @@ function setRightHeld(held) {
   // document, one pointer lock — see in0). In net mode the banked frame goes
   // upstream seat-agnostic and the SERVER binds it to this socket's seat, so
   // this write is never the thing that decides whose comet turns on.
+  // The PRESS EDGE latches at the DOM transition, in BOTH solo modes: the
+  // want-write below runs at the DOM edge too, so in live tick mode the want
+  // is already true when the banked rh: 1 frame drains and the drain walk
+  // sees no rise — this latch is what carries the edge there, and it cannot
+  // double-latch because the same write that masks the drain edge is the
+  // write that gates this transition.
+  // SOLO ONLY: this DOM latch serves the LOCAL sim, whose energySlice consumes
+  // it next tick. In net mode frameBody runs Net.clientTick() and the local
+  // sim never steps, so nothing here would ever spend it — the banked rh frame
+  // carries the edge upstream and the SERVER's drain walk derives the press —
+  // and a latch set now would sit stranded until some later solo tick spent
+  // it against a click made long before. The want-write below stays
+  // unconditional: net mode reads it at the boundary (the cursor, the banked
+  // rh, carryLocal's seed).
+  if (!!held && !players[0].input.cometWant && !(window.Net && Net.active())) players[0].input.cometPress = 1;
   players[0].input.cometWant = !!held;
   syncCursor();
   if (wasMouseAim && !aiming()) snapshotMouseAim();
@@ -4348,7 +4442,8 @@ window.__test = { G, players, cam, step: clientStep, setCamMode, render, WW, WH,
   // constants ride along so a check names them instead of copying 0/1/2.
   cometPres, cometView, cometPresTick,
   cometPhases: () => ({ off: CP_OFF, wind: CP_WIND, live: CP_LIVE,
-    windTicks: COMET_WIND_TICKS, flashTicks: COMET_FLASH_TICKS, hold: COMET_WIND_HOLD }),
+    windTicks: COMET_WIND_TICKS, flashTicks: COMET_FLASH_TICKS, hold: COMET_WIND_HOLD,
+    refuseTicks: COMET_REFUSE_TICKS }),
   cometLog: () => ({ ...COMET_LOG, ring: COMET_LOG.ring.map((e) => ({ ...e })) }),
   cometLogReset: () => {
     COMET_LOG.asks = COMET_LOG.confirms = COMET_LOG.retracts = COMET_LOG.pops = 0;

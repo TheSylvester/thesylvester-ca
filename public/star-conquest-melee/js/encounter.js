@@ -4793,15 +4793,21 @@
     ctx.lineWidth = 1;
     ctx.strokeRect(8.5, 31.5, ebW, 4);
     if (ebF > 0) {
-      // a seat below the re-arm floor and not already in comet is LOCKED OUT,
-      // not merely low — the dimmer fill is what makes "why won't it turn on"
-      // answerable from the screen, and the notch below says where the line is.
-      // "already in comet" comes off the ONE presentation owner the halo, the
-      // light layer and the wake read (game.js's cometView), so a bar that has
-      // gone bright and a ship that has not lit up cannot happen: a WINDUP
-      // brightens the bar too, because the pilot has asked and the screen owes
-      // them the answer to that ask rather than to the round trip.
-      ctx.globalAlpha = cometView(localSeat(), EB).phase === CP_OFF && ebF < ENARM ? 0.4 : 1;
+      // a seat below the re-arm floor and not in a CONFIRMED comet is LOCKED
+      // OUT, not merely low — the dimmer fill is what makes "why won't it
+      // turn on" answerable from the screen, and the notch below says where
+      // the line is. Only CP_LIVE lifts the dim: a RUNNING comet is exempt
+      // (it holds to dry on the level, so a low pool is not a lockout), but a
+      // WINDUP over a locked-out pool stays DIM — the seat cannot arm, and a
+      // bar that went full-bright exactly then was lying. The dim answers the
+      // POOL alone: above the floor the bar is bright because a fresh CLICK
+      // arms instantly (the click-again rule). A refused WINDUP is answered
+      // by the retract cue and the ring collapse; a button still held after
+      // the pool refills gets no further answer BY DESIGN — the owner's rule
+      // is that a held button is not an ask, the next click is. The phase
+      // comes off the ONE presentation owner the halo, the light layer and
+      // the wake read (game.js's cometView).
+      ctx.globalAlpha = cometView(localSeat(), EB).phase !== CP_LIVE && ebF < ENARM ? 0.4 : 1;
       ctx.fillStyle = C.clay;
       ctx.fillRect(9, 32, Math.max(1, (ebW - 1) * ebF), 3);
       ctx.globalAlpha = 1;
@@ -4853,7 +4859,12 @@
       ctx.lineWidth = 1;
     }
     // --- state overlays ---
-    if (E.state === "cleared" && wt - E.clearTick < bannerHold()) {
+    // wt >= E.clearTick: the countdown's straddle guard, for the same frames —
+    // at a net deal the lerped waveTick walks toward 0 while state/clearTick
+    // still ride the old snapshot, so wt - clearTick runs strongly negative
+    // and a long-faded card would redraw at full alpha (and, as the head of
+    // this chain, hide SHIP DOWN under it) for those frames.
+    if (E.state === "cleared" && wt >= E.clearTick && wt - E.clearTick < bannerHold()) {
       const left = bannerHold() - (wt - E.clearTick);
       ctx.globalAlpha = Math.min(1, left / 60); // the banner fades out
       ctx.textAlign = "center";

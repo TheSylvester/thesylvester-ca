@@ -523,7 +523,8 @@
       aimAngle: 0, aimOff: { x: 0, y: 0 }, aimed: false,
       cool: 0, comet: false, energy: 0, energyMax: 0, enIdle: 0,
       thrustAcc: { x: 0, y: 0 }, flame: { x: 0, y: 0 },
-      input: { scur: { x: 0, y: 0 }, fireHeld: false, cometWant: false } };
+      input: { scur: { x: 0, y: 0 }, fireHeld: false, cometWant: false,
+               cometPress: 0 } };
   }
   function adoptWire(K, pr) {
     // v8: a PARKED seat's record is four keys — seat, hull, hm, cl: -1 — and
@@ -550,6 +551,9 @@
       K.thrustAcc.x = L.thrustAccX; K.thrustAcc.y = L.thrustAccY;
       K.input.scur.x = L.scurX; K.input.scur.y = L.scurY;
       K.input.fireHeld = L.fireHeld; K.input.cometWant = L.cometWant;
+      // cometPress is deliberately NOT carried: the latch re-derives per tick
+      // inside the replayed drain from the carried cometWant, so incremental
+      // and replay agree with no stored copy to drift
     } else {
       // no prior prediction of this tick (first base, or after a hard snap):
       // seed from the live client input state — the honest zero
@@ -730,6 +734,13 @@
     const K = freshK();
     adoptWire(K, pr);
     carryLocal(K, s.tick); // the map was just cleared — seeds from live input
+    // the cue-edge detector re-seeds from that same live want — the level the
+    // sim's drain seeds ITS edge walk from (prevRh = b.cometWant). The
+    // incremental path does not run while predIdle, so a prevRh left frozen
+    // at the last pre-idle frame would call a button held straight through
+    // death a fresh press at respawn, and a release+re-press inside the gap
+    // no press at all. Instrument-only: spec.cometCueShown/cometRefused.
+    prevRh = K.input.cometWant ? 1 : 0;
     predK = K;
     predTick = s.tick;
     predIdle = down;
@@ -1453,7 +1464,18 @@
         if (f.rh && !prevRh) {
           // the comet CUE answers the EXACT arm rule on predicted state: a
           // running comet continues while the pool holds, a new one needs
-          // the floor — counted at the press edge, shown by the halo
+          // the floor — counted at the press edge, shown by the halo. The
+          // sim's `press` term needs no copy here, but only because this
+          // block runs solely under the f.rh && !prevRh press edge above, and
+          // on such a tick the drained rise latches the sim's press too — so
+          // the two rules agree AT THIS GATE while the predictor is running
+          // continuously. Nothing more is claimed: away from the edge this
+          // block does not run at all, and across an idle gap (death) the
+          // frames still go upstream but never through here, so a press made
+          // inside the gap is the sim's alone — hardSnap re-seeds prevRh from
+          // the live want so the first frame after the gap is classified
+          // against the level the sim's bank holds, not a frozen pre-death
+          // reading. These are telemetry counters; the halo reads predK.
           const armed = predK.energy > 0 && predK.energy >= predK.energyMax * ENARM;
           if (predK.comet ? predK.energy > 0 : armed) spec.cometCueShown += 1;
           else spec.cometRefused += 1;
