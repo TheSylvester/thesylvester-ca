@@ -381,6 +381,16 @@
   const buf = [];          // decoded snapshots, ascending by tick
   const evq = [];          // events awaiting their presented tick, in order
   const trails = new Map();// missile id → rebuilt trail samples
+  const bCarry = new Map();// bullet id → the two RENDER-ONLY numbers the wire does
+                           // not carry: {vx, vy} derived from the last bracket and
+                           // {ox, oy}, where the round first appeared on screen.
+                           // Rebuilt whole on every deal from the rounds just
+                           // presented — never appended to, so it holds exactly the
+                           // live set and cannot leak an entry per shot fired. It is
+                           // dropped at the same cuts `trails` is: an id is only a
+                           // handle inside ONE match, and the server reissues ids
+                           // from 1 at a restart, so a carry that outlived the cut
+                           // would hand a fresh round a dead one's heading.
   const pendingInputs = [];// at most two records, flushed once per animation frame
   const snapGaps = [];     // accepted snapshot inter-arrival gaps, milliseconds
   let ws = null;
@@ -730,6 +740,9 @@
     sentHist.length = 0;
     localAtTick.clear();
     tracers.length = 0;
+    bCarry.clear(); // a restart reissues entity ids from 1, and G.bullets is NOT
+                    // cleared here — the carry must go, or a fresh round with a
+                    // recycled id inherits a dead run's heading and muzzle
     pendingAutofireCue = false;
     const K = freshK();
     adoptWire(K, pr);
@@ -1149,6 +1162,8 @@
     buf.length = 0;
     evq.length = 0;
     trails.clear();
+    bCarry.clear(); // the streak's two derived numbers describe rounds of the
+                    // match that just died, and the server reissues ids from 1
     pendingInputs.length = 0;
     snapGaps.length = 0;
     // the jitter estimate described the stream that just died, so it stands
@@ -2134,14 +2149,52 @@
       return { id: o0.id, x: pose.x, y: pose.y, vx: 0, vy: 0 };
     });
     const b1by = s1 ? new Map(s1.bullets.map((b) => [b.id, b])) : null;
+    // what this client knew about each round LAST deal — read from bCarry and
+    // NOT from the outgoing G.bullets, which the discontinuities do not clear:
+    // resync() and hardSnap() leave the dead run's rounds standing in that
+    // array, and a net client never restarts its own encounter, so a colliding
+    // id out of the server's restarted id space would inherit a heading that
+    // belongs to a match that is over. bCarry is cleared at both cuts.
+    const bWas = new Map(bCarry);
+    bCarry.clear();
     G.bullets = s0.bullets.map((b0) => {
       const b1 = b1by ? b1by.get(b0.id) : null;
       const pose = presentBody(POLICY.bullet, b0, b1, k, h, 0, false, 0, 0);
       const x = pose.x, y = pose.y;
+      const was = bWas.get(b0.id);
+      // vx/vy is DERIVED, RENDER-ONLY, and never on the wire: the encoder sends
+      // { id, x, y, o } and the byte band has no room for two more floats. It is
+      // the forward difference across the very bracket the pose is lerped in, so
+      // it is constant under alpha — the one property js/fx.js's streak needs
+      // and the reason that draw refuses (x - px). Zero is what shipped here,
+      // and zero is a round with NO streak at all: the own shot's tracer had one
+      // and lost it at the hand-off, and no other seat's round ever wore one.
+      //   h is s1.tick - s0.tick: +1 ordinarily, NEGATIVE under the starvation
+      // guard, which reverses the endpoints deliberately (s1 older than s0).
+      // Both sign flips cancel, so ONE expression serves both branches — the
+      // divide is load-bearing and must not be simplified away.
+      //   No b1 means the bracket has no second sample. Ordinarily that is the
+      // round's death tick (a disappearing id IS the death, and presentBody
+      // freezes the pose at s0 for it); under starvation the same shape means a
+      // NEWBORN, absent from the older endpoint. The last vector we drew is the
+      // honest answer to both, and a round never seen before keeps the 0.
+      let vx = 0, vy = 0;
+      if (b1) { vx = (b1.x - b0.x) / h; vy = (b1.y - b0.y) / h; }
+      else if (was) { vx = was.vx; vy = was.vy; }
+      // ...and ox/oy is where this round FIRST showed up on THIS screen, which
+      // is all a clamp on its own streak can honestly mean here: the muzzle is
+      // a sim fact the wire does not carry, and the server's lag rebate has
+      // already flown the round most of a round trip before its first snapshot.
+      // The own shot is the exception and it is handled at the hand-off below.
+      const ox = was ? was.ox : x, oy = was ? was.oy : y;
+      bCarry.set(b0.id, { vx, vy, ox, oy }); // ...for the next deal to read. A
+                            // round that stops appearing simply stops being
+                            // written, so the map is swept by the rebuild
+                            // itself and never by a live-id pass.
       // v4: the wire's owner seat replaces the hard-coded "player" stamp —
       // bulletSeat() reads the int directly, and the legacy-string alias
       // stays for local mode's suite synthetics only
-      return { id: b0.id, x, y, px: x, py: y, vx: 0, vy: 0,
+      return { id: b0.id, x, y, px: x, py: y, vx, vy, ox, oy,
         r: 2.2, dmg: 0, owner: Number.isInteger(b0.o) ? b0.o : 0,
         ttl: 1, dead: false, spent: false };
     });
@@ -2154,7 +2207,17 @@
         if (b.owner !== mySeat || b.id <= maxOwnBulletId) continue;
         maxOwnBulletId = b.id;
         if (tracers.length) {
-          tracers.shift();
+          // the cue's MUZZLE rides across with it. Both live in the raw
+          // predicted frame, so the two agree about where the shot left; take
+          // the origin over and the streak the player has been watching keeps
+          // its length instead of collapsing to nothing and growing back over
+          // the three ticks after the hand-off.
+          const cue = tracers.shift();
+          b.ox = cue.ox;
+          b.oy = cue.oy;
+          const c = bCarry.get(b.id); // ...and into the carry, or the next deal
+          if (c) { c.ox = b.ox; c.oy = b.oy; } // re-seeds it at the round's own
+                                // pose and the transplant lasts exactly one frame
           spec.cueMatched += 1;
         }
       }

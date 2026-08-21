@@ -1934,8 +1934,15 @@ function fire(seat = 0) {
   // one id SPACE across bullets and bodies — a replication layer keys by id
   // alone and cannot disambiguate by owning array; a page without the
   // encounter has nothing to replicate, so 0 stands in there
+  // ox/oy is the MUZZLE, and it is render-only: the light layer clamps the
+  // round's streak to the distance actually flown from it, so a round one tick
+  // old wears a one-tick tail instead of a fixed 3.24-tick one hanging out
+  // behind the ship. Deliberately NOT in BULLET_HASH (a declared allow-list —
+  // see the contract above it): it describes where the round came from, never
+  // what the simulation will do next, and the wire never carries it either.
   G.bullets.push({ id: window.Encounter ? Encounter.nextId() : 0,
                    x: P.ship.x, y: P.ship.y, px: P.ship.x, py: P.ship.y, vx, vy,
+                   ox: P.ship.x, oy: P.ship.y,
                    r: 2.2, dmg: BDMG, owner: seat, dead: false, spent: false,
                    ttl: Math.max(1, Math.round(BLIFE * 1000 / TICK)) }); // no upgrade touches lifetime — BLIFE is the only knob
   // the phase-15 lag REBATE, at spawn and only at spawn: a vt-bearing frame's
@@ -2068,6 +2075,13 @@ function step() {
       else if (rx > WW) { queueWallFx(b, WW, alongWall(b.py, ry, crossT(b.px, rx, WW), WH), rvx / m, rvy / m); b.x = WW * 2 - b.x; b.vx = -b.vx; }
       if (ry < 0) { queueWallFx(b, alongWall(b.px, rx, crossT(b.py, ry, 0), WW), 0, rvx / m, rvy / m); b.y = -b.y; b.vy = -b.vy; }
       else if (ry > WH) { queueWallFx(b, alongWall(b.px, rx, crossT(b.py, ry, WH), WW), WH, rvx / m, rvy / m); b.y = WH * 2 - b.y; b.vy = -b.vy; }
+      // ...and the MUZZLE moves to the wall. ox/oy is render-only (the light
+      // layer clamps the streak to the distance flown from it) and it measures
+      // straight-line displacement, which stops meaning path length the moment
+      // a round folds: a bounced round heading back at its own launch point
+      // would shorten to nothing and lose its tail entirely. A reflection is a
+      // new departure, so re-stamp it. Unhashed on both sides of the fold.
+      if (b.x !== rx || b.y !== ry) { b.ox = b.x; b.oy = b.y; }
     }
     b.ttl--;
     // expiry marks, never splices here — the encounter hook still sweeps

@@ -617,60 +617,99 @@
         const comet = cometView(P0.id).phase === CP_LIVE;
         const span = Math.min(Math.min(r.n, RING_N) - 1,
           Math.round((14 + 40 * TRAILS) * (comet ? 1.7 : 1)));
+        // THE HEAD IS THE HULL. The ring is written from the TICK pose
+        // (writeRings reads P0.ship), the hull and its halo are drawn from the
+        // PRESENTED pose — the two disagree by the sub-tick remainder, which is
+        // a lead of v*alpha for the own predicted seat and a lag of
+        // delta*(1-alpha) for an interpolated one. Read the newest vertex off
+        // the frame view instead of the ring and the wake roots on the ship in
+        // both directions, with no verdict re-derived here: the presented
+        // instant SUPERSEDES the newest tick, it does not extend it, so the
+        // vertex is replaced and never appended. At alpha 1 the frame pose IS
+        // the tick pose and every vertex is the ring's own, byte for byte.
+        const hp = (view && view.ships && view.ships[P0.id]) || P0.ship;
+        const wx = (j) => (j === r.n - 1 ? hp.x : r.x[j % RING_N]);
+        const wy = (j) => (j === r.n - 1 ? hp.y : r.y[j % RING_N]);
         for (let i = 0; i < span; i++) {
-          const a = (r.n - 1 - i) % RING_N, b = (r.n - 2 - i) % RING_N;
+          const a = r.n - 1 - i, b = r.n - 2 - i;
+          const ax = wx(a), ay = wy(a), bx = wx(b), by = wy(b);
           // A HOVERING ship writes the same pose every advance, and a
           // zero-length stroke under lineCap "round" is a filled disc, not
           // nothing: fifty-odd of them stacked additively on one point would
           // burn a bright blob through the hull the halo is meant to sit
           // around. A ship that did not move leaves no wake.
-          if (r.x[a] === r.x[b] && r.y[a] === r.y[b]) continue;
+          if (ax === bx && ay === by) continue;
           const f = 1 - i / span;
           g.strokeStyle = PAL.clay;
           g.globalAlpha = 0.26 * TRAILS * f * f * (comet ? 1.5 : 1);
           g.lineWidth = Math.max(0.5, 4.2 * f * (comet ? 1.5 : 1));
           g.beginPath();
-          g.moveTo(r.x[a], r.y[a]);
-          g.lineTo(r.x[b], r.y[b]);
+          g.moveTo(ax, ay);
+          g.lineTo(bx, by);
           g.stroke();
           g.strokeStyle = PAL.bright; // the white core is the narrower, shorter half
           g.globalAlpha = 0.14 * TRAILS * f * f * f;
           g.lineWidth = Math.max(0.4, 1.7 * f);
           g.beginPath();
-          g.moveTo(r.x[a], r.y[a]);
-          g.lineTo(r.x[b], r.y[b]);
+          g.moveTo(ax, ay);
+          g.lineTo(bx, by);
           g.stroke();
         }
       }
       // bullet streaks — warm line and white core BOTH fresh. The playground
       // persisted the warm half; here a round travels the screen and the smear
-      // would follow it. Length comes off the round's own last tick of travel
-      // (px/py), so it is unit-free and follows every speed upgrade for nothing.
+      // would follow it. Length comes off the round's own per-tick velocity, so
+      // it is unit-free and follows every speed upgrade for nothing.
+      //
+      // ...CLAMPED to the distance the round has actually flown. K is a count of
+      // TICKS (3.24 of them, 48.6 world px at BSPEED 15), and a round one tick
+      // old has covered 15 of those px: the other 33 hung out the far side of
+      // the muzzle, through and behind the ship that fired it. That is what the
+      // owner saw and called bad, and it reads worst in ?mp, where an own shot
+      // flies as a speculative TRACER that starts life at the ship's own pose.
+      // A tail longer than the flight is a tail drawn where the round never was.
       const K = 2.4 * (0.35 + TRAILS);
-      const streak = (x, y, dx, dy) => {
+      // `flown` is the world distance from the round's origin, or a NEGATIVE
+      // number for a round that has none — unknown keeps the full length, which
+      // is exactly what shipped before the clamp, so a synthetic round in a
+      // suite is drawn as it always was. This layer is the only forgiving
+      // reader: the flat pass's tracer glow spells tr.ox/tr.oy straight into an
+      // arc (js/game.js drawTracers) and would throw NaN at a cue without one.
+      // Straight-line DISPLACEMENT, not path length — a round that folds must
+      // re-stamp its origin at the fold, which is what the BOUNCE branch of the
+      // bullet integrator does.
+      const streak = (x, y, dx, dy, flown) => {
         if (!dx && !dy) return;
+        const k = flown >= 0 ? Math.min(K, flown / Math.hypot(dx, dy)) : K;
+        if (!(k > 0)) return; // a round still sitting on its own muzzle: the
+                              // halo is its whole ink until it has moved
         g.strokeStyle = PAL.clay;
         g.globalAlpha = 0.2 * TRAILS;
         g.lineWidth = 3.4;
         g.beginPath();
         g.moveTo(x, y);
-        g.lineTo(x - dx * K, y - dy * K);
+        g.lineTo(x - dx * k, y - dy * k);
         g.stroke();
         g.strokeStyle = PAL.bright;
         g.globalAlpha = 0.5 * TRAILS;
         g.lineWidth = 1.7;
         g.beginPath();
         g.moveTo(x, y);
-        g.lineTo(x - dx * K * 0.7, y - dy * K * 0.7);
+        g.lineTo(x - dx * k * 0.7, y - dy * k * 0.7);
         g.stroke();
       };
+      // the origin is READ, never kept: a frame copy carries ox/oy through
+      // Object.assign untouched, and a round without them is drawn exactly as
+      // it was before this clamp existed.
+      const flownFrom = (o) => (typeof o.ox === "number" && typeof o.oy === "number"
+        ? Math.hypot(o.x - o.ox, o.y - o.oy) : -1);
       for (const b of (view && view.bullets) || G.bullets) {
         if (b.dead || b.spent) continue;
         // the round's OWN per-tick velocity, never (x - px): on a frame copy x
         // is the interpolated pose and px the last tick's, so the difference is
         // alpha-scaled and the streak would pulse from nothing to full length
         // once per tick. vx/vy is the same vector at alpha 1 and constant under it.
-        streak(b.x, b.y, b.vx || 0, b.vy || 0);
+        streak(b.x, b.y, b.vx || 0, b.vy || 0, flownFrom(b));
       }
       // ...and the SPECULATIVE rounds, which is why every one of these is fresh.
       // A tracer can be matched, expire, be retracted mid-flight, or vanish in a
@@ -682,7 +721,13 @@
         for (const tr of Net.tracers()) {
           blob(tr.x, tr.y, 7 * gl, PAL.clay, 0.35);
           blob(tr.x, tr.y, 2.8, PAL.bright, 0.45 * g1);
-          streak(tr.x, tr.y, tr.vx || 0, tr.vy || 0);
+          // a tracer has carried its muzzle since the cue was written — the flat
+          // pass draws its two-frame glow there (js/game.js drawTracers). It is
+          // in the RAW predicted frame, where the authoritative round also lives
+          // and the drawn hull does not, so the clamp is against the shot's own
+          // origin and never against the ship: anchoring this ink to the hull is
+          // what would break the hand-off.
+          streak(tr.x, tr.y, tr.vx || 0, tr.vy || 0, flownFrom(tr));
         }
       }
     }
