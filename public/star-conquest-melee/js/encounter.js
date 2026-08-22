@@ -432,6 +432,18 @@
     const S = E.seats[seat];
     return termsFromOwned(S ? S.owned : null);
   }
+  // ...and the RAW vector beside it, for the one consumer that judges OWNERSHIP
+  // rather than a derived term: Flight.abilityOn asks whether the seat owns the
+  // ability at all, which is a rank test and not a formula. The array itself is
+  // handed back, not a copy — the arm rule reads one index and never writes —
+  // and a seat that does not exist answers null, which the rule reads as
+  // unowned. It is FULL WIDTH (restart builds it as SHOP.map(() => 0)), so the
+  // raw index the rule performs is safe by the same padding argument
+  // tests/fixtures/README.md states for every other raw read.
+  function ownedFor(seat) {
+    const S = E.seats[seat];
+    return S ? S.owned : null;
+  }
   // The COMPATIBILITY VIEW, kept ONLY because a wide test surface (snapState
   // consumers, sim-host's snapshotRaw, the golden suites' keyThrust
   // save/restore) still reads Encounter.mods — it answers with SEAT 0's
@@ -848,9 +860,9 @@
   }
   const seatAlive = (s) => { const S = E.seats[s]; return !!S && S.hull > 0; };
   // THE CLAIM PRESS. A seat asks to be dealt back in with the ONE input it
-  // already sends every tick — the fire edge. game.js latches `fp` into the
-  // seat's own input bank at the drain (and clears every bank once the tick is
-  // over), so this read is deterministic at encStep time and costs no new wire
+  // already sends every tick — the fire edge. game.js latches bit 0 of the
+  // frame's `ap` mask into the seat's own input bank at the drain (and clears
+  // every bank once the tick is over), so this read is deterministic at encStep time and costs no new wire
   // field, no new frame key and no new fixture byte. It is a READ: the sim
   // never writes input transport, and the same latch still decides firing —
   // fire() is already cold for a dead seat, so the press does double duty
@@ -2653,6 +2665,10 @@
       pl.vel.x = 0;
       pl.vel.y = 0;
       pl.cool = 0;
+      if (window.Abilities) Abilities.reset(pl); // ability 0's cooldown is pl.cool
+                     // above; every other ability's whole slot record goes back
+                     // to rest with it, so a restart cannot carry a cooldown,
+                     // a fuse or a stale press into wave 1
       pl.flame.x = pl.flame.y = 0;
       pl.thrustAcc.x = pl.thrustAcc.y = 0;
       energyFill(s); // the pool is run state, so it restarts with the run — and
@@ -2847,15 +2863,15 @@
         }
       } else if (S.respawnT > 0) {
         // the press is READ on the expiry tick, and it is an EDGE, not a level.
-        // claimPress is latched off a frame's `fp` — the fire presses that began
+        // claimPress is latched off bit 0 of a frame's `ap` mask — the presses that began
         // inside that tick — so a player who holds the button down through the
         // whole countdown asserts nothing here and is NOT dealt back: the timer
         // expires unclaimed and the seat falls through to the claim window below,
         // where a fresh click still takes it. That is the feature, not a gap in
         // it. A held button is the one piece of state an abandoned tab reliably
-        // leaves behind — `fh` and `rh` ride every frame a dead tab sends, which
-        // is why neutralizeHeldBanks exists and why frameIsActive refuses them
-        // both — so a level would deal the seat back to nobody and put the ghost
+        // leaves behind — the whole HELD mask `ah` rides every frame a dead tab
+        // sends, which is why neutralizeHeldBanks exists and why frameIsActive
+        // refuses it — so a level would deal the seat back to nobody and put the ghost
         // ship straight back on the field this gate was written to clear. Only an
         // edge is evidence that a hand moved, and the card says "click", so the
         // rule and what the player is told are the same sentence. Reading it on
@@ -4380,6 +4396,7 @@
   // stale cache is unreachable rather than merely unlikely.
   let boardRows = [];       // { s, y0, y1 } per drawn row, in BOARDUI space
   let nameCardRect = null;  // the claim card's name box, in FIELD space
+  let skinCellRects = [];   // ...and the ship strip's cells, in FIELD space too
 
   // The SHIP DOWN card's second line, as a string rather than an inline
   // literal — the copy is a CLAIM about the rules, so it has to be pinnable.
@@ -4726,6 +4743,12 @@
   // no box was drawn on the last frame, which is every screen that is not the
   // claim or seat-released card.
   function nameCardClick(x, y) {
+    // the SHIP STRIP is tested first, and through this same entry point rather
+    // than a second route in js/game.js, because the two controls are one
+    // affordance: whatever gates the name box's press has to gate the hull's,
+    // and a second call site is a second thing to keep in step with the router's
+    // ordering — which is what put the old DOM box under the fire path.
+    if (skinStripClick(x, y)) return true;
     const r = nameCardRect;
     if (!r || x < r.x0 || x > r.x1 || y < r.y0 || y > r.y1) return false;
     // HANDLED means the press landed on the rect, NOT that the editor changed
@@ -4737,6 +4760,89 @@
     // half-typed name and handed the keyboard back to the ship, which is the
     // exact class of defect this editor exists to end.
     if (window.Net && Net.openNameEdit) Net.openNameEdit();
+    return true;
+  }
+
+  // ---- the SHIP STRIP — the identity affordance's other half ----------------
+  // D2's ruling is that name and ship are ONE identity, chosen in ONE moment,
+  // on ONE affordance and travelling on ONE channel. So the strip is drawn with
+  // the name box and hit-tested through the same drawn cursor, and js/net.js
+  // sends the pair on one `ui: name` message. Two pilots may choose the same
+  // hull: that is legal by ruling and there is no collision rule here to look
+  // for.
+  //
+  // Cosmetic through this milestone. Nothing under this comment reads or writes
+  // E, the seats or any hashed field — the id lives on the PLAYER record on the
+  // server socket, rides the low-frequency roster, and is absent from the 60 Hz
+  // snapshot. R4 is where drawHull starts keying a descriptor table off it.
+  //
+  // The glyphs are drawn HERE and not through drawHull on purpose: drawHull is
+  // R4's to change, and a picker that called it today would move field pixels
+  // every existing baseline was captured against. These are picker-local
+  // silhouettes, and R4 replaces them with the real table's shapes.
+  const SKINS = [
+    { id: 0, label: "DART",   pts: [[1, 0], [-0.7, 0.62], [-0.4, 0], [-0.7, -0.62]] },
+    { id: 1, label: "WEDGE",  pts: [[1, 0], [-0.6, 0.85], [-1, 0], [-0.6, -0.85]] },
+    { id: 2, label: "NEEDLE", pts: [[1, 0], [-0.95, 0.38], [-0.65, 0], [-0.95, -0.38]] },
+    { id: 3, label: "DELTA",  pts: [[1, 0], [-0.55, 0.9], [-0.55, -0.9]] },
+  ];
+  const SKINCELL = { w: 30, h: 20, gap: 4, r: 8 };
+  // The strip's own width, derived rather than written down twice — a cell count
+  // that disagreed with a hardcoded width would put the hit test beside the draw.
+  const skinStripW = () => SKINS.length * SKINCELL.w + (SKINS.length - 1) * SKINCELL.gap;
+
+  function drawSkinStrip(cx, cy) {
+    // the LOCAL client's hull. A build with no Net at all (a bare page) still
+    // draws the strip on the default, so the affordance is never a blank row.
+    const own = window.Net && Net.ownSkin ? Net.ownSkin() : 0;
+    const total = skinStripW();
+    let x = cx - total / 2;
+    skinCellRects = [];
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    for (const sk of SKINS) {
+      const x0 = x;
+      const y0 = cy - SKINCELL.h / 2;
+      const on = sk.id === own;
+      ctx.fillStyle = "rgba(14, 17, 25, 0.9)";
+      ctx.fillRect(x0, y0, SKINCELL.w, SKINCELL.h);
+      // CLAY for the chosen one, wall for the rest — the same two-channel cue
+      // the name box's border already uses, so the card speaks one language
+      ctx.strokeStyle = on ? C.clay : C.wall;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x0 + 0.5, y0 + 0.5, SKINCELL.w - 1, SKINCELL.h - 1);
+      ctx.fillStyle = on ? C.bright : C.dim;
+      ctx.beginPath();
+      sk.pts.forEach((pt, i) => {
+        const px = x0 + SKINCELL.w / 2 + pt[0] * SKINCELL.r;
+        const py = cy + pt[1] * SKINCELL.r;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      });
+      ctx.closePath();
+      ctx.fill();
+      skinCellRects.push({ id: sk.id, x0, y0, x1: x0 + SKINCELL.w, y1: y0 + SKINCELL.h });
+      x += SKINCELL.w + SKINCELL.gap;
+    }
+    // the chosen hull's NAME, under the strip — a silhouette 20 px wide cannot
+    // carry one, and a player who cannot say what they picked has not been told
+    const picked = SKINS.find((sk) => sk.id === own) || SKINS[0];
+    ctx.font = "400 9px " + FONT;
+    ctx.fillStyle = C.dim;
+    ctx.fillText("ship · " + picked.label, cx, cy + SKINCELL.h / 2 + 10);
+    ctx.restore();
+  }
+
+  // FIELD coordinates, exactly as nameCardClick's are, and false whenever no
+  // strip was drawn on the last frame. Answers HANDLED on any press inside a
+  // cell, including a re-press of the hull already flying: reporting that one
+  // unhandled would send it on to js/game.js's commit-and-close and end an edit
+  // the player is still typing into — the same defect nameCardClick's own block
+  // records, one affordance over.
+  function skinStripClick(x, y) {
+    const hit = skinCellRects.find((r) => x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1);
+    if (!hit) return false;
+    if (window.Net && Net.pickSkin) Net.pickSkin(hit.id);
     return true;
   }
 
@@ -4753,6 +4859,8 @@
     // nothing else — a hit test may never outlive the rect it inverts, and the
     // idle return below is a screen with no card on it
     nameCardRect = null;
+    skinCellRects = [];  // ...and the ship strip's cells with it, same rule: a
+                         // hit test may never outlive the rects it inverts
     if (E.state === "idle") return;
     ctx.save();
     const wt = E.waveTick;
@@ -4987,6 +5095,15 @@
       ctx.fillStyle = C.dim;
       ctx.fillText("press R to restart from wave 1 — tuner settings survive", FW / 2, FH / 2 + 12);
     }
+    // --- the identity strip, over the card chain that may have drawn a box ---
+    // It follows the NAME: on the claim card, which is where a pilot with no
+    // board row of its own is asked who it is, and on any screen where the
+    // editor is OPEN, which is how a seated pilot renaming from its board row
+    // reaches the hull in the same moment. One position, above the chain's
+    // lowest line (FH/2 + 56) and below the box (FH/2 + 34), so no card branch
+    // has to know the strip is here.
+    const idOpen = window.Net && Net.nameEdit ? Net.nameEdit() !== null : false;
+    if (nameCardRect || idOpen) drawSkinStrip(FW / 2, FH / 2 + 74);
     // --- the hovered row's own panel, over everything it explains ---
     // Last, so it paints over the spawn markers and the warning line if a wave
     // lands while the player is shopping — but never over the status stack or
@@ -5244,7 +5361,7 @@
     // it here (fire cooldown, the per-seat vcap, the pool's cap/regen), and
     // the phase-11 predictor calls the SAME formula through termsFromOwned:
     // terms over a BARE rank vector (the ACKED wire ow), one source, no copy.
-    termsFor, termsFromOwned,
+    termsFor, termsFromOwned, ownedFor,
     // The simulation event stream — see the queue at the top of the file.
     // Drained once per step() by the presentation side; events() is the
     // readonly view of what this tick queued.
@@ -5567,6 +5684,7 @@
       mods, // the seat-0 compatibility VIEW (getter-backed on termsFor) —
             // kept only for the standing test surface; sim code never reads it
       termsFor,
+      ownedFor,
       resetSeatUpgrades, // the per-seat rank reset — restart()'s per-seat leg,
                          // and phase 14's PvP-death hook
       reset: (seed) => restart(seed),
@@ -5663,6 +5781,10 @@
       // these are live draw state and a check may not hold a handle on them.
       boardRows: () => boardRows.map((r) => ({ ...r })),
       nameBoxRect: () => (nameCardRect ? { ...nameCardRect } : null),
+      // ...and the ship strip's cells, on the same terms and for the same
+      // reason: a leg presses the rect the last frame drew.
+      skinRects: () => skinCellRects.map((r) => ({ ...r })),
+      SKINS: () => SKINS.map((sk) => ({ id: sk.id, label: sk.label })),
       shopClick,      // ...and the click that runs through it
       shopInfo: (seat = localSeat()) => SHOP.map((row, i) => ({ // the SEAT's resolved view —
         // prices/ranks/availability all differ per seat now; the default is

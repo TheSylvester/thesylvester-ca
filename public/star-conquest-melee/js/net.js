@@ -24,9 +24,10 @@
 //
 // In net mode the client simulates NOTHING. Each frame-loop tick it banks
 // the same input accumulator local play banks (bankTickInput — the identical
-// eleven-field record, the right-hold comet bit `rh` included: the banked
-// frame goes upstream whole, so the server's sim learns comet mode through
-// the same ring field local play drains — and the sim's per-seat comet flag
+// ten-field record, the two ABILITY MASKS included: the banked
+// frame goes upstream whole, so the server's sim learns comet mode
+// through the same ring fields local play drains — bit 1 of `ap` for
+// the press, bit 1 of `ah` for the hold — and the sim's per-seat comet flag
 // rides every snapshot back DOWN as `comet`, with the seat's ENERGY pool and
 // its live cap beside it, so a remote seat's glow renders from server truth,
 // never from local guesswork: the client never runs the pool's gate and never
@@ -69,7 +70,12 @@
 // encounter's internals through the __test.enc surface exactly as
 // server/sim-host.mjs does.
 (() => {
-  const NET_V = 8; // MUST equal server/snapshot.mjs's SNAPSHOT_VERSION — a
+  // the two shipped abilities' mask bits, resolved from the catalog rather than
+  // written as 1 and 2 here — js/abilities.js owns the id table, and this file
+  // reaches it through window like it reaches Flight
+  const AB_FIRE = Abilities.bit(Abilities.ABILITY.FIRE);
+  const AB_COMET = Abilities.bit(Abilities.ABILITY.COMET);
+  const NET_V = 9; // MUST equal server/snapshot.mjs's SNAPSHOT_VERSION — a
                    // classic script cannot import it, so this mirrors it by
                    // hand; the s.v gate below silently drops every snapshot
                    // if the two ever drift, and a stale hello meets 4001
@@ -174,6 +180,31 @@
     } catch { /* a name that cannot be remembered is still a name this session */ }
   }
 
+  // ---- the SHIP, the identity plane's second half ---------------------------
+  // Mirrored BY HAND from server/server.js, like NAME_MAX and NET_V, and pinned
+  // byte-equal by server/names.test.mjs. The server's answer is still the only
+  // one that reaches a screen; this copy exists so the strip shows what the
+  // server will accept instead of a pick it is about to refuse.
+  const SKIN_COUNT = 4;
+  const SKIN_KEY = "scmelee.skin";
+  // No null here, unlike cleanName: every pilot flies something, and junk folds
+  // to hull 0 — the default every existing pixel baseline was captured against.
+  function cleanSkin(v) {
+    if (!Number.isInteger(v) || v < 0 || v >= SKIN_COUNT) return 0;
+    return v;
+  }
+  // Storage answers strings, so the parse is here rather than in cleanSkin:
+  // cleanSkin is the WIRE gate and a wire skin is a number. Both halves swallow,
+  // for the same reason the name's do.
+  function storedSkin() {
+    try { return cleanSkin(Number.parseInt(window.localStorage.getItem(SKIN_KEY), 10)); }
+    catch { return 0; }
+  }
+  function storeSkin(id) {
+    try { window.localStorage.setItem(SKIN_KEY, String(id)); }
+    catch { /* a hull that cannot be remembered is still this session's hull */ }
+  }
+
   // ---- the name editor (CANVAS-side, and deliberately not a DOM input) ------
   // What this replaces was a real <input> over the canvas, and it could not be
   // clicked in the DEFAULT aim mode at all. AIMMODE starts "locked", resume()
@@ -204,11 +235,16 @@
   // stored one, for seat 0 — and one editor with one commit path is the only
   // version of this that cannot disagree with itself.
   let ownName = storedName();
+  let ownSkin = storedSkin();
   let editing = false;
   let editBuf = "";
   // set by the net branch below. Null in local play, where a name is stored and
   // drawn and never sent anywhere.
   let sendName = null;
+  // ...and its twin for the hull. The two are separate hooks and ONE message:
+  // see pushIdentity, which is the reason a ship pick and a name commit that
+  // land inside one rate window leave together instead of racing.
+  let sendSkin = null;
   // CODE POINTS, not UTF-16 units. The cap is the server's cap and the server
   // counts code points — see cleanName's own slice, and the maxLength note the
   // deleted input carried, which was wrong for exactly this reason.
@@ -235,6 +271,21 @@
     storeName(next); // remembered for the NEXT visit; this visit's copy is the
                      // one the server sanitizes and fans back out
     if (sendName) sendName(next);
+    return true;
+  }
+
+  // The ship pick — the identity affordance's other control, and deliberately
+  // NOT gated on the editor being open. A player picking a hull while typing a
+  // name keeps what they typed: js/encounter.js reports the press HANDLED, so
+  // js/game.js never reaches the commit-and-close a press anywhere else earns.
+  // Answers whether the choice actually moved, so a caller can tell a pick from
+  // a re-press of the hull already flying.
+  function pickSkin(id) {
+    const next = cleanSkin(id);
+    if (next === ownSkin) return false;
+    ownSkin = next;
+    storeSkin(next); // remembered for the NEXT visit, exactly as the name is
+    if (sendSkin) sendSkin(next);
     return true;
   }
 
@@ -306,6 +357,9 @@
     // local mode: every hook declines, every caller falls through
     window.Net = {
       active: () => false,
+      wireVersion: () => NET_V, // the build's wire version — answered in local
+                                // mode too, because a suite may read it before
+                                // any socket exists
       seat: () => 0, // local play is always seat 0 — localSeat() reads this
       released: () => false, // ...and there is no server to take it away, so the
                              // release latch is dead here; the card's own gate
@@ -329,6 +383,14 @@
       ownName: () => ownName,
       nameEdit: () => (editing ? editBuf : null),
       openNameEdit, closeNameEdit,
+      // ...and the HULL, which local play has for the same reason it has a
+      // name: the picker is drawn here too and the choice is remembered for the
+      // next visit. sendSkin stays null, so the pick stops at storage. Every
+      // other seat answers null — nobody is flying it, which is not the same
+      // sentence as "hull 0".
+      seatSkin: (s) => (s === 0 ? ownSkin : null),
+      ownSkin: () => ownSkin,
+      pickSkin,
       typing: () => editing,
     };
     return;
@@ -470,6 +532,7 @@
   // the two counts it is a LOBBY fact: a names-only `you` repaints the board
   // and tears nothing down (see onYou).
   let seatNames = [];
+  let seatSkins = [];
   let lastAck = 0;        // the server's highest CONTIGUOUS RESOLVED input n
 
   // ---- the OWN-SHIP predictor (phase 11b) -----------------------------------
@@ -520,7 +583,6 @@
   const off = { x: 0, y: 0 }; // the render correction offset — presentation only
   let rebases = 0;
   let lastRebaseMag = 0;
-  let prevRh = 0;       // the comet cue's press-edge detector
   const spec = { cueShown: 0, cueMatched: 0, cueRefused: 0,
                  cometCueShown: 0, cometRefused: 0,
                  cueRetracted: 0 }; // monotone, render-side — the row-2
@@ -545,6 +607,12 @@
       aimAngle: 0, aimOff: { x: 0, y: 0 }, aimed: false,
       cool: 0, comet: false, energy: 0, energyMax: 0, enIdle: 0,
       thrustAcc: { x: 0, y: 0 }, flame: { x: 0, y: 0 },
+      // the ABILITY SLOT record — a HAND-WRITTEN bank, which is exactly why it
+      // has to be named here: adding a field to makePlayer does NOT add it to
+      // this one, and a kernel field the predictor lacks makes replay and
+      // incremental disagree as rubber-banding. The wire's own `cd` is adopted
+      // onto it in adoptWire below.
+      slots: window.Abilities ? Abilities.makeSlots() : [],
       input: { scur: { x: 0, y: 0 }, fireHeld: false, cometWant: false,
                cometPress: 0 } };
   }
@@ -564,6 +632,14 @@
     K.energyMax = pr.em || ENMAX;
     K.cool = pr.cool || 0;
     K.enIdle = pr.enIdle || 0;
+    // the per-seat ability cooldowns, rebased exactly as `cool` is. The wire
+    // sends the vector with its TRAILING DEFAULT RUN cut off and drops the key
+    // entirely when it is empty (trimRanks' rule, and its reason), so the
+    // absent case must write ZEROS rather than leave the last rebase standing.
+    if (K.slots) {
+      const cd = Array.isArray(pr.cd) ? pr.cd : [];
+      for (let i = 0; i < K.slots.length; i++) K.slots[i].cd = cd[i] | 0;
+    }
   }
   function carryLocal(K, tick) {
     const L = localAtTick.get(tick);
@@ -656,7 +732,7 @@
   }
   // a PRESS's cue: model the fire (the real refusal ladder + the cool set)
   // and show the promise in the same tick — a press is the player's own
-  // edge, and the server consumes it as an fp count whatever the grouping
+  // edge, and the server ORs the press masks whatever the grouping
   function specFire(K, terms) {
     if (!modelFire(K, terms)) return false;
     return spawnCue(K, terms);
@@ -686,8 +762,8 @@
 
   // one predicted kernel tick, in the server's exact per-tick order:
   // drain → energy → integrate, then the autofire pass. `fx.fire` decides
-  // whether an fp edge is a cue (incremental) or only a cool model (replay).
-  const PRED_CTX = { alive: true, terms: null, keyThrust: null };
+  // whether a fire press is a cue (incremental) or only a cool model (replay).
+  const PRED_CTX = { alive: true, terms: null, keyThrust: null, owned: null };
   let pendingAutofireCue = false; // incremental-only: an autofire shot was
                         // modeled last tick — its cue shows THIS tick if the
                         // trigger is still held (see the trail note below)
@@ -695,14 +771,31 @@
     PRED_CTX.alive = true; // the predictor idles while the seat is down, so
                            // a live replayed tick is a live seat by contract
     PRED_CTX.terms = terms;
+    // the ARM RULE's ownership term, and it has to be here or the predictor and
+    // the sim answer Flight.abilityOn differently the day an ability gets a shop
+    // row. myOw is the ACKED wire rank vector — the same value predTerms() feeds
+    // termsFromOwned — and it is deliberately NOT padded: the arm rule reads it
+    // through `| 0`, which answers rank 0 past the end, exactly as
+    // termsFromOwned's `|| 0` does. That is the one property snapshot.mjs's trim
+    // rests on, restated here because this is a raw index into a trimmed vector.
+    PRED_CTX.owned = myOw;
     PRED_CTX.keyThrust = () => (terms ? terms.keyThrust !== false : true);
+    // `ability` is a NO-OP on both sinks, and deliberately so: the speculative
+    // tracer is hardcoded to the standard round's ballistics (spawnCue), so
+    // cueing an ability through it would draw a normal bullet for a shot that is
+    // not one — and an unmatched tracer expires as spec.cueRefused, which
+    // corrupts the row-2 refusal instrument. The ARM and its COOLDOWN are
+    // modelled anyway, because the drain slice does both before it reaches this
+    // sink; only the picture is withheld. A silent ability is honest until the
+    // tracer learns the catalog.
     const fx = cueing
       ? { fire: () => { if (specFire(K, terms)) ownCue("fire", K.ship); },
+          ability: () => {},
           // the sink hands the flight slice's own two numbers straight
           // through — the same world position and pre-bounce magnitude
           // FLIGHT_FX.thud gives Encounter.emit in the sim
           thud: (x, y, gain) => { ownCue("thud", { x, y }, gain); } }
-      : { fire: () => { modelFire(K, terms); }, thud: () => {} };
+      : { fire: () => { modelFire(K, terms); }, ability: () => {}, thud: () => {} };
     Flight.drainSlice(K, frames, PRED_CTX, fx);
     Flight.energySlice(K, PRED_CTX);
     Flight.integrateSlice(K, PRED_CTX, fx);
@@ -714,8 +807,8 @@
     // a lie (measured 6-13% refusals at j20). Showing the cue one frame
     // later, only if the trigger is STILL held, turns those over-cues into
     // silent under-cues: a bullet with no tracer costs nothing, a tracer
-    // with no bullet is a broken promise. A PRESS (fp) still cues in its
-    // own tick — the server consumes fp counts whatever the grouping.
+    // with no bullet is a broken promise. A PRESS (bit 0 of `ap`) still
+    // cues in its own tick — the merge ORs the press masks whatever the grouping.
     if (cueing && pendingAutofireCue) {
       pendingAutofireCue = false;
       // the ear inherits the trail rather than rebuilding it: the sound is
@@ -740,7 +833,6 @@
     tracers.length = 0;
     off.x = off.y = 0;
     myOw = null;
-    prevRh = 0;
     maxOwnBulletId = -1;
     pendingAutofireCue = false;
   }
@@ -759,13 +851,11 @@
     const K = freshK();
     adoptWire(K, pr);
     carryLocal(K, s.tick); // the map was just cleared — seeds from live input
-    // the cue-edge detector re-seeds from that same live want — the level the
-    // sim's drain seeds ITS edge walk from (prevRh = b.cometWant). The
-    // incremental path does not run while predIdle, so a prevRh left frozen
-    // at the last pre-idle frame would call a button held straight through
-    // death a fresh press at respawn, and a release+re-press inside the gap
-    // no press at all. Instrument-only: spec.cometCueShown/cometRefused.
-    prevRh = K.input.cometWant ? 1 : 0;
+    // No cue-edge detector to re-seed here any more. It used to exist because
+    // the comet's press was DERIVED from a rise in the held level, so a detector
+    // frozen across the predictor's idle window called a button held straight
+    // through death a fresh press at respawn — tracker S-r3mfs8 leg R2. The
+    // press bit rides the frame explicitly now and there is nothing to seed.
     predK = K;
     predTick = s.tick;
     predIdle = down;
@@ -825,6 +915,15 @@
     while (i < sentHist.length) {
       const b = sentHist[i].batch;
       frames.length = 0;
+      // THE BATCH INVARIANT, stated because it is load-bearing and was not.
+      // The inner loop stops at FRAMES_PER_TICK WITHOUT advancing past the rest
+      // of the batch, so a batch of three would be replayed as TWO ticks the
+      // server ran as one. It is safe only because appendInputFrame caps
+      // pendingInputs at 2 and batchId increments once per flush — so a batch is
+      // never wider than the lid. Raise FRAMES_PER_TICK, or let a third frame
+      // into one flush, and this loop silently re-times the replay. It matters
+      // more since R1: an ability arm SPENDS from the pool inside the drain, so
+      // a mis-grouped press is an 18-point pool divergence rather than nothing.
       while (i < sentHist.length && sentHist[i].batch === b &&
              frames.length < FRAMES_PER_TICK) {
         frames.push(sentHist[i].f);
@@ -936,23 +1035,31 @@
   // It starts as what the hello carried, so a returning player who opens the
   // editor and closes it again sends nothing.
   let nameSent = ownName;
+  let skinSent = ownSkin;
   let nameSentAt = -1;
   let namePending = false;
-  function pushName() {
+  // ONE message carries the WHOLE identity — the name and the hull together —
+  // and that is not tidiness. The server rate-gates this route at a quarter
+  // second and answers a dropped message with silence, so two messages sent
+  // inside one window would lose the second half of an identity a player chose
+  // in one moment. Sending the pair means the coalescing below can never split
+  // them: whatever the flush finds in nameSent/skinSent is what leaves.
+  function pushIdentity() {
     if (!ws || ws.readyState !== 1) return;
     const now = Date.now();
     const gap = now - nameSentAt;
     if (nameSentAt >= 0 && gap < 300) {
       if (!namePending) {
         namePending = true;
-        setTimeout(() => { namePending = false; pushName(); }, 300 - gap);
+        setTimeout(() => { namePending = false; pushIdentity(); }, 300 - gap);
       }
       return;
     }
     nameSentAt = now;
     // an empty string, not an absent field: this is how a player CLEARS a name,
-    // and the server's sanitize reads it as null exactly as it reads junk
-    ws.send(JSON.stringify({ v: NET_V, ui: "name", name: nameSent || "" }));
+    // and the server's sanitize reads it as null exactly as it reads junk. The
+    // skin has no such hole — 0 IS a hull — so it is sent as the number it is.
+    ws.send(JSON.stringify({ v: NET_V, ui: "name", name: nameSent || "", skin: skinSent }));
   }
   // the editor's ONE way out to the wire, and closeNameEdit above is its only
   // caller — a name reaches the server because a player finished typing it,
@@ -960,7 +1067,13 @@
   sendName = (next) => {
     if (next === nameSent) return;
     nameSent = next;
-    pushName();
+    pushIdentity();
+  };
+  // ...and the picker's, on the same terms and through the same gate.
+  sendSkin = (next) => {
+    if (next === skinSent) return;
+    skinSent = next;
+    pushIdentity();
   };
 
   // ---- helpers ---------------------------------------------------------------
@@ -977,8 +1090,14 @@
       tx: older.tx + newer.tx, ty: older.ty + newer.ty,
       ax: older.ax + newer.ax, ay: older.ay + newer.ay,
       cx: newer.cx, cy: newer.cy,
-      fp: older.fp + newer.fp,
-      fh: newer.fh, kx: newer.kx, ky: newer.ky, rh: newer.rh,
+      // ap ORs: a press that happened in EITHER merged frame happened, and a
+      // mask is the only shape that merges correctly — the old fp COUNT summed,
+      // which for ability ids 2 and 3 would have produced ability 5.
+      ap: (older.ap | 0) | (newer.ap | 0),
+      // ah takes the NEWEST, the fh/kx/ky rule: held is a LEVEL, not an event,
+      // and the newest sample is what the buttons are actually doing.
+      ah: newer.ah | 0,
+      kx: newer.kx, ky: newer.ky,
       // the NEWEST view tick wins, the fh rule — and when neither frame
       // carries one the key stays undefined, which JSON drops: absence
       // survives the fold as absence
@@ -1073,6 +1192,11 @@
       const hello = { v: NET_V, hello: true };
       const boot = storedName();
       if (boot) hello.name = boot;
+      // the hull rides the hello unconditionally, because 0 is a real answer
+      // and not an absence — there is no "nothing stored" hull the way there is
+      // a nothing-stored name, and omitting it would only make the server's
+      // fold the client's contract instead of its own guard.
+      hello.skin = ownSkin;
       ws.send(JSON.stringify(hello));
       helloed = true;
       note("NET connected — " + url);
@@ -1121,6 +1245,10 @@
       rosMax = -1;
       rosStarted = false;
       seatNames = [];
+      seatSkins = []; // ...and the hulls with them, for the identical reason:
+                      // they are drawn on the FIELD, and a set kept here would
+                      // leave a frozen board wearing the hulls of a room this
+                      // client can no longer see
       released = false; // ...the latch goes with it. A dropped socket is not a
                         // released seat — the rejoin asks for one like any fresh
                         // client, and a latch that survived the close would show
@@ -1247,6 +1375,13 @@
     // A non-array reads as no names at all, which is the same UNKNOWN the two
     // counts fall back to and draws exactly the pre-name board.
     const nextNames = Array.isArray(you.names) ? you.names.map(cleanName) : [];
+    // ...and the hulls, on the same terms and with one difference the shapes
+    // force: an entry may be null (nobody is flying that seat), so the fold to
+    // hull 0 runs only on the entries that are NOT null. Collapsing null to 0
+    // here would tell the board an empty seat had chosen a hull.
+    const nextSkins = Array.isArray(you.skins)
+      ? you.skins.map((v) => (v === null || v === undefined ? null : cleanSkin(v)))
+      : [];
     const identitySame = seat === mySeat && seatEpoch === mySeatEpoch &&
       matchEpoch === myMatchEpoch;
     const rosterSame = granted === rosGranted && maxSeats === rosMax &&
@@ -1259,11 +1394,18 @@
     // is allowed to ride this message at all.
     const namesSame = nextNames.length === seatNames.length &&
       nextNames.every((v, i) => v === seatNames[i]);
-    if (identitySame && rosterSame && namesSame) return;
+    // ...and the hulls are the roster's FOURTH count, held to the same rule: a
+    // change here is a LOBBY change and reaches the early return and nothing
+    // else. Folded in beside namesSame rather than given a paragraph of its own
+    // because the two are one identity and every reader below treats them so.
+    const skinsSame = nextSkins.length === seatSkins.length &&
+      nextSkins.every((v, i) => v === seatSkins[i]);
+    if (identitySame && rosterSame && namesSame && skinsSame) return;
     rosGranted = granted;
     rosMax = maxSeats;
     rosStarted = started;
     seatNames = nextNames;
+    seatSkins = nextSkins;
     // ...and this client's OWN copy follows the server's answer for its own
     // seat. The server's sanitize is the only one that reaches a screen, and
     // the claim card draws from ownName rather than from a row it does not
@@ -1272,6 +1414,11 @@
     // standing: a seatless roster is silence about this client, not a clear.
     if (Number.isInteger(seat) && seat >= 0 && seat < seatNames.length &&
         seatNames[seat]) ownName = seatNames[seat];
+    // ...and the hull follows the server's answer for this client's own seat on
+    // the same terms. The null test is NOT the name's truthiness test: hull 0 is
+    // a real answer and `seatSkins[seat] &&` would refuse to ever adopt it.
+    if (Number.isInteger(seat) && seat >= 0 && seat < seatSkins.length &&
+        seatSkins[seat] !== null && seatSkins[seat] !== undefined) ownSkin = seatSkins[seat];
     if (identitySame) { noteIdentity(); return; } // a seat arrived, the door shut, or somebody named themselves
     const namespaceMoved = seat !== mySeat || seatEpoch !== mySeatEpoch;
     const matchMoved = matchEpoch !== myMatchEpoch;
@@ -1488,22 +1635,23 @@
       if (vtDrawn >= 0) f.vt = vtDrawn;
       appendInputFrame(pendingInputs, f);
       // the INCREMENTAL prediction: the tick this frame describes, run now —
-      // one kernel tick with cues live (fp/fh edges may fire the speculative
-      // tracer, rh edges answer the comet cue). The next rebase's replay
+      // one kernel tick with cues live (the fire bit may fire the speculative
+      // tracer, the comet press bit answers the comet cue). The next rebase's replay
       // re-derives the same window from the acked base and corrects.
       if (predOn && !predIdle && mySeat !== null) {
         const terms = predTerms();
-        if (f.rh && !prevRh) {
+        if ((f.ap | 0) & AB_COMET) {
           // the comet CUE answers THE arm rule — js/game.js's Flight.cometOn,
           // the one copy the sim and the HUD dim also call — on predicted
-          // state. `press` is passed `true` because this block runs only at
-          // the f.rh && !prevRh edge above, so a fresh press is a fact at this
-          // gate rather than a term to re-derive. These are telemetry
-          // counters; the halo reads predK.
+          // state. `press` is passed `true` because this block runs only on the
+          // frame's own PRESS BIT, which is a fact and no longer a rise this
+          // file has to reconstruct. There is no prevRh any more, and so no
+          // hardSnap re-seed for it either: a button held straight through
+          // death sets no bit at respawn, because no press was made. These are
+          // telemetry counters; the halo reads predK.
           if (Flight.cometOn(predK.comet, predK.energy, predK.energyMax, true)) spec.cometCueShown += 1;
           else spec.cometRefused += 1;
         }
-        prevRh = f.rh ? 1 : 0;
         predTick += 1;
         predTickK(predK, [f], terms, true);
         recordLocal(predK, predTick);
@@ -1544,7 +1692,7 @@
       // the pending frames IS the click, so no new gesture and no new key: the
       // frames are still discarded, and only the ASK survives them. The server
       // decides whether anything is open; a claim on a full room is a no-op.
-      const asked = pendingInputs.some((f) => f.fp);
+      const asked = pendingInputs.some((f) => (f.ap | 0) & AB_FIRE);
       pendingInputs.length = 0;
       if (asked && ws && ws.readyState === 1 && helloed) {
         ws.send(JSON.stringify({ v: NET_V, ui: "claim" }));
@@ -1986,6 +2134,15 @@
       P.comet = !!pr.comet;
       P.cool = pr.cool || 0;     // v4: the fire cooldown and the recharge delay
       P.enIdle = pr.enIdle || 0; // — presented truth, and the predictor's rebase source
+      // ...and the ability slots' cooldowns beside them, so the HUD's
+      // availability dim reads presented truth on every seat. PADDED back to
+      // the local catalog's width: a raw index into a trimmed vector is exactly
+      // the NaN padRanks exists to stop (tests/fixtures/README.md's raw-index
+      // caveat), and Flight.abilityOn indexes this record.
+      if (P.slots) {
+        const cd = Array.isArray(pr.cd) ? pr.cd : [];
+        for (let i = 0; i < P.slots.length; i++) P.slots[i].cd = cd[i] | 0;
+      }
       // ...and the pool the flag is spending, DISCRETE from s0 like every other
       // state bit: the halo sizes off it and the HUD bar reads it directly, so
       // both present server truth instead of a client-side simulation of it.
@@ -2361,6 +2518,11 @@
 
   window.Net = {
     active: () => true,
+    // the wire version this build speaks. Published so a suite can address the
+    // live number instead of mirroring it by hand — a hand-written `v: 8` in a
+    // test file is a FOURTH copy of a constant test/node-golden.mjs already
+    // pins in three places, and it reds every wire bump for the wrong reason.
+    wireVersion: () => NET_V,
     // THE seat this client flies, or null while it spectates or waits for its
     // grant. game.js's localSeat() reads it and folds null to 0.
     seat: () => mySeat,
@@ -2380,6 +2542,12 @@
     // nothing else knows about. The board's Player-N fallback covers both.
     seatName: (s) => (Number.isInteger(s) && s >= 0 && s < seatNames.length
       ? seatNames[s] : null),
+    // ...and the seat's hull, read off the same roster. Null for a seat outside
+    // the room's range and for one nobody is flying — R4's drawHull reads this
+    // and falls back to the default hull on a null, exactly as the board falls
+    // back to Player-N on a nameless row.
+    seatSkin: (s) => (Number.isInteger(s) && s >= 0 && s < seatSkins.length
+      ? seatSkins[s] : null),
     // ...and THIS client's own name, which is not a roster read: a seatless
     // client has no row on the board and no entry in `names`, and the claim
     // card is exactly the screen where a name is worth asking for. It follows
@@ -2387,6 +2555,8 @@
     // (see the `you` decode), because the server's sanitize is the only one
     // that reaches a screen.
     ownName: () => ownName,
+    ownSkin: () => ownSkin,
+    pickSkin,
     // ...and the editor over it. nameEdit answers the LIVE buffer while an edit
     // is open and null while none is — null, not "", because an empty buffer is
     // a real state (a player clearing a name) and js/encounter.js has to draw a

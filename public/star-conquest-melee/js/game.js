@@ -104,8 +104,9 @@ let BLASTGAIN = 8;      // px the radius grows per rank past the first: BLASTR +
 // flag is up the ship answers the stick much harder, tops out much faster,
 // shrugs off ALL incoming damage and damages anything it touches. The flag
 // itself lives on the per-seat player struct (makePlayer) and is fed through
-// the input ring's `rh` field — see bankTickInput/drainTickInput — never read
-// off the DOM inside step(). The comet is no longer free: it SPENDS from the
+// the input ring's ability masks — bit 1 of `ah` for the hold and bit 1 of `ap`
+// for the press edge; see bankTickInput/drainTickInput — never read off the DOM
+// inside step(). The comet is no longer free: it SPENDS from the
 // seat's ENERGY pool below, through that pool's own API and nothing else —
 // the COMET* numbers here say what it costs and what it does, the EN* numbers
 // say what the pool is. That split is the whole point: the next skill prices
@@ -333,8 +334,19 @@ function makePlayer(id) {
                      // and the halo and the HUD bar read this one place on both paths.
     thrustAcc: { x: 0, y: 0 }, // acceleration applied since the last tick — feeds the flame
     flame: { x: 0, y: 0 }, // smoothed thrust the engine flame renders
+    slots: Abilities.makeSlots(), // the per-seat ABILITY SLOT record (P5) — one
+                     // {cd, t, stage, mode, want, press} per ability ID, never per
+                     // loadout position. HASHED, behind the guarded zero-default
+                     // fold at the end of hashShip: at rest it costs zero bytes, so
+                     // an ability nobody arms re-keys no trace. js/abilities.js
+                     // loads FIRST for exactly this call.
     input: { // the seat's whole input transport — never hashed (input state, not simulation state)
-      acc: { tx: 0, ty: 0, ax: 0, ay: 0, fp: 0, n: 0 }, // per-tick raw-delta accumulator
+      acc: { tx: 0, ty: 0, ax: 0, ay: 0, ap: 0, n: 0 }, // per-tick raw-delta accumulator.
+                     // `ap` is the tick's ABILITY PRESS MASK, indexed by ability id
+                     // — bit 0 fire, bit 1 comet, one more bit per ability after
+                     // them. It replaced the `fp` fire-edge COUNT: the drain always
+                     // read that count as a bit anyway, and a count cannot say
+                     // WHICH ability. Presses OR in and never overwrite.
       ring: [], // the lag ring: one banked record per tick, drained by step()
       lcur: { x: FW / 2, y: FH / 2 }, // locked-mode view cursor (field coordinates)
       scur: { x: WW / 2, y: WH / 2 }, // the sim's delayed aim point (WORLD coordinates)
@@ -348,8 +360,8 @@ function makePlayer(id) {
       claimPress: 0, // THIS TICK's fire edge, latched for the encounter's claim
                      // gate — 1 while a press has been drained (or dispatched, in
                      // event mode) and not yet spent. Input transport, NEVER
-                     // hashed, exactly like fireHeld: it is a copy of the `fp`
-                     // that already rides every frame, kept where encStep can read
+                     // hashed, exactly like fireHeld: it is a copy of the `ap`
+                     // fire bit that already rides every frame, kept where encStep reads
                      // it AFTER the drain, so a downed seat's click needs no new
                      // wire field and no new frame key. Cleared once per tick at
                      // the END of step(), so a press survives exactly the tick it
@@ -359,12 +371,12 @@ function makePlayer(id) {
                         // (energyStep) is what turns this into the seat's real, hashed
                         // `comet` flag; a seat with an empty pool wants the comet and does
                         // not get it.
-      cometPress: 0, // THIS TICK's comet press EDGE — 1 while a false→true rise of
-                     // the held bit has been seen (drainSlice's frame walk, or
-                     // setRightHeld at the DOM edge) and not yet spent. Input
-                     // transport, NEVER hashed, exactly like claimPress above: the
-                     // edge derives from the `rh` LEVEL already on every frame, so
-                     // no new wire field and no new frame key. Unlike claimPress it
+      cometPress: 0, // THIS TICK's comet press EDGE — 1 while bit 1 of a drained
+                     // frame's `ap` mask has been seen (or setRightHeld dispatched
+                     // one, in event mode) and not yet spent. Input transport,
+                     // NEVER hashed, exactly like claimPress above. The edge is
+                     // EXPLICIT on the frame now and no longer derived from a rise
+                     // in the held level, which is what retired the prevRh walk. Unlike claimPress it
                      // is CONSUMED inside energySlice itself — the read-then-zero is
                      // the slice's first statement, BEFORE the liveness test, so a
                      // click made while the seat is down is deliberately SPENT and
@@ -377,6 +389,31 @@ function makePlayer(id) {
     },
   };
 }
+// The two shipped abilities' mask bits, resolved ONCE from the catalog rather
+// than written as 1 and 2 in a dozen places: js/abilities.js owns the id table
+// and this is the only place game.js restates it. Load order makes this legal —
+// the catalog is the first script on both surfaces.
+const AB_FIRE = Abilities.bit(Abilities.ABILITY.FIRE);   // bit 0
+const AB_COMET = Abilities.bit(Abilities.ABILITY.COMET); // bit 1
+// THE BENCH SELECTION — pure client UI, and it never reaches the wire. The
+// server holds its own copy of this `let` at the file default and never reads
+// it: what it reads is the seat's `ap` mask. That is what makes key binding,
+// rebinding and loadout swapping free forever, and it is why the lazy version
+// (a module latch the DOM handler writes) is broken for everybody but the
+// person testing it.
+let SELECTED_ABILITY = Abilities.ABILITY.RAILSHOT;
+// which ability each held KEY is holding, so a keyup releases the bit its own
+// keydown set even if the selection changed in between. Client-side transport,
+// read once per bank.
+const heldAbilityKeys = new Map();
+function heldAbilityMask() {
+  let m = (G.leftHeld ? AB_FIRE : 0) | (G.rightHeld ? AB_COMET : 0);
+  for (const id of heldAbilityKeys.values()) m |= Abilities.bit(id);
+  return m;
+}
+const AB_FIRST = 2; // the first ability whose whole state lives in the SLOT
+                    // record. Fire and comet keep the scalars they shipped with
+                    // (P.cool, the energy pool) — see js/abilities.js's note.
 const players = [makePlayer(0)];
 // The seat-count control — the ONLY site that grows or shrinks players[].
 // New seats are appended with makePlayer (fresh banks, centre spawn — the
@@ -908,20 +945,20 @@ const Flight = {
   // frame produced.
   drainSlice(K, frames, ctx, fx) {
     const b = K.input;
-    let lastRh = -1; // -1 = nothing drained this tick — the flag then persists,
-                     // exactly the held-input semantics fireHeld keeps
-    // the comet PRESS EDGE, seeded from the PRE-drain want: a rise anywhere in
-    // the walked sequence — frames[0] against the standing want, every later
-    // frame against its predecessor — latches cometPress for energySlice. A
-    // same-tick press+release cannot arm under EITHER grouping: by the time
-    // the slice runs, the LEVEL term (cometWant) is already false again, which
-    // matches today; the edge derivation only matters when the press's rh: 1
-    // is still standing at slice time. This drain-path edge serves the WIRE
-    // and the fixture producers (pushInputFrame drives this walk directly);
-    // setRightHeld's DOM-time latch serves both solo modes.
-    let prevRh = b.cometWant ? 1 : 0;
+    let lastAh = -1; // -1 = nothing drained this tick — the HELD levels then
+                     // persist, exactly the semantics fireHeld always kept
+    // There is no press-edge DERIVATION here any more, and that is the point of
+    // the round. The comet's edge used to be reconstructed from a rise in the
+    // held bit `rh` — a prevRh seeded off the standing want, walked frame by
+    // frame, with a hardSnap re-seed bolted on in js/net.js so a button held
+    // through death was not read as a fresh press at respawn (tracker S-r3mfs8
+    // leg R2 was an open defect in exactly that derivation). The `ap` mask
+    // carries the edge EXPLICITLY, for every ability including the comet, so
+    // the derivation, its bookkeeping and that whole class of defect are gone.
     for (let k = 0; k < frames.length; k++) {
       const a = frames[k];
+      const ap = a.ap | 0; // PRESS mask — an edge per ability id
+      const ah = a.ah | 0; // HELD mask — a level per ability id
       b.scur.x = a.cx;
       b.scur.y = a.cy;
       // the phase-15 lag-rebate latch, recomputed at EVERY drained frame (the
@@ -929,31 +966,72 @@ const Flight = {
       // clamped tick delta between the sim's now and the client's presented
       // view tick; a frame without one earns nothing. fire() reads the latch,
       // which is what gives the frameless autofire path (game.js's held-fire
-      // loop) the same rebate the fp edge gets.
+      // loop) the same rebate the `ap` fire edge gets.
       b.fireDelta = Number.isInteger(a.vt) ? Math.max(0, Math.min(21, simTick - a.vt)) : 0;
       // the claim latch, ABOVE the liveness gate and OR'd rather than assigned:
       // a corpse's press is the whole point (it is how a downed seat asks to be
       // dealt back), and a catch-up tick that drains two frames must not let the
       // second frame's silence erase the first frame's click
-      if (a.fp) b.claimPress = 1;
-      // a dead seat's frames still land (the cursor and the held bit) but
+      if (ap & AB_FIRE) b.claimPress = 1;
+      // ...and the comet's, latched the same way and ABOVE the same gate. It is
+      // a plain mask test now rather than a rise walk; energySlice still spends
+      // it before its own liveness test, so a click made while down cannot arm
+      // the comet at respawn.
+      if (ap & AB_COMET) b.cometPress = 1;
+      // a dead seat's frames still land (the cursor and the held bits) but
       // apply no impulse and fire nothing — the corpse takes no input
       if (ctx.alive) {
         if (a.ax || a.ay) Flight.aim(K, a.ax, a.ay);
         if (a.tx || a.ty) Flight.thrust(K, a.tx, a.ty);
         if ((a.kx || a.ky) && ctx.keyThrust()) Flight.thrust(K, a.kx * KEYTHRUST, a.ky * KEYTHRUST);
-        if (a.fp) fx.fire();
+        if (ap & AB_FIRE) fx.fire();
       }
-      b.fireHeld = a.fh;
-      lastRh = a.rh ? 1 : 0;
-      if (lastRh && !prevRh) b.cometPress = 1;
-      prevRh = lastRh;
+      b.fireHeld = !!(ah & AB_FIRE);
+      lastAh = ah;
+      // every OTHER ability, in ASCENDING ID ORDER — pinned, exactly as the
+      // seat drain order is: the moment two abilities can spawn on one tick the
+      // order is hash-visible and it may never change. The arm rule is
+      // Flight.abilityOn and this is its one authoritative call site; the
+      // cooldown is set HERE rather than inside the sink, so the predictor
+      // replaying this same slice models it without a second copy of the rule.
+      const slots = K.slots;
+      if (slots) {
+        for (let id = AB_FIRST; id < slots.length; id++) {
+          const sl = slots[id];
+          if (ap & (1 << id)) sl.press = 1;
+          if (ctx.alive && sl.press && Flight.abilityOn(id, sl, ctx.owned, true, K.energy)) {
+            const d = Abilities.def(id);
+            // the price, paid at the ARM and inside the drain — so the predictor,
+            // which replays this same slice, models the pool exactly as the
+            // server spends it. Flight.spend re-arms the recharge delay, so an
+            // ability and a comet compete for one pool and one regen clock.
+            // spend's ANSWER is read, not discarded. It is unreachable today —
+            // abilityOn's `en >= d.en` and spend's `K.energy < n` are exact
+            // complements over the same unmutated K.energy — but they are two
+            // tests in two files, and a second priced ability arming between
+            // them, or any reordering, turns a silent `false` into a free arm.
+            if (d && d.en > 0 && !Flight.spend(K, d.en)) { sl.press = 0; continue; }
+            sl.cd = d ? d.cd | 0 : 0;
+            fx.ability(id);
+          }
+          sl.press = 0; // spent at the fire site, whether it armed or not: a
+                        // press a cooldown refused is not banked for later, and
+                        // a corpse's press dies with the corpse (the deliberate
+                        // opposite of claimPress, whose whole feature is that a
+                        // downed seat's click survives to ask for a deal)
+        }
+      }
     }
-    // AFTER the entries applied: the seat's comet WANT takes the LAST drained
-    // frame's rh — so a catch-up tick lands on the newest button state, and a
-    // tick with no frame leaves the want exactly where it was. The want is not
-    // the flag: the energy slice is what decides whether the pool can pay.
-    if (lastRh >= 0) b.cometWant = lastRh === 1;
+    // AFTER the entries applied: the HELD levels take the LAST drained frame's
+    // mask — so a catch-up tick lands on the newest button state, and a tick
+    // with no frame leaves them exactly where they were. A want is not a flag:
+    // the energy slice decides whether the pool can pay for the comet, and each
+    // ability's own record decides the rest.
+    if (lastAh >= 0) {
+      b.cometWant = (lastAh & AB_COMET) !== 0;
+      const slots = K.slots;
+      if (slots) for (let id = AB_FIRST; id < slots.length; id++) slots[id].want = (lastAh >> id) & 1;
+    }
   },
   // ---- THE ARM RULE, and the only copy -----------------------------------
   // running = the seat's settled or presented comet flag; en/enMax = the pool
@@ -973,6 +1051,52 @@ const Flight = {
   // expression it replaces was.
   cometOn(running, en, enMax, press) {
     return running ? en > 0 : (en > 0 && en >= enMax * ENARM && press);
+  },
+  // ---- THE GENERAL ARM RULE, and the only copy ---------------------------
+  // cometOn above answers ONE ability; this answers every other one, and it is
+  // written on day one for the reason cometOn was written on day 400: three
+  // consumers each carried their own copy of "may this seat arm?", and adding a
+  // term to the sim's copy alone left the HUD bright while the clicks did
+  // nothing. Every consumer calls THIS.
+  //
+  // TWO consumers today, not three: the drain slice — whose replay inside
+  // js/net.js's predictor is the second evaluation of that same call — and event
+  // mode's inputAbility. A HUD availability dim is the third and does NOT exist
+  // yet. Writing the rule before the second consumer rather than after the third
+  // is the whole point; naming an imaginary third is how the next reader
+  // concludes the rule is already load-bearing everywhere when it is not.
+  //
+  // `id` is an ABILITY ID and never a loadout position — the sim does not know
+  // what a slot index is. `slot` is that ability's own record; `owned` is the
+  // seat's rank vector, the ownership the sim already holds; `press` is the
+  // fresh edge off the `ap` mask.
+  //
+  // The catalog lookup is inside on purpose. Taking a `def` argument would let
+  // two consumers disagree about how a def is FOUND, which is the same class of
+  // divergence the function exists to end.
+  //
+  // Ownership: a record with a null `row` is available to every seat — that is
+  // every record today, because the shop has no ability rows yet (they land
+  // with the shop round). The clause is written now so the day a row appears it
+  // is a data edit, not a new gate in three places.
+  abilityOn(id, slot, owned, press, en) {
+    const A = window.Abilities;
+    if (!A) return false;
+    const d = A.def(id);
+    if (!d || !d.spawn) return false; // a mask bit the catalog does not name, or
+                                      // an id whose state lives elsewhere (fire's
+                                      // P.cool, comet's pool) — never armable here
+    if (!press) return false;         // press-armed; a hold-armed record declares
+                                      // itself the day one exists
+    if (!slot || slot.cd > 0) return false; // keyed by ability id, so moving the
+                                      // ability to another button cannot hand it a
+                                      // fresh cooldown — the loadout-swap dodge
+    // the ENERGY price, judged the way cometOn judges the comet's: the pool is
+    // GENERAL and this is simply its second consumer. A record with no `en`
+    // costs nothing and this clause is an exact no-op for it.
+    if (d.en > 0 && !((en || 0) >= d.en)) return false;
+    if (d.row === undefined || d.row === null) return true;
+    return (((owned && owned[d.row]) | 0) > 0);
   },
   // ---- pass B: the per-seat ENERGY body -----------------------------------
   // The one place a comet WANT becomes a comet. The input layer only ever
@@ -1060,6 +1184,12 @@ const Flight = {
     K.flame.y += (K.thrustAcc.y - K.flame.y) * FLAME_EASE;
     K.thrustAcc.x = K.thrustAcc.y = 0;
     if (K.cool > 0) K.cool--;
+    // ...and every ability slot's clocks with it, for the same reason and in
+    // the same place: a corpse's cooldown runs down too. Ability 0's cooldown
+    // IS K.cool above — it predates the record, is already hashed and already
+    // on the wire, and re-encoding it here would move 25 traces to change
+    // nothing.
+    if (window.Abilities) Abilities.tick(K);
   },
 };
 window.Flight = Flight; // the vm sandbox and the page both reach it here; a
@@ -1069,7 +1199,10 @@ window.Flight = Flight; // the vm sandbox and the page both reach it here; a
 // run every tick for every seat, and a per-seat object literal per pass would
 // be pure garbage. Neither is re-entrant and neither needs to be — a slice
 // call returns before the next one starts.
-const FLIGHT_CTX = { alive: true, terms: null, keyThrust: null };
+const FLIGHT_CTX = { alive: true, terms: null, keyThrust: null,
+  owned: null }; // the seat's RAW rank vector — the ownership Flight.abilityOn
+                 // judges an ability against. `terms` beside it is the DERIVED
+                 // view and cannot answer "does this seat own it at all".
 const FLIGHT_FX = {
   seat: 0,
   thud(x, y, gain) {
@@ -1078,6 +1211,13 @@ const FLIGHT_FX = {
     if (window.Encounter) Encounter.emit("thud", { x, y }, gain, this.seat);
   },
   fire() { fire(this.seat); }, // bullets, ids and the cap are the caller's
+  // ...and the general twin: the drain slice has already run the arm rule and
+  // paid the cooldown, so this sink only has to spawn. The predictor's sink
+  // does NOTHING here on purpose — js/net.js's speculative tracer is hardcoded
+  // to the standard round's ballistics, so cueing an ability through it would
+  // draw a normal bullet for a shot that is not one. A silent ability is honest
+  // until the tracer learns the catalog.
+  ability(id) { abilityFire(this.seat, id); },
 };
 const FLIGHT_FRAMES = []; // the drain's scratch list, reused per seat
 // THE frames-per-tick lid — ONE constant for the three places that must
@@ -1097,6 +1237,9 @@ const FRAMES_PER_TICK = 2;
 // permissively: a page with no encounter still has a full, working pool at
 // the slider's base numbers, exactly the contract keyThrustUnlocked() keeps.
 const termsOf = (s) => (window.Encounter && Encounter.termsFor ? Encounter.termsFor(s) : null);
+// ...and the RAW vector the ARM RULE judges ownership against. termsOf answers
+// with derived terms and cannot say whether a seat owns an ability at all.
+const ownedOf = (s) => (window.Encounter && Encounter.ownedFor ? Encounter.ownedFor(s) : null);
 // the seat's live cap: the base slider plus the seat's ENERGY CELL rank's
 // fraction of it. Re-derived from the RANK every time, never compounded, so
 // dragging ENMAX mid-run rescales every rank the player bought instead of
@@ -1548,13 +1691,36 @@ function inputAim(dx, dy) {
   aimImpulse(dx, dy);
 }
 function inputFire() {
-  if (INPUTMODE === "tick") { in0.acc.fp++; return; }
+  if (INPUTMODE === "tick") { in0.acc.ap |= AB_FIRE; return; }
   // event mode banks nothing, so the claim latch is set at the press itself —
   // the tick that follows reads it and step() clears it. Ahead of fire(),
   // which refuses a dead seat outright: the press has to count precisely in
   // the case the shot does not.
   in0.claimPress = 1;
   fire();
+}
+// inputFire's GENERAL twin — every ability from AB_FIRST up. Tick mode ORs the
+// bit into the accumulator and lets the drain do everything else, which is the
+// whole reason this works in net mode: the bit rides the banked frame upstream
+// and the SERVER arms the ability for whichever seat that socket holds. Setting
+// a module-level latch in the DOM handler instead — the lazy version — does
+// nothing at all in net mode, because the local sim never steps there.
+//
+// Event mode banks nothing, so it arms at the press itself, exactly as
+// inputFire fires at the press. It calls the SAME Flight.abilityOn, so the two
+// modes cannot disagree about whether a press arms.
+function inputAbility(id) {
+  if (!Abilities.exists(id) || id < AB_FIRST) return;
+  if (INPUTMODE === "tick") { in0.acc.ap |= Abilities.bit(id); return; }
+  const P = players[0];
+  const sl = Abilities.slot(P, id);
+  if (!seatAlive(0)) return;
+  if (!Flight.abilityOn(id, sl, ownedOf(0), true, P.energy)) return;
+  const d = Abilities.def(id);
+  if (d && d.en > 0 && !Flight.spend(P, d.en)) return; // spend's answer is read here
+                                                       // too — see the drain's note
+  sl.cd = d ? d.cd | 0 : 0;
+  abilityFire(0, id);
 }
 function inputCursor(dx, dy) {
   moveLockedCursor(dx, dy);
@@ -1569,7 +1735,9 @@ function dropTickInput() {
   for (let s = 0; s < players.length; s++) {
     const b = players[s].input;
     b.acc.tx = b.acc.ty = b.acc.ax = b.acc.ay = 0;
-    b.acc.fp = 0;
+    b.acc.ap = 0; // the whole press mask, and for the accumulator's own reason:
+                  // every ability's edge is discarded with the ring it would
+                  // have ridden in on
     b.acc.n = 0;
     b.fireHeld = s === 0 ? G.leftHeld : false; // only seat 0 has a local mouse
     b.claimPress = 0; // a press made under a frozen overlay is discarded with the
@@ -1577,6 +1745,9 @@ function dropTickInput() {
                       // not a request to be dealt back into the field
     b.cometPress = 0; // ...and so is a comet press: the edge must not survive
                       // to the first unfrozen tick (transport only, like the rest)
+    if (window.Abilities) Abilities.clearPresses(players[s]); // ...and every other
+                      // ability's latched press with them. The cooldowns stay:
+                      // a shop visit is not a refund
     b.ring.length = 0;
   }
 }
@@ -1604,11 +1775,14 @@ function bankTickInput() {
   const { x: kx, y: ky } = keyDirection();
   const w = lcurWorld();
   in0.ring.push({ tx: in0.acc.tx, ty: in0.acc.ty, ax: in0.acc.ax, ay: in0.acc.ay,
-                  cx: w.x, cy: w.y, fp: in0.acc.fp, fh: G.leftHeld, kx, ky,
-                  rh: G.rightHeld ? 1 : 0 }); // the comet bit — right-hold, as a
-                  // per-tick record the sim drains; step() never reads G.rightHeld
+                  cx: w.x, cy: w.y, ap: in0.acc.ap, ah: heldAbilityMask(), kx, ky });
+                  // TWO MASKS and nothing else: `ap` is the tick's accumulated
+                  // press edges, `ah` the buttons' live LEVELS read at the bank.
+                  // The three named booleans they replaced — fp, fh, rh — are
+                  // gone from the frame entirely; step() still never reads
+                  // G.leftHeld or G.rightHeld, it reads what was banked.
   in0.acc.tx = in0.acc.ty = in0.acc.ax = in0.acc.ay = 0;
-  in0.acc.fp = 0;
+  in0.acc.ap = 0;
   in0.acc.n = 0;
 }
 // The one producer API for every non-DOM seat: append a pre-formed banked
@@ -1627,9 +1801,13 @@ function pushInputFrame(seat, f) {
     return false;
   }
   const rec = { tx: f.tx, ty: f.ty, ax: f.ax, ay: f.ay,
-    cx: f.cx, cy: f.cy, fp: f.fp, fh: f.fh, kx: f.kx, ky: f.ky,
-    rh: f.rh ? 1 : 0 }; // normalized, default 0 — an old frame without the
-                         // comet bit decodes as comet-off, never undefined
+    cx: f.cx, cy: f.cy, kx: f.kx, ky: f.ky,
+    // the two ability masks, through the ONE normalizer: a finite check and an
+    // UPPER LID, never `+f.ap || 0`, which admits Infinity (the defect bf2c961
+    // fixed). Default 0 — a frame carrying no masks decodes as no ability
+    // pressed and none held, never undefined. That is the old rh normalizer's
+    // own contract, generalized to every ability at once.
+    ap: Abilities.mask(f.ap), ah: Abilities.mask(f.ah) };
   // vt (phase 15) copies only when PRESENT and integer — ABSENT is the
   // default, so a frame without a view tick stays byte-identical to every
   // committed fixture's F() record and earns a zero rebate at the drain
@@ -1665,7 +1843,11 @@ function drainTickInput() {
     // respawn flow revives the seat. Read ONCE per pass, as before: liveness
     // only changes in encounter code, which runs after all three passes.
     FLIGHT_CTX.alive = seatAlive(s);
-    FLIGHT_CTX.terms = null; // the drain derives nothing from ranks
+    FLIGHT_CTX.terms = null; // the drain derives nothing from ranks...
+    FLIGHT_CTX.owned = ownedOf(s); // ...but the ARM RULE judges ownership against
+                     // the seat's own raw vector, which is a rank test and not a
+                     // formula. Per seat, so one seat's purchase can never arm
+                     // another's ability
     FLIGHT_CTX.keyThrust = keyThrustUnlocked; // the gate, still evaluated per frame
     FLIGHT_FX.seat = s;
     Flight.drainSlice(players[s], FLIGHT_FRAMES, FLIGHT_CTX, FLIGHT_FX);
@@ -1963,6 +2145,80 @@ function fire(seat = 0) {
                                           // byte-identical cue outcome) and the wire needs the point
 }
 
+// The general spawn, and fire()'s twin. It is reached ONLY through the drain
+// slice's sink (or event mode's dispatcher), which has already run the ONE arm
+// rule and paid the ability's cooldown, so every gate here is a FIELD gate —
+// the overlay, the corpse, the bullet cap, the direction — and never a second
+// copy of "may this seat arm?".
+//
+// Rule 2 of the plan holds: no new damage call site. Every round it spawns is
+// an ordinary bullet in G.bullets, swept by the encounter's existing pass, so
+// BULLET_HASH does not grow and the wire carries it as {id, x, y, o} like any
+// other. Rule 4 holds too: the remote look is declared here, and it is the
+// shipped "fire" event — direction and speed replicate for free through the
+// round's own position, which is the one thing the wire is generous about.
+//
+// A cooldown paid for a shot the field then refuses is deliberate. The
+// predictor models the arm and the cooldown from the same slice and cannot know
+// about a frozen overlay or a full bullet cap, so charging at the ARM is what
+// keeps the two sides agreeing about K.slots[id].cd.
+function abilityFire(seat, id) {
+  if (window.Encounter && Encounter.frozen()) return; // overlays own the field
+  if (!seatAlive(seat)) return;
+  const P = players[seat];
+  const d = Abilities.def(id);
+  const sp = d && d.spawn;
+  if (!sp) return;
+  const dir = fireDirFor(seat);
+  if (!dir) return; // at rest and never aimed — no direction exists
+  let mine = 0;
+  for (const b of G.bullets) if (bulletSeat(b) === seat) mine++;
+  const base = Math.atan2(dir.y, dir.x);
+  let spawned = 0;
+  for (let i = 0; i < sp.n; i++) {
+    if (mine + spawned >= BMAX) break; // the FIRING seat's own cap, owner-scoped
+                                       // exactly as fire()'s is
+    // the cone: one round sits on the aim, and a wider pattern spreads evenly
+    // about it. `spread` is 0 on every record today, so this is an exact ×1.
+    const off = sp.n > 1 ? (i / (sp.n - 1) - 0.5) * sp.spread : 0;
+    const a = base + off;
+    const spd = BSPEED * sp.spd; // the record scales the BSPEED slider, so that
+                                 // one tuner still moves every ability together.
+                                 // BMODE is deliberately NOT read here: a rifle's
+                                 // muzzle speed is its own record's, not the basic
+                                 // gun's cq-scale/newtonian arithmetic, and a
+                                 // record that wants that inheritance will say so
+    G.bullets.push({ id: window.Encounter ? Encounter.nextId() : 0,
+                     x: P.ship.x, y: P.ship.y, px: P.ship.x, py: P.ship.y,
+                     vx: Math.cos(a) * spd, vy: Math.sin(a) * spd,
+                     ox: P.ship.x, oy: P.ship.y, // the muzzle — render-only, and
+                                    // out of BULLET_HASH like every other round's
+                     r: sp.r, dmg: sp.dmg, owner: seat, dead: false, spent: false,
+                     ttl: sp.ttl });
+    spawned++;
+  }
+  // NO LAG REBATE, and it is a stated gap rather than an oversight. fire() calls
+  // Encounter.rebate to advance a round along its own path by the frame's latched
+  // view-tick delta. An ability's rebate is a per-primitive lag POLICY — a
+  // hitscan rewinds, a fused round does not — and that contract lands with the
+  // round that gives each primitive one. Until then an ability's round is
+  // uncompensated, exactly as the comet is.
+  //   AND NOTE WHAT A REFUSAL HERE COSTS. The drain already paid the whole
+  // price before this function ran — the cooldown AND the energy — so a seat
+  // refused here (frozen, dead, capped out, or with no aim direction) loses 45
+  // ticks, 18 energy and the recharge delay, spawns nothing, and makes NO SOUND,
+  // because the `fire` event below is skipped with the spawn. The player sees
+  // the bar drop and hears nothing.
+  //   It is deterministic on both surfaces, so prediction parity holds: this is
+  // a FEEL defect, not a desync, and it is the price of letting the predictor
+  // model the arm with no second copy of the rule. Closing it means moving the
+  // refusal ladder above the payment, which needs the predictor to be able to
+  // answer "is this seat capped out?" — that is the round that gives each
+  // primitive its own refusal and lag contract, not this one.
+  if (!spawned) return; // a capped-out seat makes no sound either
+  if (window.Encounter) Encounter.emit("fire", P.ship, undefined, seat);
+}
+
 // ---- simulation step (one ~16.7ms update) --------------------------------
 // simTick counts every step() call for the run's whole life — the input
 // recorder orders events against it, and E.waveTick cannot serve because it
@@ -1980,7 +2236,7 @@ function keyDirection() {
   // changes nothing and the non-inverted role swap keeps its exact contract.
   // Client-side only: in tick mode this direction is BANKED (kx, ky) and the
   // sim drains it from the ring — the comet's sim half still arrives through
-  // rh alone, and step() still never reads G.rightHeld.
+  // the ability masks alone, and step() still never reads G.rightHeld.
   if ((aiming() || G.rightHeld) && G.keys.size) {
     for (const c of G.keys) { x += KEY_AIM[c][0]; y += KEY_AIM[c][1]; }
     const m = Math.hypot(x, y);
@@ -2009,6 +2265,7 @@ function energyStep() {
     // purchase can never speed another's recharge or raise another's cap
     FLIGHT_CTX.alive = seatAlive(s);
     FLIGHT_CTX.terms = termsOf(s);
+    FLIGHT_CTX.owned = null; // the energy pass runs no arm rule
     FLIGHT_CTX.keyThrust = null; // the energy pass reads no input gate
     Flight.energySlice(players[s], FLIGHT_CTX);
   }
@@ -2042,6 +2299,7 @@ function step() {
   for (let si = 0; si < players.length; si++) {
     FLIGHT_CTX.alive = true; // unread by the integrate slice — stated, not implied
     FLIGHT_CTX.terms = termsOf(si); // the seat's OWN AFTERBURNER rank feeds the cap
+    FLIGHT_CTX.owned = null; // ...and the integrate pass runs no arm rule either
     FLIGHT_CTX.keyThrust = null;
     FLIGHT_FX.seat = si;
     Flight.integrateSlice(players[si], FLIGHT_CTX, FLIGHT_FX);
@@ -2108,7 +2366,15 @@ function step() {
 // other per-seat walk in this file; a press is worth exactly one tick, so an
 // unread one is dropped rather than carried into a tick its player never made.
 function clearClaimPress() {
-  for (let s = 0; s < players.length; s++) players[s].input.claimPress = 0;
+  for (let s = 0; s < players.length; s++) {
+    players[s].input.claimPress = 0;
+    // ...and any ability press the drain did not reach. The drain spends every
+    // one it walks, so this is the frameless tick's residue and nothing else —
+    // stated rather than assumed, because `press` is a HASHED field and a value
+    // that leaked across a tick boundary would enter the guarded fold and re-key
+    // every trace that touched an ability.
+    if (window.Abilities) Abilities.clearPresses(players[s]);
+  }
 }
 
 // ---- the client tick boundary ---------------------------------------------
@@ -3669,31 +3935,27 @@ function requestLock(pauseOnFailure = true, preferRaw = true) {
 function setRightHeld(held) {
   const wasMouseAim = cursorAim() && aiming();
   G.rightHeld = held;
-  // seat 0's comet WANT, synced at the client boundary: event mode has no ring
-  // to carry rh (this IS its comet path, mirroring how event mode bypasses the
-  // ring everywhere), and in tick mode the very next drained frame re-states it
-  // from the banked rh — the sim itself still never reads G.rightHeld. It is
-  // the want and not the flag: the button asks, energyStep answers on the next
-  // tick, and a seat with an empty pool holds this down for nothing.
+  // seat 0's comet WANT, synced at the client boundary. In tick mode the very
+  // next drained frame re-states it from bit 1 of the banked `ah` mask; event
+  // mode has no ring, so this write IS its level. The sim itself still never
+  // reads G.rightHeld. It is the want and not the flag: the button asks,
+  // energySlice answers on the next tick, and a seat with an empty pool holds
+  // this down for nothing.
   // physically seat 0: the DOM listener layer is a SEAT-0-ONLY producer (one
   // document, one pointer lock — see in0). In net mode the banked frame goes
   // upstream seat-agnostic and the SERVER binds it to this socket's seat, so
   // this write is never the thing that decides whose comet turns on.
-  // The PRESS EDGE latches at the DOM transition, in BOTH solo modes: the
-  // want-write below runs at the DOM edge too, so in live tick mode the want
-  // is already true when the banked rh: 1 frame drains and the drain walk
-  // sees no rise — this latch is what carries the edge there, and it cannot
-  // double-latch because the same write that masks the drain edge is the
-  // write that gates this transition.
-  // SOLO ONLY: this DOM latch serves the LOCAL sim, whose energySlice consumes
-  // it next tick. In net mode frameBody runs Net.clientTick() and the local
-  // sim never steps, so nothing here would ever spend it — the banked rh frame
-  // carries the edge upstream and the SERVER's drain walk derives the press —
-  // and a latch set now would sit stranded until some later solo tick spent
-  // it against a click made long before. The want-write below stays
-  // unconditional: net mode reads it at the boundary (the cursor, the banked
-  // rh, carryLocal's seed).
-  if (!!held && !players[0].input.cometWant && !(window.Net && Net.active())) players[0].input.cometPress = 1;
+  // THE PRESS EDGE, and it is one line now. In tick mode — solo and net alike —
+  // it ORs the comet's bit into the tick's press mask and the banked frame
+  // carries it; the sim's drain reads the bit rather than reconstructing a rise
+  // out of the held level, so the prevRh walk, its hardSnap re-seed and the
+  // solo-only DOM latch that used to paper over net mode are all deleted.
+  // Event mode banks nothing, which is why its latch survives: that IS its
+  // comet path, mirroring how event mode bypasses the ring everywhere.
+  if (held) {
+    if (INPUTMODE === "tick") in0.acc.ap |= AB_COMET;
+    else if (!players[0].input.cometWant) players[0].input.cometPress = 1;
+  }
   players[0].input.cometWant = !!held;
   syncCursor();
   if (wasMouseAim && !aiming()) snapshotMouseAim();
@@ -3793,9 +4055,13 @@ canvas.addEventListener("mousedown", (e) => {
       else if (pp.panel === "board" && e.button === 0 && window.Encounter) Encounter.boardClick(pp.x, pp.y);
       return;
     }
-    // The claim card's name box is a FIELD target, not a gutter one, so it is
-    // tested here rather than through panelAt — same drawn cursor, same press,
-    // one transform further in. It is tested BEFORE the pointer-lock re-arm and
+    // The identity affordance — the claim card's name box and the ship strip
+    // beside it — is a FIELD target, not a gutter one, so it is tested here
+    // rather than through panelAt — same drawn cursor, same press, one
+    // transform further in. ONE call, not two: nameCardClick tests the strip
+    // first and the box second, so the router has one ordering to keep honest
+    // and the two controls can never end up on opposite sides of the fire path.
+    // It is tested BEFORE the pointer-lock re-arm and
     // before inputFire() below, because both of those used to swallow it: a
     // press aimed at the old DOM box became the seat CLAIM and took the card
     // away.
@@ -3877,6 +4143,27 @@ document.addEventListener("keydown", (e) => {
   // held; this return keeps new ones out for the whole visit.
   if (window.Encounter && Encounter.frozen()) return;
   if (!G.running) return; // the ring only exists in flight, same as the right button
+  // THE BENCH BINDINGS, between the running gate and the aim ring so they
+  // inherit every guard above for free — the typing gate, Escape, the frozen
+  // overlay and the running test. Both branches MUST return before G.keys.add
+  // below: KEY_AIM has no entry for these codes and keyDirection() would read
+  // undefined.
+  if (e.code === "Space") {
+    e.preventDefault(); // Space scrolls the page
+    if (e.repeat) return; // auto-repeat is not a press
+    inputAbility(SELECTED_ABILITY);
+    heldAbilityKeys.set(e.code, SELECTED_ABILITY); // ...and the HELD level, so a
+                       // record that arms on a hold reads the button honestly
+    return;
+  }
+  if (e.code.startsWith("Digit")) {
+    const n = Number(e.code.slice(5));
+    // 1 selects the first BENCH ability, so the two shipped ones keep their own
+    // buttons and the digits count the bench. Selection is client UI: it changes
+    // which bit Space sets and nothing else, and it may change mid-flight.
+    if (n >= 1 && Abilities.exists(AB_FIRST + n - 1)) SELECTED_ABILITY = AB_FIRST + n - 1;
+    return;
+  }
   const d = KEY_AIM[e.code];
   if (!d) return;
   G.keys.add(e.code);
@@ -3889,7 +4176,7 @@ document.addEventListener("keydown", (e) => {
   P.aimOff.y = (d[1] / m) * AIM_R;
   P.aimed = true;
 });
-document.addEventListener("keyup", (e) => G.keys.delete(e.code));
+document.addEventListener("keyup", (e) => { G.keys.delete(e.code); heldAbilityKeys.delete(e.code); });
 // ...and NOT guarded by typingName: a key released while the editor is open must
 // still leave G.keys, or a key held before the click stays held forever. The
 // keydown guard is what keeps anything from entering that set in the first
@@ -4571,6 +4858,13 @@ function hashShip() {
     h.num(P.thrustAcc.x); h.num(P.thrustAcc.y);
     h.num(P.flame.x); h.num(P.flame.y);
   }
+  // the ABILITY SLOT record (P5), behind its guarded zero-default fold and
+  // OUTSIDE the per-seat loop — the charter rule's idiom and the README's
+  // collision trap in one line: entered ONCE for the whole room, and once
+  // entered EVERY seat folds, so "seat 1 armed" and "seat 0 armed" can never
+  // hash alike. At rest it folds ZERO BYTES, which is what makes an ability
+  // nobody arms cost no trace. See js/abilities.js's hashInto for the encoding.
+  if (window.Abilities) Abilities.hashInto(h, players);
   return h;
 }
 function hashBullets() {
@@ -4675,7 +4969,7 @@ Object.assign(window.__test, {
   pushInputFrame,
   thrustImpulse,
   // the claim press, written where the drain writes it. Not a second path:
-  // this is the SAME latch a frame's `fp` sets, so a check that presses here
+  // this is the SAME latch a frame's `ap` fire bit sets, so a check that presses here
   // and a client that clicks reach the encounter's respawn loop identically.
   // It exists because advance() drives ticks with no frames at all, and the
   // press has to be assertable on ONE named tick.
