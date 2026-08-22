@@ -2656,8 +2656,18 @@ function woundAt(x, y, seat, b, k) {
 // VIOLET: clay is attack (bullets, the crown, the rosette) and cyan is the
 // radar's sensor, and an identity that borrowed either would be answering a
 // question the palette already answers.
+//   `glow` IS NOT A `C` COLOUR, and hull 0's is the reason to say so out loud.
+// It feeds js/fx.js's light layer, and that layer burns in its OWN palette —
+// PAL, "the HOT palette, warmer and brighter than the flat pass's C, because
+// light reads as light only when it sits above the ink it surrounds". The ship
+// halo has always burned PAL.clay (#ff8a4a), never C.clay (#d97757), so hull 0
+// carries the hot byte LITERALLY: js/game.js cannot see PAL, and the alarm in
+// server/names.test.mjs is what keeps the two copies honest. Writing C.clay
+// here instead reads correct and is not — it quietly cools the default ship's
+// biggest mark while the comet halo and the engine flame beside it, which still
+// read PAL.clay, stay hot. That shipped once; the pin exists so it cannot twice.
 const HULLS = [
-  { id: 0, label: "DART",   plate: C.bright, glow: C.clay,   mark: C.clay, sides: 0, turn: 0,             ring: 4.4, pips: 8, dot: 1.2 },
+  { id: 0, label: "DART",   plate: C.bright, glow: "#ff8a4a", mark: C.clay, sides: 0, turn: 0,             ring: 4.4, pips: 8, dot: 1.2 },
   { id: 1, label: "WEDGE",  plate: "#7fb2f0", glow: "#7fb2f0", mark: C.clay, sides: 3, turn: Math.PI / 2,  ring: 2.2, pips: 3, dot: 1.1 },
   { id: 2, label: "NEEDLE", plate: "#8fd18a", glow: "#8fd18a", mark: C.clay, sides: 4, turn: -Math.PI / 2, ring: 3.6, pips: 4, dot: 1.2 },
   { id: 3, label: "DELTA",  plate: "#c99adf", glow: "#c99adf", mark: C.clay, sides: 3, turn: -Math.PI / 2, ring: 2.2, pips: 3, dot: 1.1 },
@@ -4030,6 +4040,19 @@ function pause() {
   // resume click is the one gesture that re-arms it (one banner per resume)
   if ((mouseMode() || lockedMode()) && locked() && typeof document.exitPointerLock === "function") document.exitPointerLock();
   G.keys.clear(); // keyups can vanish the same way
+  heldAbilityKeys.clear(); // ...and the ability keys held on the SAME keyboard,
+                           // for the SAME reason. This map is the `ah` mask's
+                           // only source, so an entry a vanished keyup left
+                           // behind ORs its bit into every banked frame for the
+                           // rest of the session — a held level nobody is
+                           // holding. The server already defends the room
+                           // against that shape (neutralizeHeldBank, then
+                           // releaseStalledSeats), but a client that
+                           // re-asserts the bit the moment the neutral frame
+                           // lands just makes the release fire forever. Inert
+                           // while no shipped ability arms on a hold; the day
+                           // one does, this line is what stops a paused player
+                           // from resuming as a stuck turret.
   clearTickInput(); // a banked delta must never survive a pause and land on resume
   stopLoop();
   syncTuner();

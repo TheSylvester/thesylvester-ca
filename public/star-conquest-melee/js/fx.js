@@ -542,9 +542,15 @@
     // surviving plate pixels on all three coloured hulls with the layer up
     // against 393-542 with it down: the bloom eats the flat colour whole. The
     // halo is the biggest mark on the screen, so it is where the colour keeps.
-    //   DART's glow is C.clay — the warm burn every ship has always had — so a
-    // build with nobody having picked anything paints exactly what it did
-    // before, and this suite's sixty pixel legs never moved.
+    //   DART's glow is PAL.clay's own byte, #ff8a4a — the warm burn every ship
+    // has always had — so a build with nobody having picked anything paints
+    // exactly what it did before. It has to be that byte and not C.clay: this
+    // layer is the HOT palette (see PAL above), C is the flat pass's ink, and
+    // the two clays are different colours. An earlier pass wrote C.clay here
+    // and cooled every default ship's biggest mark while the comet halo and the
+    // engine flame below — still PAL.clay — stayed hot. The sixty pixel legs in
+    // THIS suite did not notice, because none of them samples the halo's hue;
+    // server/names.test.mjs pins the two bytes equal instead.
     const health = window.Encounter && Encounter.seatHealth;
     for (const P of players) {
       // a downed seat draws a WRECK, not a ship — the same answer drawShip
