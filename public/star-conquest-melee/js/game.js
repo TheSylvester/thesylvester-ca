@@ -2618,16 +2618,94 @@ function woundAt(x, y, seat, b, k) {
 // hit takes this path and only this path, so an undamaged ship paints the
 // bytes it has always painted and nothing that probes one can see any of the
 // work above.
-function drawHull(x, y, tint) {
-  ctx.fillStyle = tint || C.bright;
+// THE HULL TABLE — one row per flyable ship, keyed by the skin id the PLAYER
+// chose for itself on the claim card (R2's strip, js/encounter.js). Identity is
+// a value the player owns and NOT a function of the seat index: two pilots may
+// fly the same hull, that is legal by ruling, and there is no collision rule to
+// look for here.
+//   Adding a hull is ADDING A ROW to this table and a glyph beside it in the
+// picker's SKINGLYPHS. The id set and the labels are written down exactly ONCE,
+// here; the picker DERIVES both from this table rather than restating them, so
+// the "two copies of one rule" disease cannot start between the strip and the
+// field. server/names.test.mjs pins this table's row count, the glyph table's
+// row count and SKIN_COUNT on both sides of the wire against each other, so a
+// row added in one place and forgotten in another reds the gate.
+//   COSMETIC AND HASH-FREE through this milestone. Nothing in this table
+// reaches the sim, the snapshot or a trace: flight, hull points and weapons are
+// identical for every row. A stats block hangs off the same id in a
+// post-milestone round, and pays a recapture then like any other sim change.
+//   HULL 0 IS THE INCUMBENT, byte for byte — the circle of C.bright with the
+// eight-dot clay rosette this file has drawn since the beginning. A seat with
+// no pick, a seat nobody is flying and a build with no Net at all all resolve
+// to it, which is why every pixel baseline this repository already carries
+// stayed green through this round with nothing re-captured.
+//   A ROW IS: `plate` and `mark`, the two inks on the flat layer; `glow`, the
+// colour js/fx.js burns this hull's halo in — see below, it is the channel that
+// actually carries at range; `sides`/`turn`, the plate's
+// silhouette — 0 is the circle, any other value an N-gon inscribed in the SAME
+// SHIP_R at `turn` radians, so no hull buys a bigger or a smaller ship than
+// another; and `ring`/`pips`/`dot`, the rosette that sits inside it. The
+// rosette shrinks with the plate's INRADIUS and not with its radius: a triangle
+// inscribed in SHIP_R only has 3.5 px of room to its own edge, and the eight
+// dots at 4.4 the circle carries would spill straight off three sides of it.
+//   TWO CHANNELS, on purpose. Colour is the primary one because at a 14 px ship
+// it is the only one that survives a glance across a four-way brawl, and the
+// silhouette is the secondary one so the four stay attributable in a greyscale
+// capture, to a colour-blind reader, and to a player whose ship is half behind
+// somebody else's. The three added plates are deliberately BLUE, GREEN and
+// VIOLET: clay is attack (bullets, the crown, the rosette) and cyan is the
+// radar's sensor, and an identity that borrowed either would be answering a
+// question the palette already answers.
+const HULLS = [
+  { id: 0, label: "DART",   plate: C.bright, glow: C.clay,   mark: C.clay, sides: 0, turn: 0,             ring: 4.4, pips: 8, dot: 1.2 },
+  { id: 1, label: "WEDGE",  plate: "#7fb2f0", glow: "#7fb2f0", mark: C.clay, sides: 3, turn: Math.PI / 2,  ring: 2.2, pips: 3, dot: 1.1 },
+  { id: 2, label: "NEEDLE", plate: "#8fd18a", glow: "#8fd18a", mark: C.clay, sides: 4, turn: -Math.PI / 2, ring: 3.6, pips: 4, dot: 1.2 },
+  { id: 3, label: "DELTA",  plate: "#c99adf", glow: "#c99adf", mark: C.clay, sides: 3, turn: -Math.PI / 2, ring: 2.2, pips: 3, dot: 1.1 },
+];
+// The hull a SEAT is flying, as a row of the table above. R2's roster is the
+// source and the only one: Net.seatSkin(seat) answers the id that seat's pilot
+// chose, and NULL for a seat nobody is flying — which is not the same sentence
+// as hull 0. A null, an id outside the table and a build with no Net at all all
+// fall back to HULLS[0], so a screen never has a ship with no hull to draw.
+//   NEVER `Net.seatSkin(seat) && ...` and never `id || 0`: hull 0 is FALSY, and
+// both idioms would refuse to ever adopt DART. The test is for an INTEGER in
+// range, which is the only test that tells a chosen 0 from an absent one.
+//   A plain read with no allocation — it is on the per-seat per-frame path.
+function hullFor(seat) {
+  const id = window.Net && Net.seatSkin ? Net.seatSkin(seat) : null;
+  if (!Number.isInteger(id) || id < 0 || id >= HULLS.length) return HULLS[0];
+  return HULLS[id];
+}
+// The plate's OUTLINE. sides 0 draws the circle this game has always drawn —
+// the same one call, so hull 0 paints the bytes it always painted — and any
+// other value draws an N-gon inscribed in the SAME SHIP_R at `turn` radians.
+// The silhouette is identity and never reach: every hull keeps one footprint,
+// so no row of the table can buy a bigger or smaller ship than another.
+function platePath(x, y, r, K) {
   ctx.beginPath();
-  ctx.arc(x, y, SHIP_R, 0, Math.PI * 2);
+  if (!K.sides) { ctx.arc(x, y, r, 0, Math.PI * 2); return; }
+  for (let i = 0; i < K.sides; i++) {
+    const a = K.turn + (i / K.sides) * Math.PI * 2;
+    const px = x + Math.cos(a) * r;
+    const py = y + Math.sin(a) * r;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+}
+function drawHull(x, y, K, tint) {
+  const H = K || HULLS[0]; // a caller with no row: the incumbent, never a crash
+  ctx.fillStyle = tint || H.plate; // tint is the DAMAGE override and stays free
+                                   // while SHOW_HULL_DAMAGE is off, so the
+                                   // hull's own plate is what a living ship
+                                   // paints today
+  platePath(x, y, SHIP_R, H);
   ctx.fill();
-  ctx.fillStyle = C.clay; // the rosette ring
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2;
+  ctx.fillStyle = H.mark; // the rosette ring, sized to THIS plate's room
+  for (let i = 0; i < H.pips; i++) {
+    const a = (i / H.pips) * Math.PI * 2;
     ctx.beginPath();
-    ctx.arc(x + Math.cos(a) * 4.4, y + Math.sin(a) * 4.4, 1.2, 0, Math.PI * 2);
+    ctx.arc(x + Math.cos(a) * H.ring, y + Math.sin(a) * H.ring, H.dot, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.beginPath();
@@ -2639,8 +2717,8 @@ function drawHull(x, y, tint) {
 // would read as an anti-aliased gradient instead of battle damage. A full hull
 // returns the untouched white by construction, so the pristine draw and the
 // flashing-but-unhurt draw agree about what an intact plate looks like.
-function hullTint(frac) {
-  if (frac >= 1) return C.bright;
+function hullTint(frac, K) {
+  if (frac >= 1) return (K || HULLS[0]).plate;
   if (frac > 0.5) return "#b6bbc7";
   if (frac > 0.25) return "#949aa8";
   return "#7b8290"; // a hull this far gone has nothing bright left on it
@@ -2648,6 +2726,14 @@ function hullTint(frac) {
 // A damaged, living hull: a chewed rim charred along its whole edge, a rosette
 // whose sockets go dark as the hull points go, and — on the last quarter — an
 // ember still burning in the first wound.
+//   THIS PATH CARRIES NO HULL IDENTITY, and that is a deliberate stop rather
+// than an oversight: the whole look is PARKED (SHOW_HULL_DAMAGE is false), so a
+// living seat never reaches it, and re-cutting the chewed silhouette and the
+// dark-socket gauge for four plate shapes would be building the identity half
+// of a look nobody has decided to bring back. The plate's COLOUR does follow
+// the hull — hullTint returns the row's own plate at a full hull and darkens
+// from there — so the day the flag flips the ramp already starts in the right
+// place, and the geometry is what takes a row read then.
 function drawDamagedHull(x, y, H, seat, tint) {
   const frac = Math.max(0, Math.min(1, H.hull / Math.max(1, H.hullMax)));
   const lost = Math.min(6, Math.max(1, H.hullMax - H.hull)); // six notches is
@@ -2795,8 +2881,12 @@ let SHOW_HULL_DAMAGE = false;
 // lives in the loop and nowhere else: an UNSEATED seat never reaches this
 // function, so an `absent` record here would be a caller's bug, not a case.
 function drawShip(x, y, seat, H) {
+  // ...and WHICH HULL this seat is flying, read ONCE per seat per frame. The
+  // seat is already a parameter — the render loop has always handed it in for
+  // the damage hashes — so identity needed no new thread through this call.
+  const K = hullFor(seat);
   // no record to read, or an untouched hull: the original draw, untouched
-  if (!H || (H.hull >= H.hullMax && H.flash <= 0)) { drawHull(x, y); return; }
+  if (!H || (H.hull >= H.hullMax && H.flash <= 0)) { drawHull(x, y, K); return; }
   if (H.hull <= 0) { drawWreck(x, y, H, seat); return; }
   let hx = x;
   let hy = y;
@@ -2814,11 +2904,48 @@ function drawShip(x, y, seat, H) {
   }
   // With the look parked the tint stays the untouched white, so a hurt hull
   // paints the SAME bytes the pristine draw paints — that is the whole ask.
-  const tint = H.flash > 13 || !SHOW_HULL_DAMAGE
-    ? C.bright
-    : hullTint(H.hull / Math.max(1, H.hullMax));
-  if (!SHOW_HULL_DAMAGE || H.hull >= H.hullMax) drawHull(hx, hy, tint); // flashing, but not yet hurt
+  const tint = H.flash > 13
+    ? C.bright                    // the kick flashes WHITE on every hull: it is
+                                  // an impact cue, not a name
+    : !SHOW_HULL_DAMAGE
+      ? null                      // the look is parked, so no override at all
+                                  // and the hull's own plate stands
+      : hullTint(H.hull / Math.max(1, H.hullMax), K);
+  if (!SHOW_HULL_DAMAGE || H.hull >= H.hullMax) drawHull(hx, hy, K, tint); // flashing, but not yet hurt
   else drawDamagedHull(hx, hy, H, seat, tint);
+}
+
+// THE FIELD CROWN — who LEADS, over the leader's own ship.
+//   TWO QUESTIONS, TWO CHANNELS, and this marker keeps them apart exactly as
+// the board already does. "Which one is you" is answered in C.bright: on the
+// board by the local row's name and its lowercase "you" caption, and on the
+// field by the camera, which follows this client's ship and nothing else.
+// "Who leads" is answered in C.clay, here and on the board's crowned row, and
+// it is never the identity channel either: the HULL says WHO a ship is, so the
+// crown adds a standing to a ship that is already named and never has to carry
+// the name itself. Three questions, three answers, no two on one channel.
+//   The seat it sits over comes from Encounter.kingSeat() — the SAME call the
+// board's crowned row reads, so the two can never disagree. That means it
+// ranks by `best`, the high-water score: a crown that ranked by the live score
+// would come off every leader for the whole of their respawn timer.
+//   It is drawn AFTER the ship, over the plate's own band and clear of it, so
+// no hull's silhouette is cut and the crown is legible on all four plates.
+function drawFieldCrown(x, y) {
+  const cy = y - SHIP_R - 4.5; // clear of the widest plate, and close enough to
+                               // read as this ship's and not the next one's
+  const w = 5;
+  const h = 4;
+  ctx.fillStyle = C.clay;
+  ctx.beginPath();
+  ctx.moveTo(x - w, cy + h);
+  ctx.lineTo(x - w, cy - h);
+  ctx.lineTo(x - w / 2, cy);
+  ctx.lineTo(x, cy - h);
+  ctx.lineTo(x + w / 2, cy);
+  ctx.lineTo(x + w, cy - h);
+  ctx.lineTo(x + w, cy + h);
+  ctx.closePath();
+  ctx.fill();
 }
 
 function drawAim() {
@@ -3624,6 +3751,12 @@ function render() {
   ctx.strokeRect(0.5, 0.5, WW - 1, WH - 1); // the world border
   if (window.Encounter) Encounter.draw(ctx, FRAME); // enemies, orbs, telegraphs — under the camera, below the ship
   drawFlame();
+  // ...and WHO LEADS, read ONCE for the whole frame rather than per seat: it
+  // sorts the seat records, and asking it four times a frame would sort them
+  // four times to answer the same question. -1 whenever a build has no
+  // encounter loaded (the headless sim host is one) and whenever nobody has
+  // scored yet, and -1 matches no seat id, so the crown simply does not draw.
+  const fieldKing = window.Encounter && Encounter.kingSeat ? Encounter.kingSeat() : -1;
   // every seat's ship draws; only seat 0 (the local pilot) wears the flame,
   // and a comet-mode seat wears its glow under the hull
   for (const P of players) {
@@ -3660,6 +3793,12 @@ function render() {
     drawShip(vp.x, vp.y, P.id, H); // ...and its damage, its hit reaction, or
                                    // its wreck — see drawShip; H is THIS seat's
                                    // wire record, read once above
+    // ...and the crown, if this is the seat that leads. A seat that is DOWN
+    // keeps it: the standing it is crowned for is its high-water score, which
+    // a death does not take, and the board keeps the row crowned through the
+    // respawn timer for the same reason. A WRECK on the field is still the
+    // leader's wreck.
+    if (P.id === fieldKing) drawFieldCrown(vp.x, vp.y);
   }
   ctx.fillStyle = C.bright; // CQ pixel bullets — read off the frame view
   for (const b of FRAME.bullets || G.bullets) {
@@ -4715,6 +4854,13 @@ window.__test = { G, players, cam, step: clientStep, setCamMode, render, WW, WH,
   // that the parked draw still works when it is switched back on.
   hullDamageShown: () => SHOW_HULL_DAMAGE,
   setHullDamage: (v) => { SHOW_HULL_DAMAGE = !!v; },
+  // the HULL TABLE and the one read the ship draw makes into it. Published so
+  // a check can drive the real resolver — a leg that asked "does this seat draw
+  // a different plate" by diffing pixels alone could not tell WHICH hull it
+  // got, and a leg that re-derived the fallback itself would be testing its own
+  // copy of the rule instead of the one that ships.
+  hulls: () => HULLS.map((h) => ({ ...h })),
+  hullFor,
   setFxInt: (v) => { FXINT = v; },
   setFxDur: (v) => { FXDUR = v; },
   // the LIGHT LAYER's two seams: its suppression lever and its counters. Both

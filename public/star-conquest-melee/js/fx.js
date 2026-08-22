@@ -530,8 +530,21 @@
       g.drawImage(sprite(col), x - r, y - r, r * 2, r * 2);
     };
 
-    // every seat, uniformly: no per-seat hue exists anywhere in this repo and
-    // inventing one is a readability decision to make with the user, not here
+    // ...and each seat in ITS OWN HULL'S colour. The note that stood here said
+    // no per-seat hue existed in this repo and that inventing one was a
+    // readability decision to make with the user rather than in this file. The
+    // decision was made — D2 rules identity a value the PLAYER owns — and R4
+    // wrote it down in js/game.js's HULLS, so this reads that table and invents
+    // nothing. It is a HULL hue and not a SEAT hue: two pilots flying the same
+    // ship glow the same colour, which is legal by the same ruling.
+    //   It has to be the LIGHT and not only the plate. This layer composites
+    // with `lighter`, and a sample of the box around each ship measured 0
+    // surviving plate pixels on all three coloured hulls with the layer up
+    // against 393-542 with it down: the bloom eats the flat colour whole. The
+    // halo is the biggest mark on the screen, so it is where the colour keeps.
+    //   DART's glow is C.clay — the warm burn every ship has always had — so a
+    // build with nobody having picked anything paints exactly what it did
+    // before, and this suite's sixty pixel legs never moved.
     const health = window.Encounter && Encounter.seatHealth;
     for (const P of players) {
       // a downed seat draws a WRECK, not a ship — the same answer drawShip
@@ -560,8 +573,9 @@
       // is answered by SOUND now (js/audio.js's `refuse` cue at the press edge,
       // and the engine's own ENG_BURN_WIND swell, which still reads cv.wind),
       // so the confirmed burn is the only thing on this screen that lights.
-      blob(vp.x, vp.y, SHIP_R * 2.8, PAL.clay, 0.4 * g1);
-      blob(vp.x, vp.y, SHIP_R * 1.5, PAL.clay, 0.22 * g1);
+      const hue = typeof hullFor === "function" ? (hullFor(P.id).glow || PAL.clay) : PAL.clay;
+      blob(vp.x, vp.y, SHIP_R * 2.8, hue, 0.4 * g1);
+      blob(vp.x, vp.y, SHIP_R * 1.5, hue, 0.22 * g1);
       blob(vp.x, vp.y, Math.min(3, 2.2 * gl), PAL.bright, 0.5 * g1);
       // the engine flame's glow, off the same smoothed thrust the flat flame
       // draws from

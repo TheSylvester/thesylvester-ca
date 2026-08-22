@@ -4530,6 +4530,23 @@
     .filter((r) => !r.S.absent)
     .sort((a, b) => b.S.best - a.S.best || a.s - b.s);
 
+  // ...and WHO LEADS, or -1 when nobody does yet. ONE derivation, because the
+  // board's crowned row and the field's crown over the leader's own ship are
+  // the same claim about the same match: two copies of it would drift the day
+  // one of them learned about a tie, and a field that crowned a different seat
+  // than the board beside it would be worse than no crown at all.
+  //   It reads `best`, the seat's HIGH-WATER score, and not the live one. Under
+  // the death rule a seat's score is 0 for the whole respawn timer, so a crown
+  // that ranked by the live number would come off every leader the moment they
+  // died — reporting a different question than the board is asking.
+  //   `> 0` is the "nobody has scored yet" gate: an unstarted match has four
+  // seats on 0 and no leader, and crowning the lowest seat id for that would be
+  // an accident of the sort order rather than a standing.
+  const kingSeat = () => {
+    const ranked = boardRanking();
+    return ranked.length && ranked[0].S.best > 0 ? ranked[0].s : -1;
+  };
+
   // ...and WHICH of those rows belongs to the reader, or -1 when none does.
   //   The correction this exists for: boardRanking filters ABSENT SEATS. It
   // knows nothing about the client reading it, so a seatless client is NOT
@@ -4598,11 +4615,8 @@
     };
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    // the crowned row: the leader by STANDING, and only while it has
-    // actually scored. Reading best rather than the live score is what keeps
-    // the crown on a leader who just died — under the new death rule the
-    // score half of that test would be 0 for the whole respawn timer.
-    const king = ranked.length && ranked[0].S.best > 0 ? ranked[0].s : -1;
+    const king = kingSeat(); // the derivation lives above, where the field's own
+                             // crown reads the SAME one — see kingSeat
     const me = ownRow(); // -1 on a seatless screen: no row is this reader's
     boardRows.length = 0; // re-recorded below, in the order the rows are drawn
     ranked.forEach((r, i) => {
@@ -4776,16 +4790,31 @@
   // server socket, rides the low-frequency roster, and is absent from the 60 Hz
   // snapshot. R4 is where drawHull starts keying a descriptor table off it.
   //
-  // The glyphs are drawn HERE and not through drawHull on purpose: drawHull is
-  // R4's to change, and a picker that called it today would move field pixels
-  // every existing baseline was captured against. These are picker-local
-  // silhouettes, and R4 replaces them with the real table's shapes.
-  const SKINS = [
-    { id: 0, label: "DART",   pts: [[1, 0], [-0.7, 0.62], [-0.4, 0], [-0.7, -0.62]] },
-    { id: 1, label: "WEDGE",  pts: [[1, 0], [-0.6, 0.85], [-1, 0], [-0.6, -0.85]] },
-    { id: 2, label: "NEEDLE", pts: [[1, 0], [-0.95, 0.38], [-0.65, 0], [-0.95, -0.38]] },
-    { id: 3, label: "DELTA",  pts: [[1, 0], [-0.55, 0.9], [-0.55, -0.9]] },
+  // The glyphs are drawn HERE and not through drawHull, and they stay that way:
+  // a 30x20 strip glyph and a 14 px field hull are genuinely DIFFERENT DATA,
+  // not one shape written twice. The strip glyph points RIGHT because a card is
+  // read as a catalogue of ships and a catalogue draws them facing; the field
+  // plate has no heading at all to draw, because the ship's own heading is
+  // carried by the flame and the aim marker and never by the plate. Calling
+  // drawHull from here would also paint field ink into a card at card scale.
+  //   What is NOT duplicated is the part that could drift: the id set and the
+  // labels are read straight off js/game.js's HULLS, the one place a hull is
+  // declared. This table adds a glyph per id and nothing else, so a hull can
+  // never be offered here under a name or an id the field does not know.
+  // (Classic scripts share one global lexical environment and js/game.js loads
+  // first — index.html:496 — so HULLS is a plain read here, as C and SHIP_R
+  // already are.)
+  const SKINGLYPHS = [
+    { id: 0, pts: [[1, 0], [-0.7, 0.62], [-0.4, 0], [-0.7, -0.62]] },
+    { id: 1, pts: [[1, 0], [-0.6, 0.85], [-1, 0], [-0.6, -0.85]] },
+    { id: 2, pts: [[1, 0], [-0.95, 0.38], [-0.65, 0], [-0.95, -0.38]] },
+    { id: 3, pts: [[1, 0], [-0.55, 0.9], [-0.55, -0.9]] },
   ];
+  const SKINS = HULLS.map((h) => ({
+    id: h.id,
+    label: h.label,
+    pts: (SKINGLYPHS.find((g) => g.id === h.id) || SKINGLYPHS[0]).pts,
+  }));
   const SKINCELL = { w: 30, h: 20, gap: 4, r: 8 };
   // The strip's own width, derived rather than written down twice — a cell count
   // that disagreed with a hardcoded width would put the hit test beside the draw.
@@ -5357,6 +5386,10 @@
   // ---- publish — one namespace, one assignment ---------------------------
   restart(ECFG.seed);
   window.Encounter = { step: encStep, draw: encDraw, drawHud: encDrawHud, frozen, mods, reset: restart,
+    // WHO LEADS — published for the FIELD crown in js/game.js, which draws over
+    // the leader's own ship and must never disagree with the board's crowned
+    // row. The board reads the same call; there is one derivation and no copy.
+    kingSeat,
     // termsFor(seat) — the ONE upgrade-term derivation. game.js's sim reads
     // it here (fire cooldown, the per-seat vcap, the pool's cap/regen), and
     // the phase-11 predictor calls the SAME formula through termsFromOwned:
@@ -5822,6 +5855,11 @@
       boardScoreLine, // ...and the board's score line, published on exactly the
                       // same ground: it states which number is the standing and
                       // which is the live run
+      kingSeat,       // ...and WHO LEADS, the one derivation the board's crowned
+                      // row and the field's crown both read. Published here on
+                      // the same ground as boardRanking: "which seat leads" is
+                      // a predicate question, and a check that diffed two
+                      // panels for it could not say whether they AGREE.
       boardRanking,   // ...and the ROW ORDER those lines are drawn in. The
                       // shopLayout idiom: a check drives the real comparator
                       // rather than diffing pixels for an ordering question
