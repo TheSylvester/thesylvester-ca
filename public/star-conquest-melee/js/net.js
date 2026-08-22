@@ -585,14 +585,19 @@
   let lastRebaseMag = 0;
   const spec = { cueShown: 0, cueMatched: 0, cueRefused: 0,
                  cometCueShown: 0, cometRefused: 0,
-                 cueRetracted: 0 }; // monotone, render-side — the row-2
-                        // harness seam (latency-rig reads these).
-                        // cueRetracted is the rebase reconciliation's
-                        // bookkeeping (the cool-delta block in rebase); there
-                        // is deliberately NO cueLate counter — back-filling a
-                        // never-cued server shot with a late cue was tried,
-                        // over-cued in measurement (rebases land between the
-                        // flush and the next incremental tick), and rejected
+                 cueRetracted: 0, cueBackfilled: 0 }; // monotone, render-side —
+                        // the row-2 harness seam (latency-rig reads these).
+                        // Both of the last two are the rebase reconciliation's
+                        // bookkeeping (the cool-delta block in rebase), one per
+                        // direction: cueRetracted when the rebase pulls the
+                        // cooldown back under a cue already shown, cueBackfilled
+                        // when it pushes the phase forward past a shot the
+                        // incremental tick never modelled. The back-fill was
+                        // once rejected for over-cueing, and that measurement
+                        // was against TRACERS — it now sounds ONLY, so an
+                        // over-cue costs a late pew and never a broken promise
+                        // on screen. See the reconciliation block for the
+                        // measurement that reopened it.
   const tracers = [];   // speculative rounds: {x,y,ox,oy,vx,vy,age,ttl} — NEVER G.bullets
   let maxOwnBulletId = -1; // the hand-off's high-water mark. Entity ids are
                         // MONOTONIC (nextId), so "new own bullet" is an id
@@ -954,14 +959,35 @@
     // at its stale expiry, the rebase pulled the cooldown BACK, and the shot
     // cued AGAIN at the true expiry — two tracers, one bullet. When the
     // rebase retards the phase under a just-shown cue, retract that cue: the
-    // same shot will re-cue at the truth. (The symmetric "server fired a
-    // shot we never cued" case is deliberately NOT back-filled with a late
-    // cue — rebases land asynchronously between the flush and the next
-    // incremental tick, and a dc-threshold back-fill over-cued in
-    // measurement; an uncued bullet at worst steals one tracer.)
+    // same shot will re-cue at the truth.
+    //   THE SYMMETRIC CASE IS NOW BACK-FILLED, AS A SOUND AND NOTHING ELSE,
+    // and the reversal is worth stating because this comment argued the other
+    // way for two days. The fire cue is authored ONLY on an incremental tick —
+    // predTickK takes cueing=false on the replay path and true on the
+    // incremental one — so when a rebase pushes the cooldown phase FORWARD, the
+    // replay models a shot the incremental never did, pendingAutofireCue is
+    // never set, and ownCue never runs. This was left alone on the stated price
+    // "an uncued bullet at worst steals one tracer". That price expired at
+    // 76dcd1f: fireEvents now suppresses the wire's copy of own fire as an
+    // own-echo whenever the predictor is live, so the only remaining copy of
+    // that shot is the one this block declines to author, and the gun goes
+    // SILENT rather than untraced. MEASURED 2026-08-22 in Firefox at ?mp, the
+    // trigger held: 38 cues, inter-cue gaps 0.40 s × 31 and 0.80 s × 3 against a
+    // 400 ms BCOOL — three shots fired and never heard, 7.5%, with the
+    // predictor up throughout (pred.on, !idle, unacked 0) and tracers 0 against
+    // BMAX 15, which excludes both the stand-down and the budget-refusal paths.
+    //   The old rejection measured a back-fill that spawned a TRACER, where an
+    // over-cue is a visible broken promise. This one calls ownCue alone: no
+    // tracer, no promise, and at worst a late pew — the sound the player was
+    // already expecting. It cannot double-cue either, because a shot the
+    // incremental DID model leaves predK.cool already high, which puts dc near
+    // zero and takes neither branch.
     if (!termCut) {
       const dc = K.cool - predK.cool;
-      if (dc < -4) {
+      if (dc > 4) {
+        ownCue("fire", K.ship); // sound only — never a tracer
+        spec.cueBackfilled += 1;
+      } else if (dc < -4) {
         // the early promise is usually still PENDING (the autofire cue
         // trails its model by one frame) — cancel it there first; only a
         // just-spawned tracer needs the pop
