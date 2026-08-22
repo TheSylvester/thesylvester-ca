@@ -1008,7 +1008,11 @@
   // defaults to localSeat(), which is what every panel/label caller means:
   // seat 0 in local play and on the server, the granted seat in net mode.
   // The sim and the wire encoder always pass an explicit seat.
-  const rankAt = (i, seat) => { const S = E.seats[seat]; return S ? S.owned[i] : 0; };
+  // `| 0` is not decoration: since the wire trims the trailing default run
+  // off `ow` (server/snapshot.mjs), a decoded vector may be SHORTER than SHOP,
+  // and a missing entry means rank 0 — never `undefined`. Both callers below
+  // do arithmetic on this result, so an undefined here prints NaN prices.
+  const rankAt = (i, seat) => { const S = E.seats[seat]; return S ? S.owned[i] | 0 : 0; };
   const shopCost = (i, seat = localSeat()) => SHOP[i].curve === "double" ? SHOP[i].base * Math.pow(2, rankAt(i, seat)) : SHOP[i].base;
   const shopMaxed = (i, seat = localSeat()) => SHOP[i].cap !== undefined && rankAt(i, seat) >= SHOP[i].cap;
   // What a row COSTS, as the player reads it. Both places that print a price —
@@ -5403,14 +5407,52 @@
     h.u32(E.seats.length); // length-prefixed, ascending seat order — like hashShip
     for (const S of E.seats) {
       for (const f of SEAT_HASH) h.num(S[f]);
-      // the seat's PERSONAL rank vector, length-prefixed — ranks decide what
-      // the sim does next (every effective term is termsFor of them). The
-      // derived terms themselves are NOT hashed: pure functions of these
-      // ranks and unhashed tunables, the standing energyMax/vcap rule —
-      // folding them too would hash the same truth twice. termSeq stays out:
-      // derived bookkeeping, never a decision input.
-      h.u32(S.owned.length);
-      for (const n of S.owned) h.num(n);
+    }
+    // The seats' PERSONAL rank vectors, folded to the LAST RANK ANYONE BOUGHT
+    // and no further — the pvpCd/claimT guarded-fold idiom, and here it is the
+    // CHARTER rule itself. Ranks decide what the sim does next (every effective
+    // term is termsFor of them), so they belong in the hash; but `owned` is
+    // SHOP.map(() => 0), so folded whole beside the SEAT_HASH fields its LENGTH
+    // PREFIX is a shop-row counter baked into every trace ever captured. A
+    // ninth shop row that NOBODY BUYS would move that prefix from 8 to 9, fold
+    // one more zero per seat, and re-key every fixture and the boot self-check
+    // for content that changed no behaviour. That tax is what makes content
+    // expensive, and this is where it is refused.
+    //   Note WHICH suppression this is, because the weaker one is not enough.
+    // Guarding only the ALL-STOCK room would still tax every trace in which
+    // somebody bought anything — duo-shop, pvp-duel and pvp-ram all move under
+    // that version, which is most of the traces a shop round cares about. So
+    // the trailing DEFAULT RUN goes on every seat: a stock room folds ZERO
+    // BYTES, and a room where seat 1 bought AFTERBURNER folds exactly as many
+    // ranks as it takes to say so, whatever the shop's width has grown to.
+    // server/snapshot.mjs's trimRanks does the identical thing to the same
+    // vector on the wire, for the identical reason; the two cannot import each
+    // other (classic script against ES module), so they are two spellings of
+    // one rule and each names the other.
+    //   Trailing zeros carry NO information to suppress: an absent entry is
+    // rank 0 by rankAt's own contract, so a wire-decoded short vector and a
+    // full one holding the same ranks are the same state and MUST hash alike —
+    // the sim cannot tell them apart and neither may the oracle.
+    //   Two collisions to close, and the block closes both. It is entered ONCE
+    // for the whole room — not per seat — so "seat 0 bought a cell" and "seat 1
+    // bought a cell" cannot fold the same bytes; and each seat keeps its OWN
+    // length prefix inside the block, so a two-rank seat beside a five-rank one
+    // can never run together into one ambiguous stream.
+    //   The derived terms are still NOT hashed: pure functions of these ranks
+    // and unhashed tunables, the standing energyMax/vcap rule — folding them
+    // too would hash the same truth twice. termSeq stays out: derived
+    // bookkeeping, never a decision input.
+    {
+      const ranked = E.seats.map((S) => {
+        let n = S.owned.length;
+        while (n > 0 && !S.owned[n - 1]) n--;
+        return n;
+      });
+      if (ranked.some((n) => n > 0)) for (let i = 0; i < E.seats.length; i++) {
+        const S = E.seats[i];
+        h.u32(ranked[i]);
+        for (let r = 0; r < ranked[i]; r++) h.num(S.owned[r]);
+      }
     }
     // The PvP pair windows, folded ONLY when the store is non-empty: an empty
     // store contributes ZERO BYTES, which is the whole reason every one-seat

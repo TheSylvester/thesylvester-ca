@@ -505,6 +505,18 @@
   let batchId = 0;
   const localAtTick = new Map(); // tick → the locally-continuous kernel fields
   let myOw = null;      // the ACKED rank vector — termsFromOwned's input
+  // The wire's rank vector, back at full shop width. `ow` arrives trimmed of
+  // its trailing default run (server/snapshot.mjs trimRanks), and `was` is the
+  // vector already on the record — SHOP.map(() => 0) since restart() built it —
+  // so its length is the width to restore. Whichever is longer wins the length,
+  // so a server whose shop has grown past this client's still decodes whole
+  // rather than silently truncated.
+  const padRanks = (ow, was) => {
+    const n = Math.max(ow.length, Array.isArray(was) ? was.length : 0);
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) out[i] = ow[i] | 0;
+    return out;
+  };
   const off = { x: 0, y: 0 }; // the render correction offset — presentation only
   let rebases = 0;
   let lastRebaseMag = 0;
@@ -766,6 +778,11 @@
     if (!s.players) return;
     const pr = s.players.find((p) => p.seat === mySeat);
     if (!pr) { predOn = false; return; }
+    // ...and this one is NOT padded, unlike the seat record's copy below. myOw
+    // has exactly one consumer — termsFromOwned — which reads it as
+    // `owned[ROW_IX[name]] || 0` and so already means rank 0 by absence. Pad it
+    // the day something INDEXES it directly, because a raw index into a trimmed
+    // vector is the NaN that padRanks exists to stop.
     if (Array.isArray(pr.ow)) myOw = pr.ow.slice();
     // the discontinuity markers, read at ARRIVAL (their tick IS this
     // snapshot's tick while SNAPSHOT_EVERY === 1 — asserted server-side).
@@ -2003,7 +2020,15 @@
         // branch at the top of the loop, so this record is a SEATED one.
         S.claimT = (pr.cl || 0) > 0 ? pr.cl : 0;
         S.absent = false;
-        if (Array.isArray(pr.ow)) S.owned = pr.ow.slice();
+        // ...and the rank vector, PADDED back to the local shop's width. Since
+        // v8's diet the encoder cuts the trailing default run off `ow`, so a
+        // stock seat arrives as `[]` and a seat holding only row 1 arrives as
+        // two entries. An absent entry means rank 0 — that is what the trim
+        // encodes — but a SHORT array reaching the sim record would leave every
+        // index past its end reading undefined, and shopCost raises 2 to that.
+        // rankAt's `| 0` is the second line of defence; this is the first, and
+        // it keeps S.owned exactly the shape restart() built.
+        if (Array.isArray(pr.ow)) S.owned = padRanks(pr.ow, S.owned);
         // ...and THIS is what spends the release latch: the seat this client
         // now holds, presented, showing something other than a release. Not the
         // grant that handed the seat over — see onYou for why that edge is a

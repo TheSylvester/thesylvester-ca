@@ -83,7 +83,7 @@
                         // 20 ms ahead, and `live` counted from creation), so
                         // budget pressure rose with it — MEASURED, not felt:
                         // the 10 s four-seat melee of the audio-duck harness
-                        // (.ai-reference/tools/audio-duck, e2.live) asked 311
+                        // (test/tools/audio-duck, e2.live) asked 311
                         // / played 311 / refused 0 both BEFORE and AFTER the
                         // lookahead, in Firefox and in Chrome. stats().live is
                         // the number to watch if the mix is ever raised.
