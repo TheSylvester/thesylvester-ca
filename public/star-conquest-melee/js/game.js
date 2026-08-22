@@ -2154,9 +2154,19 @@ function fire(seat = 0) {
 // Rule 2 of the plan holds: no new damage call site. Every round it spawns is
 // an ordinary bullet in G.bullets, swept by the encounter's existing pass, so
 // BULLET_HASH does not grow and the wire carries it as {id, x, y, o} like any
-// other. Rule 4 holds too: the remote look is declared here, and it is the
-// shipped "fire" event — direction and speed replicate for free through the
-// round's own position, which is the one thing the wire is generous about.
+// other. Rule 4 holds too: the remote look is declared here — direction and
+// speed replicate for free through the round's own position, which is the one
+// thing the wire is generous about.
+//   WHAT THE WIRE DOES NOT CARRY IS THE LOOK ITSELF, and that is now a stated
+// gap rather than a silence. `ink` and `streak` are stamped on the local round
+// from the record and the encoder sends neither, so on a NET client — its own
+// rounds included, once the authoritative bullet takes over — a rifle shot
+// draws as an ordinary white dot. The honest fix is the same one the
+// speculative tracer needs (js/net.js's spawnCue is hardcoded to the standard
+// round's ballistics), so both land together in the round that teaches the
+// presentation side to read this catalog. The SOUND does not wait for it: the
+// cue below rides the wire's event stream as a plain kind, and the predictor
+// sounds the own shot on the press edge.
 //
 // A cooldown paid for a shot the field then refuses is deliberate. The
 // predictor models the arm and the cooldown from the same slice and cannot know
@@ -2194,7 +2204,12 @@ function abilityFire(seat, id) {
                      ox: P.ship.x, oy: P.ship.y, // the muzzle — render-only, and
                                     // out of BULLET_HASH like every other round's
                      r: sp.r, dmg: sp.dmg, owner: seat, dead: false, spent: false,
-                     ttl: sp.ttl });
+                     ttl: sp.ttl,
+                     // ...and the record's LOOK, render-only and out of
+                     // BULLET_HASH exactly as ox/oy above are. Undefined for a
+                     // record that declares none, which is what makes the draw
+                     // a single `|| C.bright` and not a branch per ability.
+                     ink: sp.ink, streak: sp.streak });
     spawned++;
   }
   // NO LAG REBATE, and it is a stated gap rather than an oversight. fire() calls
@@ -2216,7 +2231,13 @@ function abilityFire(seat, id) {
   // answer "is this seat capped out?" — that is the round that gives each
   // primitive its own refusal and lag contract, not this one.
   if (!spawned) return; // a capped-out seat makes no sound either
-  if (window.Encounter) Encounter.emit("fire", P.ship, undefined, seat);
+  // the RECORD's cue, not the standard gun's. A rifle that sounded exactly
+  // like the basic round was a shot the ear could not find, which is half of
+  // why the ability was undiscoverable at all. Abilities.cueFor answers "fire"
+  // for a record that declares none, so nothing that shipped moves — and no
+  // committed trace does either, because no fixture arms an ability above
+  // COMET and the event stream is what those traces pin.
+  if (window.Encounter) Encounter.emit(Abilities.cueFor(id), P.ship, undefined, seat);
 }
 
 // ---- simulation step (one ~16.7ms update) --------------------------------
@@ -3145,6 +3166,49 @@ const GUIDE_W = 480;                // the 3:1 asset at an integer logical size
 const GUIDE_H = 160;                // 480 × 160 — exactly the source's 2172:724
 const GUIDE_X = (FW - GUIDE_W) / 2; // 16 px of field either side
 const GUIDE_Y = 60;                 // clear of the HUD's top line, well above the pause menu's
+// THE PRE-START IDENTITY BLOCK's geometry — the name box above the ship
+// strip, on the screen the game actually starts on. Both halves are here and
+// in this order by ruling: name and ship are ONE identity chosen in ONE moment
+// on ONE affordance (D2), and the pre-start screen is the only moment on any
+// screen when the keyboard is not flying a ship, which makes it the BETTER
+// place to type a name than the claim card rather than a worse one.
+//
+// THE PAUSE MENU'S OWN ROW IS THE CONSTRAINT, and it is a DOM row over the
+// canvas, not something this file draws. resize() hangs it at FH / 2 + 96, so
+// it covers field y 267 down to about 277 — measured, not assumed, across
+// three window shapes, because its height is 18 CSS px and its FIELD extent
+// therefore shrinks as the scale grows. That row cuts this screen into two
+// usable bands, and the first layout tried here put the name box in the upper
+// one and the ship strip in the lower one, with the menu chrome wedged between
+// the two halves of a single affordance. So the AFFORDANCE goes wholly in the
+// lower band and the two lines of type that qualify it go in the upper one.
+//
+// Upper band (under the explanatory block, above the menu row):
+//   `foot` is the card screen's alone. Its bitmap says LEFT CLICK TO START and
+// that sentence is now incomplete, because a click may instead pick a hull or
+// open the name box. Regenerating the art is not this round's work, so the
+// qualification is a line of type directly under the art that made the claim.
+// The text screen needs none — its own CLICK TO START copy is above it.
+//   `rail` is on BOTH screens. RAILSHOT is bound to Space, is free to every
+// pilot and has no HUD entry, no icon, no cooldown ring and no shop row — the
+// owner could not find it at all. Its ink and its sound are what teach it in
+// flight; this line is what says the key exists. It sits here rather than in
+// pauseLines() because that call returns a PAIR and both slots are spoken for
+// on every screen that draws it, and one sentence in one place beats the same
+// sentence copied into five wordings. The two screens' anchors differ because
+// their explanatory blocks end at different heights: the bitmap stops at
+// GUIDE_Y + GUIDE_H = 220, the stand-in's second copy line at FH / 2 + 78.
+//
+// Lower band (under the menu row, above the field's bottom edge): the block
+// itself, SHARED by both screens — the menu row is where it hangs from, and
+// that row does not move with the aim mode. The name box's top lands at 283.5
+// and the strip's own label baseline at 338, so the band is used end to end.
+const IDBLOCK = {
+  card: { foot: 240, rail: 253, name: 292, strip: 318 },
+  text: { foot: null, rail: 261, name: 292, strip: 318 },
+};
+const IDSTART_LINE = "click anywhere else to start";
+const RAIL_LINE = "space fires the rail · costs energy and a cooldown";
 const guideImg = new Image();
 let guideReady = false;
 guideImg.addEventListener("load", () => { guideReady = true; render(); });
@@ -3810,9 +3874,35 @@ function render() {
     // leader's wreck.
     if (P.id === fieldKing) drawFieldCrown(vp.x, vp.y);
   }
-  ctx.fillStyle = C.bright; // CQ pixel bullets — read off the frame view
+  // CQ pixel bullets — read off the frame view. The standard round is the
+  // hoisted white dot it always was; a round whose RECORD declared a look
+  // (js/abilities.js's `ink` / `streak`, render-only and out of BULLET_HASH)
+  // wears it instead. NO randomness anywhere in here: the streak's direction
+  // and length are pure functions of fields the frame already carries, so the
+  // same frame paints the same pixels forever.
+  //   THE STREAK IS CLAMPED TO THE FLOWN DISTANCE, off the same ox/oy muzzle
+  // the standard trail is clamped against: a rifle round is four times as
+  // fast and its full-length streak would otherwise reach back BEHIND the ship
+  // that fired it on the first frame of its life.
+  ctx.fillStyle = C.bright;
   for (const b of FRAME.bullets || G.bullets) {
     if (b.dead || b.spent) continue; // consumed or expired — the next sweep removes it
+    const h = b.streak > 0 ? Math.hypot(b.vx, b.vy) : 0;
+    if (h > 0) {
+      const len = Math.min(b.streak, Math.hypot(b.x - b.ox, b.y - b.oy));
+      if (len > 0) {
+        ctx.save(); // the line join and width may not leak onto the dots below
+        ctx.strokeStyle = b.ink || C.bright;
+        ctx.lineWidth = (b.r || 2.2) * 1.1;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(b.x - (b.vx / h) * len, b.y - (b.vy / h) * len);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+    ctx.fillStyle = b.ink || C.bright;
     ctx.beginPath();
     ctx.arc(b.x, b.y, b.r || 2.2, 0, Math.PI * 2);
     ctx.fill();
@@ -3862,6 +3952,33 @@ function render() {
       ctx.fillStyle = C.dim;
       ctx.fillText(lines[0], FW / 2, FH / 2 + 64);
       ctx.fillText(lines[1], FW / 2, FH / 2 + 78);
+      ctx.textAlign = "left";
+    }
+    // ...and THE IDENTITY BLOCK under it. Both pre-start screens get it, not
+    // only the card's: the affordance is about who is flying, and gating it on
+    // guideShown() would leave a push-mode or invert-off player with no way to
+    // pick a hull at all. The block itself is identical on both — only the
+    // anchors move, see IDBLOCK.
+    //   NOT on a mid-session pause (`!G.started`), and that is coverage rather
+    // than a gap: once a run has started the gutter board is up, this client's
+    // own row opens the same editor, and js/encounter.js draws the same strip
+    // over any screen whose editor is open. The pre-start screen is the one
+    // that had no route.
+    //   BELOW Encounter.drawHud above, and it has to stay there: drawHud nulls
+    // both rect caches at its top, so this order is what keeps the recorded
+    // rects to exactly the frames that drew them.
+    if (!G.started && window.Encounter && Encounter.drawIdentity) {
+      const L = guide ? IDBLOCK.card : IDBLOCK.text;
+      Encounter.drawIdentity(L.name, L.strip);
+      // ...and the two lines of type, in the band ABOVE the pause menu's row
+      // rather than under the block they qualify — see IDBLOCK. The start line
+      // is the CARD screen's alone, because the text stand-in already prints
+      // CLICK TO START; the rail line is on both.
+      ctx.textAlign = "center";
+      ctx.font = "400 9px " + FONT;
+      ctx.fillStyle = C.dim;
+      if (L.foot) ctx.fillText(IDSTART_LINE, FW / 2, L.foot);
+      ctx.fillText(RAIL_LINE, FW / 2, L.rail);
       ctx.textAlign = "left";
     }
   }
@@ -4145,6 +4262,16 @@ function blurPanels() {
 // difference observable, so it is preserved rather than tidied.
 function resume() {
   if (G.running) return; // a focused resume button re-fires on Space/Enter — never re-enter mid-flight
+  // THE EDITOR MAY NOT SURVIVE INTO FLIGHT. It swallows the keyboard by
+  // design, so a run that starts with it open is a ship whose W does not
+  // thrust and whose R does not restart — which reads as a dead page, not as
+  // an open text box. It COMMITS rather than cancelling, exactly as pause()
+  // does and for pause()'s reason: the player typed those letters.
+  //   The pre-start mousedown route already spends a missed press on this
+  // close instead of starting, so this is the backstop for the way in that no
+  // canvas route can see — the pause menu's own start button, which is a DOM
+  // control and takes its click off the document.
+  if (window.Net && Net.closeNameEdit) Net.closeNameEdit(true);
   if (window.Sfx) Sfx.unlock(); // the page's one entry gesture — ABOVE the frozen
                                 // branch, so a death-screen resume arms audio too
   clearTickInput(); // the paused stretch banked nothing that may land now
@@ -4195,6 +4322,46 @@ canvas.addEventListener("mousedown", (e) => {
     // in — __test exposes openDev(), and a stray true must never eat a shot.
     if (UI.dev) {
       closeDev();
+      return;
+    }
+    // THE IDENTITY AFFORDANCE, and it sits ABOVE resume() because resume()
+    // takes any left press on this screen and every press below here is spent.
+    // ONE call into Encounter.nameCardClick, never a second route: that
+    // function tests the strip first and the box second so the router has one
+    // ordering to keep honest, and a second call site is a second ordering —
+    // which is what put the old DOM box under the fire path.
+    //
+    // pointerDevice UNCONDITIONALLY, where the running branch below picks
+    // lcurDevice() in locked mode. lockedMode() is a MODE test, not a
+    // lock-held test, and resume() is what acquires the lock — at pre-start
+    // NOTHING holds one, so the drawn cursor is not on the screen and hit
+    // testing against its position would invert a pointer the player cannot
+    // see. The running branch is right for the running screen and wrong here.
+    const idp = pointerDevice(e.clientX, e.clientY);
+    if (idp && window.Encounter && Encounter.nameCardClick &&
+        Encounter.nameCardClick((idp.x - ox) / scale, (idp.y - oy) / scale)) {
+      // ...and the KEYBOARD comes with the press. This screen is the only one
+      // that shows the editor beside a live DOM control: the pause menu's
+      // start button is on it, and a focused button both eats every letter
+      // (js/net.js's editor declines a key whose target is a BUTTON, so a
+      // slider is never renamed) and turns Space into a start. The press that
+      // opens the editor hands the keys to it.
+      blurPanels();
+      render(); // the paused screen draws no further frames of its own — the
+                // pick or the opened caret would not appear until something
+                // else asked for a repaint
+      return;   // ...and a press the block took NEVER also starts the game
+    }
+    // ...and a press that MISSED the block while an edit is OPEN is spent
+    // ending that edit, and does not start either. This is the pre-start
+    // equivalent of the running screen's commit-and-close below, with the one
+    // difference this screen forces: there, the press had nothing else to do,
+    // and here it would also have started the game. Committing a half-typed
+    // name AND grabbing the pointer lock off one gesture is the shape to
+    // avoid, so the gesture buys one thing and the next press starts.
+    if (window.Net && Net.typing && Net.typing()) {
+      if (Net.closeNameEdit) Net.closeNameEdit(true);
+      render();
       return;
     }
     resume();
@@ -4468,12 +4635,12 @@ function closeDev() {
 }
 function syncAimUi() {
   canvas.setAttribute("aria-label", lockedMode()
-    ? "Ship playground — the cursor aims; W A S D flies and Q E Z C add diagonals; left fires; hold right for energy-powered comet mode: fast, invulnerable, and able to ram enemies; Escape pauses"
+    ? "Ship playground — the cursor aims; W A S D flies and Q E Z C add diagonals; left fires and Space fires the rail shot, which costs energy and a cooldown; hold right for energy-powered comet mode: fast, invulnerable, and able to ram enemies; Escape pauses"
     : mouseMode()
     ? INVERT
-      ? "Ship playground — the visible pointer aims; W A S D flies and Q E Z C add diagonals; left fires; hold right for energy-powered comet mode: fast, invulnerable, and able to ram enemies; Escape pauses"
-      : "Ship playground — mouse motion flies and QWE/ASDZXC aims; left fires; hold right to aim with the visible pointer and engage energy-powered comet mode; Escape pauses"
-    : "Ship playground — relative push controls use pointer lock; QWE/ASDZXC flies while the mouse aims; left fires; hold right for energy-powered comet mode; Escape releases pointer lock");
+      ? "Ship playground — the visible pointer aims; W A S D flies and Q E Z C add diagonals; left fires and Space fires the rail shot, which costs energy and a cooldown; hold right for energy-powered comet mode: fast, invulnerable, and able to ram enemies; Escape pauses"
+      : "Ship playground — mouse motion flies and QWE/ASDZXC aims; left fires and Space fires the rail shot; hold right to aim with the visible pointer and engage energy-powered comet mode; Escape pauses"
+    : "Ship playground — relative push controls use pointer lock; QWE/ASDZXC flies while the mouse aims; left fires and Space fires the rail shot; hold right for energy-powered comet mode; Escape releases pointer lock");
 }
 // the audition readout's gain, guarded: Sfx.state() is js/audio.js's and this
 // file's caller may be skewed against it — a cached OLD audio.js beside this
@@ -4905,7 +5072,13 @@ window.__test = { G, players, cam, step: clientStep, setCamMode, render, WW, WH,
   // a check can assert the eligibility rules on a page whose PNG is still in
   // flight — plus the rect the UI pass draws, so nothing has to hardcode it
   guideState: () => ({ eligible: guideEligible(), ready: guideReady, shown: guideShown(),
-    x: GUIDE_X, y: GUIDE_Y, w: GUIDE_W, h: GUIDE_H, src: GUIDE_SRC }),
+    x: GUIDE_X, y: GUIDE_Y, w: GUIDE_W, h: GUIDE_H, src: GUIDE_SRC,
+    // ...and the IDENTITY BLOCK's anchors and copy, on the same ground the
+    // rect above is published on: nothing that checks this screen should have
+    // to hardcode where the block sits or what it says. Both rows, because a
+    // check has to be able to compare them — the whole reason there are two is
+    // that the card and the text stand-in end at different heights.
+    idBlock: IDBLOCK, startLine: IDSTART_LINE, railLine: RAIL_LINE }),
   // ...and a writer for the load flag alone. It is the one half of the card's
   // contract a check cannot otherwise reach: the bytes have long arrived by
   // the time a suite runs, so the pre-load screen has to be driven on purpose.
@@ -5143,6 +5316,62 @@ Object.assign(window.__test, {
   // It exists because advance() drives ticks with no frames at all, and the
   // press has to be assertable on ONE named tick.
   pressClaim: (seat) => { const P = players[seat]; if (P) P.input.claimPress = 1; },
+  // ...and its NET-MODE twin, which pressClaim above cannot be.
+  //
+  // WHAT IT IS. A call to inputFire(), the function the canvas mousedown
+  // handler's own `e.button === 0` branch calls. Not "the one path a click
+  // takes" — a real left click has to survive five earlier returns in that
+  // handler first (the pre-start resume, the shop and board gutters, the claim
+  // card's name box, and the pointer-lock re-arm), and this seam skips all of
+  // them. It models a click on the OPEN FIELD with the lock already held, which
+  // is the only click a driven pilot ever needs to make, and a check built on it
+  // proves nothing about that ordering. The name-box guard three branches above
+  // is there because a press aimed at the old DOM box became the seat CLAIM;
+  // that ordering needs its own leg and does not get one from here.
+  //
+  // WHAT IT PRODUCES, and this deliberately names the CONCEPT rather than the
+  // field, because the field has already moved once: the tick's banked frame
+  // carries one fire PRESS BIT — `ap & AB_FIRE` today, and the plain `fp` this
+  // seam was written against before R1's ability masks replaced it — and every
+  // claim rule downstream reads exactly that bit. The migration happened while
+  // this branch was in flight and the seam needed NO edit, which is the whole
+  // argument for going through the named producer: it survives as long as
+  // inputFire() keeps its name.
+  //
+  // WHY pressClaim IS NOT ENOUGH, and this is the whole reason the seam exists.
+  // pressClaim writes THIS PAGE's `players[seat].input.claimPress`, and in net
+  // mode NOTHING reads it: the loop calls Net.clientTick() rather than
+  // clientStep(), so step() and Encounter.step() never run on a client at all.
+  // The server's copy of the latch is set at ITS drain, from a press bit that
+  // actually crossed the wire. Worse for a LAPSED seat: once the claim window
+  // runs out the socket is told it SPECTATES, and js/net.js's flushInputs turns a
+  // pending frame's press bit into the `ui: "claim"` message that is the only
+  // door back into a parked seat. Both roads start at the same accumulator, so
+  // ONE call covers both. pressClaim keeps its own job: advance() drives ticks
+  // with no frames at all, and there the press must be assertable on one tick.
+  //
+  // WHY NOT WRITE THE FRAME KEY BY HAND. Two raw surfaces could produce a
+  // wire-crossing press today — bumping the accumulator through the published
+  // `players` array, or pushInputFrame with a hand-built record. Both are worse
+  // for the same reason: they go SILENTLY INERT the moment the field is renamed.
+  // A hand-written `fp` after the mask migration creates a dead property and
+  // reports nothing; pushInputFrame is additionally wrong here, because net
+  // mode shifts the ring's first entry and clears the rest, so an injected frame
+  // DESTROYS the thrust, aim and cursor the tick actually banked — the rig would
+  // measure flight it had just overwritten.
+  //
+  // MODE. In tick mode (the default, and the only mode the rig runs) this banks
+  // the press bit and nothing else. In EVENT mode inputFire() banks nothing at
+  // all: it sets the local latch and fires locally, and no claim leaves the
+  // page. `inputmode` is not net-locked, so that state is reachable — a caller
+  // driving this seam in event mode over a wire gets silence, not an error.
+  //
+  // It does NOT touch G.leftHeld. The click sets both, but held-fire is a LEVEL
+  // the caller already owns per frame, and the claim rule is an EDGE
+  // (js/encounter.js's respawn loop says so in full): a seam that also latched
+  // the level would make a driven reclaim indistinguishable from the abandoned
+  // tab the gate exists to clear.
+  pressFire: () => inputFire(),
   FRAMES_PER_TICK, // the ONE frames-per-tick lid — server admission, the sim
                    // drain and the predictor's replay all read this value
   presentedPool,   // the net-mode presentation accessor, for checks

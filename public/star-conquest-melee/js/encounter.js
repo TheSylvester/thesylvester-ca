@@ -4875,6 +4875,40 @@
     return true;
   }
 
+  // ---- the PRE-START identity block ---------------------------------------
+  // The same two controls, on the one screen that is not a card: js/game.js's
+  // first-run screen. encDrawHud below CANNOT reach it — that function returns
+  // at E.state === "idle", and the pre-start screen is exactly that state — so
+  // the block needs an entry point of its own, and this is it. ONE call that
+  // DRAWS AND RECORDS, because a hit test may never outlive the rect it
+  // inverts, and two calls would be two chances to draw one without the other.
+  //
+  // The CLEAR half of that invariant is encDrawHud's, not this function's, and
+  // the ORDER is what makes that safe: js/game.js's render() calls drawHud
+  // FIRST — which nulls nameCardRect and skinCellRects at its top — and reaches
+  // its pre-start branch after. A frame that draws no block therefore leaves no
+  // rect behind, and a frame that draws one records exactly what it drew. This
+  // call must stay BELOW drawHud in that function: moved above it, drawHud
+  // would clear the rects of a block still on the screen.
+  //
+  // It takes TWO y values rather than one anchor because the block hangs under
+  // whichever explanatory block the screen above it drew, and the card and the
+  // text stand-in end at different heights. js/game.js owns that choice because
+  // js/game.js owns both screens.
+  //
+  // Self-contained in ctx state, unlike the card chain's two calls: the chain
+  // sets textAlign once for every branch under it, and this caller has no such
+  // branch to inherit from. drawNameBox does not set its own alignment, so the
+  // save/restore here is what stops a left-aligned box on the first-run screen.
+  function drawIdentity(nameY, stripY) {
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    drawNameBox(FW / 2, nameY);
+    ctx.restore();
+    drawSkinStrip(FW / 2, stripY); // ...which saves and restores for itself
+  }
+
   // the two logical spaces game.js fits into the gutters — the ONE shape
   // its panelPlace and pointer routing read, so a layout change here moves
   // the fit and the hit test together
@@ -5386,6 +5420,20 @@
   // ---- publish — one namespace, one assignment ---------------------------
   restart(ECFG.seed);
   window.Encounter = { step: encStep, draw: encDraw, drawHud: encDrawHud, frozen, mods, reset: restart,
+    // the FIRST-RUN identity block — the name box and the ship strip on the
+    // screen the game starts on. Published beside drawHud because it is the
+    // second draw entry point into this file, and for the same reason: the
+    // rects it records are what nameCardClick below inverts.
+    drawIdentity,
+    // ...and the two DRAW CACHES it (and the card chain) record, read-only and
+    // copied out. Published on mapState's footing rather than as a __test
+    // seam, because the rects are the affordance's real geometry and a check
+    // that restated the strip's cell width beside it would be a second layout
+    // to keep in step. It is also how the "a hit test may never outlive the
+    // rect it inverts" invariant becomes checkable at all: a frame that drew no
+    // block answers a null box and no cells.
+    identityRects: () => ({ name: nameCardRect ? { ...nameCardRect } : null,
+                            cells: skinCellRects.map((r) => ({ ...r })) }),
     // WHO LEADS — published for the FIELD crown in js/game.js, which draws over
     // the leader's own ship and must never disagree with the board's crowned
     // row. The board reads the same call; there is one derivation and no copy.

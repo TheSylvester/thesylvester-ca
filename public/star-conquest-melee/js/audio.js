@@ -329,6 +329,18 @@
     // but BCOOL is a live dev slider, and the gap must clear whatever cadence
     // a retuned page fires at.
     fire: { bus: "shot", gap: 45, pri: 0, vary: true, steps: [["b", 880, 380, 0.05, "square", 0.22, 0]] },
+    // THE RIFLE, and it is deliberately fire's opposite in the one dimension
+    // an ear separates fastest. fire is a short falling square at 880→380;
+    // this is a short falling SAWTOOTH an octave and a half above it, over a
+    // brief noise edge — bright and hard where the gun is blunt, so a rifle
+    // shot inside a held burst of ordinary fire is still countable. Its own
+    // 90 ms gap is the ability's own 45-tick cooldown with room to spare, and
+    // it stays on the SHOT bus because it is the player's own weapon and must
+    // trim with the rest of them. pri 1, one above fire: the rifle costs
+    // energy and a cooldown, and a shot the player paid for outranks one of
+    // the shots they did not.
+    rail: { bus: "shot", gap: 90, pri: 1, vary: true, steps: [["b", 2400, 900, 0.07, "sawtooth", 0.22, 0],
+                                                              ["n", 0.03, 0.14, 4200, 0]] },
     // mass meeting a wall; mag carries the flipped component's pre-bounce
     // speed, so a graze whispers and a slam lands.
     thud: { bus: "shot", gap: 90, pri: 0, steps: [["b", 110, 62, 0.10, "sine", 0.30, 0],

@@ -89,7 +89,32 @@ const ABILITY_DEFS = [
     // ttl 6 is deliberately above the wire's floor — a round is swept for `ttl`
     // segments and appears in `ttl - 1` snapshots, so a shorter fuse would deal
     // damage nobody could see.
-    spawn: { n: 1, spd: 4, ttl: 6, r: 2.2, dmg: 2.5, spread: 0 },
+    // ...and the two RENDER-ONLY fields beside them. `ink` and `streak` are
+    // stamped onto the round and read by js/game.js's bullet draw; NEITHER is
+    // in BULLET_HASH, which is a declared allow-list, and neither is on the
+    // wire — the same footing as ox/oy, and for the same reason. They live in
+    // the RECORD rather than in a new global because the record is what
+    // invokes the behaviour: a second ability with its own look states it
+    // here and the draw needs no new branch.
+    //   The look matters as much as the numbers do. A rifle drawn in the basic
+    // gun's ink at the basic gun's radius is a shot the player cannot tell
+    // they took — which is exactly what happened. CLAY against the standard
+    // round's white is the palette's own attack channel, and the streak says
+    // the thing the radius cannot: this round is four times as fast.
+    // `streak` is a MAXIMUM in px; the draw clamps it to the distance actually
+    // flown, so a round never wears ink behind its own muzzle.
+    // `cue` is the third: the ability's OWN sound. Sharing the standard gun's
+    // `fire` event made the rifle acoustically identical to the basic round,
+    // and a cue the ear cannot separate teaches nothing. A record with no
+    // `cue` sounds as `fire`, so the two shipped rows are unchanged.
+    cue: "rail",
+    spawn: { n: 1, spd: 4, ttl: 6, r: 2.2, dmg: 2.5, spread: 0,
+             ink: "#d97757", streak: 11 }, // ...the two render-only ones sit in
+                          // the SPAWN block beside `r`, because they describe
+                          // the ROUND; `cue` above is the ABILITY's and stays
+                          // one level up, where the arm can read it with no
+                          // spawn to look inside.
+
   },
 ];
 
@@ -150,6 +175,16 @@ const Abilities = {
   bit(id) { return Number.isInteger(id) && id >= 0 && id < ABILITY_COUNT ? (1 << id) : 0; },
   has(mask, id) { return ((mask | 0) & Abilities.bit(id)) !== 0; },
   def(id) { return ABILITY_DEFS[id] || null; },
+  // the ability's CUE NAME — the js/audio.js recipe its shot sounds. One
+  // derivation for three callers: the sim's own emit, the predictor's
+  // speculative sink in js/net.js, and the own-echo test that stops the wire's
+  // copy of an already-sounded shot from doubling it. A record with no `cue`
+  // answers "fire", so nothing that shipped changes.
+  cueFor(id) { const d = ABILITY_DEFS[id]; return (d && d.cue) || "fire"; },
+  // ...and the set of them, for that echo test — DERIVED from the catalog so
+  // a new ability's cue is covered the day it is declared, rather than the day
+  // somebody remembers to widen a literal list in js/net.js.
+  CUE_KINDS: ABILITY_DEFS.map((d) => d.cue).filter(Boolean),
   exists(id) { return Number.isInteger(id) && id >= 0 && id < ABILITY_COUNT; },
 
   // THE ONE NORMALIZER for a mask arriving from anywhere — the DOM producer, a

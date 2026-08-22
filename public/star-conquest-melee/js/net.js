@@ -780,17 +780,28 @@
     // rests on, restated here because this is a raw index into a trimmed vector.
     PRED_CTX.owned = myOw;
     PRED_CTX.keyThrust = () => (terms ? terms.keyThrust !== false : true);
-    // `ability` is a NO-OP on both sinks, and deliberately so: the speculative
-    // tracer is hardcoded to the standard round's ballistics (spawnCue), so
-    // cueing an ability through it would draw a normal bullet for a shot that is
-    // not one — and an unmatched tracer expires as spec.cueRefused, which
-    // corrupts the row-2 refusal instrument. The ARM and its COOLDOWN are
-    // modelled anyway, because the drain slice does both before it reaches this
-    // sink; only the picture is withheld. A silent ability is honest until the
-    // tracer learns the catalog.
+    // `ability` withholds the PICTURE and no longer withholds the SOUND, and
+    // the two halves have different reasons. The picture stays out because the
+    // speculative tracer is hardcoded to the standard round's ballistics
+    // (spawnCue), so cueing an ability through it would draw a normal bullet
+    // for a shot that is not one — and an unmatched tracer expires as
+    // spec.cueRefused, which corrupts the row-2 refusal instrument. NONE of
+    // that touches ownCue: it is one Sfx.cue call, it spawns nothing, and it
+    // increments no counter in `spec`. So the sound rides the press edge like
+    // the gun's does, and the WIRE's copy of the same shot is suppressed as an
+    // own-echo below.
+    //   It is a PROMISE the server may still refuse. abilityFire's refusal
+    // ladder (a frozen overlay, a dead seat, a full bullet cap, no aim
+    // direction) runs past the arm this sink sits behind, and the predictor
+    // cannot see any of it — so a refused shot sounds anyway. That is the
+    // pay-then-refuse feel defect one file over, heard instead of merely felt;
+    // it is not new, it is not a desync, and the trade is deliberate: total
+    // silence at 200 ms is what made the ability undiscoverable.
+    //   The ARM and its COOLDOWN were always modelled here, because the drain
+    // slice does both before it reaches this sink.
     const fx = cueing
       ? { fire: () => { if (specFire(K, terms)) ownCue("fire", K.ship); },
-          ability: () => {},
+          ability: (id) => { ownCue(Abilities.cueFor(id), K.ship); },
           // the sink hands the flight slice's own two numbers straight
           // through — the same world position and pre-bounce magnitude
           // FLIGHT_FX.thud gives Encounter.emit in the sim
@@ -2446,8 +2457,14 @@
       //   Only the Sfx line skips. FX.cue and the comet instrument below are
       // separate consumers of this same queue — a light flash and a tripwire
       // reading — and both must still see every event this client is handed.
+      // ...and every ABILITY cue the catalog declares joins fire and thud in
+      // that list, DERIVED rather than written out again: the predictor sounds
+      // an ability on its press edge now, so the wire's copy a round trip
+      // later is the same shot twice. The membership test is a four-entry
+      // linear scan on a queue drain — cheaper than the Set it would replace.
       const ownEcho = predOn && !predIdle && e.seat === mySeat &&
-                      (e.k === "fire" || e.k === "thud");
+                      (e.k === "fire" || e.k === "thud" ||
+                       (window.Abilities && Abilities.CUE_KINDS.indexOf(e.k) >= 0));
       if (window.Sfx && !ownEcho) Sfx.cue(e.k, at, e.g, e.seat);
       // ...and the light layer, off the same presented queue: in net mode the
       // local sim never steps, so game.js's drainCues() never runs. It sits
@@ -2625,8 +2642,34 @@
     // while the predictor stands down. The comet flag left this record with
     // the halo-wire retirement: the machine's CONFIRMED state reads the wire
     // flag off the player struct, and nothing read predicted().comet any more.
+    // R3 2026-08-22: `comet` is BACK, and its absence was a dead read the
+    // measurement lane found by measuring. 9796fed ("two small honesty passes",
+    // 2026-08-19) dropped the key on the reasonable-looking ground that nothing
+    // SHIPPED consumed it — but test/tools/latency-rig.mjs consumed it at three
+    // sites (the pc sample column, the achieved-window counter, and
+    // scnSeekRam's own `burning` branch), and from that commit on all three
+    // read `undefined`. The consequences were silent and total: every comet run
+    // since reported 0 windows, latency-score's row-9 ram-disagreement metric
+    // found 0 episodes and returned null, and the seek-and-ram pilot never
+    // entered its burn branch — while the game itself was burning perfectly
+    // (measured on the same runs: cometCueShown rose 411 times and the wire's
+    // own comet flag stood on 641 sampled frames). The row-9 prior of 3.81 %
+    // was taken at 51b2267 on 2026-08-17, BEFORE this landed, which is why it
+    // was never noticed. This is the WIRE_V rotation trap in a second place:
+    // an instrument's read is a contract, and a field with no shipped consumer
+    // still has one. Render/telemetry only — predK.comet is the predictor's own
+    // kernel flag, nothing here is hashed and no wire byte moves.
+    //
+    // TEST/TELEMETRY ONLY. Do NOT route this key back into presentedPool's
+    // record: the comment above that function records why the halo round took it
+    // out — the predictor arms comet a few ticks before the wire confirms, and
+    // the old halo drew that prediction as truth. Publishing it HERE is safe
+    // because both shipped consumers are blind to it (ownLeadOn reads only
+    // truthiness; presentedPool builds an explicit en/enMax/cool literal with no
+    // spread). Putting it back into the presented record would re-create the
+    // defect that round retired.
     predicted: () => (predOn ? { energy: predK.energy, energyMax: predK.energyMax,
-      cool: predK.cool,
+      cool: predK.cool, comet: predK.comet,
       x: predK.ship.x + off.x, y: predK.ship.y + off.y,
       vx: predK.vel.x, vy: predK.vel.y } : null),
     // the live speculative-tracer list — game.js draws it in the world pass
