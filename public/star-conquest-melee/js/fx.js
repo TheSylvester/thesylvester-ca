@@ -85,7 +85,9 @@
   // The HOT palette. Warmer and brighter than the flat pass's C, because light
   // reads as light only when it sits above the ink it surrounds.
   const PAL = { clay: "#ff8a4a", radar: "#3ef2dd", bright: "#ffffff",
-                steel: "#9aa3b2", dim: "#5c6370" };
+                steel: "#9aa3b2", dim: "#5c6370",
+                gold: "#ffdf6b" }; // tier 3's hot twin of C.gold #f2cf4a —
+                                  // an ESTIMATE the owner judges under bloom
 
   const FX_SALT = 0x7EE1A5E0; // this layer's own hash salt — never FX_SEED's
   const RING_N = 100;         // the cosmetic pose ring: a FIXED ring buffer with
@@ -607,12 +609,21 @@
     // caller the next frame's bodies under the same reference.
     if (window.Encounter && Encounter.lights) {
       for (const L of Encounter.lights(view)) {
-        const radar = L.t.lastIndexOf("radar", 0) === 0;
         if (L.t === "orb") {
           blob(L.x, L.y, 9 * gl, PAL.clay, 0.4);
           blob(L.x, L.y, 2.4, PAL.bright, 0.5 * g1);
         } else {
-          blob(L.x, L.y, L.r * 2.6 * gl, radar ? PAL.radar : PAL.clay, 0.4);
+          // enemy records carry `tier` and the halo picks off the SAME field
+          // the plate ink keys on — tiers 2 and 3 burn the plate's hot twin,
+          // tier 1 keeps the clay burn every body always had (the plate is
+          // steel; the warm halo is the status quo, not a tier mark). The
+          // missile records are tier-LESS on purpose and keep the NAME test:
+          // a prefix match on an elite name would burn clay under a gold
+          // plate — the hull-0 two-clays bug, one plane over.
+          const hue = L.tier
+            ? (L.tier >= 3 ? PAL.gold : L.tier === 2 ? PAL.radar : PAL.clay)
+            : (L.t.lastIndexOf("radar", 0) === 0 ? PAL.radar : PAL.clay);
+          blob(L.x, L.y, L.r * 2.6 * gl, hue, 0.4);
         }
       }
     }

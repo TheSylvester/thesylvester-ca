@@ -282,6 +282,10 @@ const C = {
   dim: "#5c6370",
   radar: "#4fd1c5", // the radar variants' sensor cyan — reads as "looks ahead",
                     // and collides with nothing: clay is attack, steel is hull
+  steel: "#9aa3b2", // the tier-1 enemy PLATE — the byte every body always wore,
+                    // named so the tier ink lookup holds no bare literal
+  gold: "#f2cf4a",  // tier 3's plate — the owner chose yellow over red: hue
+                    // distance beats a heat ramp beside cyan and steel
 };
 const FONT = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 
@@ -2676,7 +2680,10 @@ function woundAt(x, y, seat, b, k) {
 // somebody else's. The three added plates are deliberately BLUE, GREEN and
 // VIOLET: clay is attack (bullets, the crown, the rosette) and cyan is the
 // radar's sensor, and an identity that borrowed either would be answering a
-// question the palette already answers.
+// question the palette already answers. Since the tier pass, cyan ALSO reads
+// as an enemy's tier 2 — for the aimed families the two meanings coincide by
+// construction (the tier-2 body IS the radar variant), and a cyan husk claims
+// no sensor it lacks: it claims a tier.
 //   `glow` IS NOT A `C` COLOUR, and hull 0's is the reason to say so out loud.
 // It feeds js/fx.js's light layer, and that layer burns in its OWN palette —
 // PAL, "the HOT palette, warmer and brighter than the flat pass's C, because

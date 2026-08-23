@@ -54,8 +54,11 @@
                              // every wave deals the same SCHEDULE and pattern on
                              // every run; anchor geometry tracks the live camera
                              // rectangle, which follows real input
-    enemy: {                 // dart baseline — statsFor scales hp and maxSpeed per wave
-      r: 7, hp: 2,
+    enemy: {                 // dart baseline — statsFor reads it FLAT: every body
+                             // declares a fixed hull, and hull reads as "how many
+                             // LMB shots" because BDMG is 1. Difficulty past wave
+                             // 9 comes from the tier MIX, never from a stat curve.
+      r: 7, hp: 1,
       maxSpeed: 2.4,         // px/tick — 144 px/s, just over the ship's 120 top speed
       steer: 0.06,           // fraction of (target − velocity) applied per tick
       prefer: 84,            // the ring it holds around the player, px
@@ -82,11 +85,11 @@
       halfWidth: 2.5,        // beam half-width, px
       telegraph: 45,         // 0.75 s of readable warning
       pulse: 10,             // beam live time, ticks
-      cooldown: 120,         // 2 s between lances — statsFor shortens this per wave
+      cooldown: 120,         // 2 s between lances — flat at every wave
       dmg: 1,
     },
-    charger: {               // ram archetype baseline — statsFor scales hp, maxSpeed, rest
-      r: 9, hp: 5,
+    charger: {               // ram archetype baseline — statsFor reads it flat
+      r: 9, hp: 4,
       maxSpeed: 1.6,         // seek speed — the dash, not the chase, is the threat
       steer: 0.05,
       prefer: 150,           // holds a wider ring than the darts; the lunge covers it
@@ -97,7 +100,7 @@
       windup: 50,            // plant ticks — the dash line locks at windup START
       dashSpeed: 7,          // px/tick along the locked line, constant across waves
       dashTicks: 26,         //   so is the duration — dodge difficulty stays fair
-      rest: 90,              // tired ticks after a lunge — statsFor shortens this
+      rest: 90,              // tired ticks after a lunge — flat at every wave
       cooldown: 30,          // seek ticks before the next lunge is considered
       dmg: 1,
     },
@@ -106,7 +109,7 @@
     // harrier makes it run instead of trade, so the answer to it is to close
     // the 185 px ring, not to duel across it. It never rams by intent.
     harrier: {
-      r: 8, hp: 4,
+      r: 8, hp: 2,
       maxSpeed: 1.80,        // approach — still slower than the 2.0 ship
       steer: 0.05,
       prefer: 185,           // the ring it holds
@@ -130,7 +133,7 @@
                              // the time the player needs to develop the lateral
                              // break that beats a missile; below it the first
                              // missile of every wave is an unavoidable hit
-      cooldown: 150,         // ticks between launches — statsFor shortens it, floor 90
+      cooldown: 150,         // ticks between launches — flat at every wave
       orbDrop: 2,
     },
     // The seeker missile. speed × life = 260 px of reach. It NO LONGER crosses
@@ -180,10 +183,10 @@
       trail: 14,             // the trail IS the UI for the turn radius; a bare dot
                              // travelling 4 px/tick reads as a teleport
       max: 6,                // a guard, not a mechanic: a harrier's cadence is its
-                             // cooldown (150, floor 90) plus lockon 45, so even at the
-                             // deepest wave 135 ticks separate launches against a
-                             // 65-tick life — no harrier ever has two of its own in
-                             // flight, and 3 of them cannot reach 6
+                             // cooldown (150, flat at every wave) plus lockon 45, so
+                             // 195 ticks separate launches against a 65-tick life —
+                             // no harrier ever has two of its own in flight, and 3
+                             // of them cannot reach 6
     },
     // The radar variants — the aim-attack archetypes' predictive siblings.
     // Base attacks punish a still player; a predicted attack punishes CONSTANT
@@ -210,7 +213,7 @@
     // beyond that. Get close to get around it — and close is where its contact
     // damage lives.
     anvil: {
-      r: 11, hp: 9, maxSpeed: 1.2, steer: 0.04, prefer: 0, band: 0, backSpeed: 0,
+      r: 11, hp: 3, maxSpeed: 1.2, steer: 0.04, prefer: 0, band: 0, backSpeed: 0,
       sepR: 52, engage: 0, orbDrop: 3,
       turnRate: 0.015,       // rad/tick — 0.86°/tick, the only body that does not snap
       arc: (70 * Math.PI) / 180, // HALF-angle: a ±70° frontal shield, 140° of cover
@@ -223,7 +226,7 @@
     // whole threat is the burst the player themself triggers, which is what
     // makes the kill a decision instead of a reflex.
     husk: {
-      r: 13, hp: 6, maxSpeed: 0.9, steer: 0.03, prefer: 0, band: 0, backSpeed: 0,
+      r: 13, hp: 5, maxSpeed: 0.9, steer: 0.03, prefer: 0, band: 0, backSpeed: 0,
       sepR: 58, engage: 0, orbDrop: 1,
       split: 3,              // shards dealt on a seeded fan at the death point
       kick: 2.2,             // px/tick of outward velocity on each shard
@@ -231,9 +234,10 @@
     },
     // The husk's payload, never a wave-schedule type: shards carry no split
     // field, so there is no recursion to bound. Faster than the player's 2.0 on
-    // purpose — they must be shot, not outrun.
+    // purpose — they must be shot, not outrun: 2.5 still clears the 2.0 ship
+    // by 0.5, and 1 hp keeps the burst a reflex answer, not a second fight.
     shard: {
-      r: 5, hp: 2, maxSpeed: 2.9, steer: 0.09, prefer: 0, band: 0, backSpeed: 0,
+      r: 5, hp: 1, maxSpeed: 2.5, steer: 0.09, prefer: 0, band: 0, backSpeed: 0,
       sepR: 22, engage: 0, orbDrop: 1,
     },
     player: { hull: 3, invuln: 62, // ≈ one second of post-hit grace
@@ -521,11 +525,17 @@
   let nextEntityId = 1;
   const nextId = () => nextEntityId++;
 
-  // ---- wave scaling — pure functions of the wave number ------------------
+  // ---- the wave schedule — pure functions of the wave number -------------
   // countsFor/statsFor/waveGroups read only ECFG constants: the same wave
-  // number always deals the same schedule and the same stats. startWave
+  // number always deals the same schedule. STATS no longer scale at all —
+  // statsFor is a constant table, and difficulty past wave 9 is the
+  // TIER_LADDER's mix (tier-1 bodies replaced by tier-2/3 at the same
+  // count), never a stat curve. startWave still
   // resolves statsFor ONCE into E.stats and spawnEnemy stamps that object
   // onto each body, so nothing reads a mutated global mid-wave.
+  // countsFor is PRODUCTION-DEAD above wave 9: only waveGroups' wave<10
+  // branch reads it (its caps make 10+ equal wave 9 anyway), and the ladder
+  // owns delivery from wave 10. The suites that read it deep name that.
   // One new idea per wave with a wave of air between it and the last: W1
   // darts alone (untouched), W2 the harrier — the first ranged threat, by
   // itself, against a schedule the player has already learned — W3 the
@@ -546,6 +556,40 @@
     };
   }
 
+  // ---- the tier ladder — waves 10+ ---------------------------------------
+  // [t1, t2, t3] per family; the row with the largest wave <= w applies.
+  // Waves 1-9 NEVER read this table — countsFor's arithmetic above stands and
+  // their deal is byte-identical to what it always was. Row 9 is the record
+  // of wave 9's terminal delivery (the stamped radarDarts counted at their
+  // own tier), kept so every row can be checked against ONE family total:
+  // every row of a family sums to the same body count, which is the
+  // bandwidth law — the wire's cost is COUNT, and mix is free. The wave
+  // steps and the mixes are an ESTIMATE; the owner retunes them in play.
+  const TIER_LADDER = {
+    dart:    { 9: [18, 3, 0], 10: [16, 4, 1], 13: [11, 7, 3], 16: [6, 10, 5], 19: [2, 12, 7], 22: [0, 12, 9] },
+    harrier: { 9: [3, 2, 0],  10: [2, 3, 0],  13: [2, 2, 1],  16: [1, 2, 2],  19: [0, 3, 2],  22: [0, 2, 3] },
+    charger: { 9: [4, 2, 0],  10: [3, 3, 0],  13: [2, 3, 1],  16: [1, 3, 2],  19: [0, 3, 3],  22: [0, 2, 4] },
+    husk:    { 9: [2, 0, 0],  10: [1, 1, 0],  13: [0, 2, 0],  16: [0, 1, 1],  19: [0, 1, 1],  22: [0, 0, 2] },
+    anvil:   { 9: [2, 0, 0],  10: [1, 1, 0],  13: [0, 2, 0],  16: [0, 1, 1],  19: [0, 1, 1],  22: [0, 0, 2] },
+  };
+  // each family's three tier type names, ladder column order
+  const TIER_TYPES = {
+    dart: ["dart", "radarDart", "eliteDart"],
+    harrier: ["harrier", "radarHarrier", "eliteHarrier"],
+    charger: ["charger", "radarCharger", "eliteCharger"],
+    husk: ["husk", "packHusk", "eliteHusk"],
+    anvil: ["anvil", "wardAnvil", "eliteAnvil"],
+  };
+  function tierRow(family, wave) {
+    const rows = TIER_LADDER[family];
+    let best = null;
+    for (const k in rows) {
+      const w = Number(k);
+      if (w <= wave && (best === null || w > best)) best = w;
+    }
+    return rows[best];
+  }
+
   // The one rotation the whole file REPORTS types by: snapState's byType and
   // the state hash both walk it, so its order is a committed contract and the
   // radar single stays beside its parent here. shard is absent on purpose — it
@@ -560,80 +604,82 @@
   const DEALFIRST = ["dart", "harrier", "charger", "husk", "anvil"];
   const DEALLAST = ["radarHarrier", "radarCharger"];
   // ...and the full roster, which is the rotation plus the bodies that are
-  // never their own scheduled group: the husk's shard payload, and the
-  // radarDart, which replaces a member inside a dart pack. This is the
+  // never their own scheduled group: the husk's shard payload, the
+  // radarDart, which replaces a member inside a dart pack, and the SEVEN tier
+  // rows appended at v10. This is the
   // membership test spawnEnemy uses, so an unknown name can never reach
-  // E.stats through the prototype chain.
-  const ROSTER = ROTATION.concat("shard", "radarDart");
+  // E.stats through the prototype chain. ORDER IS A WIRE CONTRACT: this list
+  // must stay equal to server/snapshot.mjs's ENEMY_TYPES — append only, and
+  // server/snapshot.test.mjs pins the equality by reading this file's source.
+  const ROSTER = ROTATION.concat("shard", "radarDart",
+    "packHusk", "wardAnvil", "eliteDart", "eliteHarrier", "eliteCharger",
+    "eliteHusk", "eliteAnvil");
+
+  // The anvil tiers' currency: the shield HALF-angle grows one step a tier —
+  // ±70° / ±90° / ±110° at the shipped baseline (an ESTIMATE the owner judges
+  // in play). A step, not three literals, so the dev slider keeps moving every
+  // tier at once.
+  const ARCSTEP = (20 * Math.PI) / 180;
 
   function statsFor(wave) {
-    const hpBonus = Math.min(Math.floor((wave - 1) / 3), 4); // +1 hull every third wave, capped
-    const mul = Math.min(1 + 0.08 * (wave - 1), 2); // shared speed multiplier — the cap doubles the base
-    // the parent entries resolve first as consts, so the radar variants below
-    // can derive from them instead of re-stating a curve they must never drift from
+    // THE CONSTANT TABLE. The wave parameter is kept for the callers' sake
+    // (js/net.js re-derives from (wave, typeName), the dev refresh() and the
+    // suites all pass one) but nothing reads it any more: every body declares
+    // a FIXED hull, a fixed speed and a fixed cadence, and hull reads as "how
+    // many LMB shots" because BDMG is 1. The old curves — +1 hull every third
+    // wave, the 1.08^ shared speed multiplier, the 0.95^ cadence shorteners
+    // with their 72/54/90 floors — are DELETED, not floored: the owner's
+    // ruling is that no enemy scales automatically. Difficulty past wave 9 is
+    // the tier MIX (see TIER_LADDER), never a stat curve.
+    // The parent entries resolve first as consts, so the tier rows below
+    // can derive from them instead of re-stating values they must never drift from.
     const dart = {
         r: ECFG.enemy.r,
-        hp: ECFG.enemy.hp + hpBonus, // 2..6 — the hpBonus cap bounds it
-        maxSpeed: ECFG.enemy.maxSpeed * mul, // 2.4..4.8
+        hp: ECFG.enemy.hp,
+        maxSpeed: ECFG.enemy.maxSpeed,
         steer: ECFG.enemy.steer, prefer: ECFG.enemy.prefer, band: ECFG.enemy.band,
         backSpeed: ECFG.enemy.backSpeed, sepR: ECFG.enemy.sepR,
-        cooldown: Math.max(72, Math.round(ECFG.lance.cooldown * Math.pow(0.95, wave - 1))),
+        cooldown: ECFG.lance.cooldown,
         engage: ECFG.lance.engage, // every type carries an engage, 0 meaning "no attack
                                    // mode" — that is what lets stepEnemy ask P.engage
                                    // instead of type-testing for a range
         orbDrop: 1, // a dart still drops exactly one orb at every wave
+        tier: 1, // colour reads tier, and the fixture's diagnosis line records it
     };
     const charger = {
         r: ECFG.charger.r,
-        hp: ECFG.charger.hp + hpBonus,
-        maxSpeed: ECFG.charger.maxSpeed * mul,
+        hp: ECFG.charger.hp,
+        maxSpeed: ECFG.charger.maxSpeed,
         steer: ECFG.charger.steer, prefer: ECFG.charger.prefer, band: ECFG.charger.band,
         backSpeed: ECFG.charger.backSpeed, sepR: ECFG.charger.sepR,
-        rest: Math.max(54, Math.round(ECFG.charger.rest * Math.pow(0.95, wave - 1))),
+        rest: ECFG.charger.rest,
         engage: ECFG.charger.engage,
         orbDrop: 2, // the heavier body pays out double
+        tier: 1,
     };
-    // the same two scaling rules as above — hp + hpBonus, maxSpeed × mul —
-      // govern the whole roster, so no type ever needs its own curve. The
-      // launcher's CADENCE shortens on the dart's 0.95^(wave-1) curve; the
-      // missile it fires does not scale at all (see ECFG.missile).
-      // The three new archetypes scale in HP and CADENCE only — their speeds
-      // are wave-invariant, on the same rule the shard and the missile follow
-      // and for the same reason the charger's dashSpeed never moved: a speed
-      // that a fairness claim rests on must not expire. Each of these three
-      // makes such a claim. The harrier's whole read is that it flees FASTER
-      // than it closes (crowd it and it runs), and the shared multiplier scales
-      // maxSpeed while leaving backSpeed alone, so the kite would invert at wave 4
-      // and the body would outrun the ship at wave 10. The anvil promises you
-      // can always walk away from it; at 1.2 × mul it out-paces a 2.0 px/tick
-      // ship from wave 10 and becomes a shielded body you cannot escape OR
-      // shoot from the front. The dart and the charger still carry the roster's
-      // speed escalation, exactly as they always did — that curve is untouched.
+    // Every speed is now what the fairness claims always wanted: the harrier
+    // flees FASTER than it closes at every wave (crowd it and it runs), the
+    // anvil and the husk stay under the 2.0 px/tick ship forever, and the
+    // dart's 2.4 stays what wave 1 taught. The charger's dashSpeed never
+    // scaled; now nothing does.
     const harrier = {
         r: ECFG.harrier.r,
-        hp: ECFG.harrier.hp + hpBonus,
-        maxSpeed: ECFG.harrier.maxSpeed, // invariant — see above
+        hp: ECFG.harrier.hp,
+        maxSpeed: ECFG.harrier.maxSpeed,
         steer: ECFG.harrier.steer, prefer: ECFG.harrier.prefer, band: ECFG.harrier.band,
         backSpeed: ECFG.harrier.backSpeed, sepR: ECFG.harrier.sepR,
         engage: ECFG.harrier.engage,
-        cooldown: Math.max(90, Math.round(ECFG.harrier.cooldown * Math.pow(0.95, wave - 1))),
+        cooldown: ECFG.harrier.cooldown,
         orbDrop: ECFG.harrier.orbDrop,
+        tier: 1,
     };
-    return {
-      dart, charger, harrier,
-      // The radar variants: the SAME body — every stat the parent resolved,
-      // by reference to the const above, never re-derived — except orbDrop
-      // (+1, the smarter aim pays a little more) and the two markers behavior
-      // code reads. `base` is how shared code resolves the archetype; `radar`
-      // is the aim switch. No hp or speed bump on purpose: the threat must be
-      // the aim, and a stat bump would blur that read.
-      radarDart: { ...dart, orbDrop: dart.orbDrop + 1, radar: true, base: "dart" },
-      radarCharger: { ...charger, orbDrop: charger.orbDrop + 1, radar: true, base: "charger" },
-      radarHarrier: { ...harrier, orbDrop: harrier.orbDrop + 1, radar: true, base: "harrier" },
-      anvil: {
+    // the three archetypes with no radar sibling resolve as consts too, so
+    // their tier rows below can spread from them the same way the radar
+    // variants spread from theirs
+    const anvil = {
         r: ECFG.anvil.r,
-        hp: ECFG.anvil.hp + hpBonus,
-        maxSpeed: ECFG.anvil.maxSpeed, // invariant — 1.2 stays well under the ship's
+        hp: ECFG.anvil.hp,
+        maxSpeed: ECFG.anvil.maxSpeed, // 1.2 stays well under the ship's
                                        // 2.0 forever, which is the promise the whole
                                        // archetype rests on: you can always leave
         steer: ECFG.anvil.steer, prefer: ECFG.anvil.prefer, band: ECFG.anvil.band,
@@ -643,10 +689,11 @@
         arc: ECFG.anvil.arc,           // body turn instead of snap, and carry a shield
         flee: ECFG.anvil.flee,
         orbDrop: ECFG.anvil.orbDrop,
-      },
-      husk: {
+        tier: 1,
+    };
+    const husk = {
         r: ECFG.husk.r,
-        hp: ECFG.husk.hp + hpBonus,
+        hp: ECFG.husk.hp,
         maxSpeed: ECFG.husk.maxSpeed, // invariant — the husk's threat is the burst,
                                       // and choosing WHERE to pop it is only a choice
                                       // while the drifter is slower than the ship
@@ -655,19 +702,55 @@
         engage: ECFG.husk.engage,
         split: ECFG.husk.split, // the presence of this field is what makes a body burst
         orbDrop: ECFG.husk.orbDrop,
-      },
-      // shards come from statsFor too, so a husk that dies on wave 9 bursts
-      // into wave-9 shards — scaled in hp, deliberately NOT in speed: the
-      // charger's dashSpeed set the precedent that a dodge stays fair forever.
-      shard: {
+        tier: 1,
+    };
+    // shards come from statsFor too. ONE tier, no variants — the payload is
+    // not a scheduled body, and husk tiers pay in shard COUNT, never in a
+    // tougher or faster shard.
+    const shard = {
         r: ECFG.shard.r,
-        hp: ECFG.shard.hp + hpBonus,
+        hp: ECFG.shard.hp,
         maxSpeed: ECFG.shard.maxSpeed,
         steer: ECFG.shard.steer, prefer: ECFG.shard.prefer, band: ECFG.shard.band,
         backSpeed: ECFG.shard.backSpeed, sepR: ECFG.shard.sepR,
         engage: ECFG.shard.engage,
         orbDrop: ECFG.shard.orbDrop,
-      },
+        tier: 1,
+    };
+    return {
+      dart, charger, harrier,
+      // The radar variants — the TIER-2 rows of the three aimed families:
+      // the SAME body — every stat the parent resolved, by reference to the
+      // const above, never re-derived — except the tier currencies: hp +1,
+      // orbDrop +1 (the smarter aim pays a little more), `tier`, and the two
+      // markers behavior code reads. `base` is how
+      // shared code resolves the archetype; `radar` is the aim switch.
+      radarDart: { ...dart, hp: dart.hp + 1, orbDrop: dart.orbDrop + 1, radar: true, base: "dart", tier: 2 },
+      radarCharger: { ...charger, hp: charger.hp + 1, orbDrop: charger.orbDrop + 1, radar: true, base: "charger", tier: 2 },
+      radarHarrier: { ...harrier, hp: harrier.hp + 1, orbDrop: harrier.orbDrop + 1, radar: true, base: "harrier", tier: 2 },
+      anvil, husk, shard,
+      // The v10 tier rows. Hull is DERIVED — tier 2 = tier 1 + 1, tier 3 =
+      // tier 1 + 2 — never re-typed, and orbDrop follows the same line.
+      // Every tier row spreads from its TIER-1 const above and re-states its
+      // own markers: the elite rows of the three aimed families carry the
+      // radar pair (they keep the predictive aim), the husk and anvil tiers
+      // carry `base` alone, so stepEnemy's kin resolve
+      // and the draw dispatch need no new behaviour branch.
+      // The husk tiers pay in SHARD COUNT (split +1/+2 — never a tougher or
+      // faster shard) and the anvil tiers in SHIELD ARC (the half-angle grows
+      // ±20° a tier — an ESTIMATE the owner judges in play). Both derive from
+      // the ECFG baselines so the dev sliders keep moving every tier at once.
+      packHusk: { ...husk, hp: husk.hp + 1, split: husk.split + 1,
+        orbDrop: husk.orbDrop + 1, base: "husk", tier: 2 },
+      wardAnvil: { ...anvil, hp: anvil.hp + 1, arc: anvil.arc + ARCSTEP,
+        orbDrop: anvil.orbDrop + 1, base: "anvil", tier: 2 },
+      eliteDart: { ...dart, hp: dart.hp + 2, orbDrop: dart.orbDrop + 2, radar: true, base: "dart", tier: 3 },
+      eliteHarrier: { ...harrier, hp: harrier.hp + 2, orbDrop: harrier.orbDrop + 2, radar: true, base: "harrier", tier: 3 },
+      eliteCharger: { ...charger, hp: charger.hp + 2, orbDrop: charger.orbDrop + 2, radar: true, base: "charger", tier: 3 },
+      eliteHusk: { ...husk, hp: husk.hp + 2, split: husk.split + 2,
+        orbDrop: husk.orbDrop + 2, base: "husk", tier: 3 },
+      eliteAnvil: { ...anvil, hp: anvil.hp + 2, arc: anvil.arc + 2 * ARCSTEP,
+        orbDrop: anvil.orbDrop + 2, base: "anvil", tier: 3 },
     };
   }
 
@@ -685,21 +768,52 @@
         { count: 2, type: "dart", warnAt: 810, spawnAt: 900 },  // second pack warns at 13.5 s, lands at 15 s
       ];
     }
-    const n = countsFor(wave);
     const queues = { dart: [], harrier: [], radarHarrier: [], charger: [], radarCharger: [], husk: [], anvil: [] };
-    for (let left = n.darts; left > 0; left -= 3) queues.dart.push({ count: Math.min(3, left), type: "dart" });
-    for (let i = 0; i < n.harriers; i++) queues.harrier.push({ count: 1, type: "harrier" });
-    for (let i = 0; i < n.chargers; i++) queues.charger.push({ count: 1, type: "charger" });
-    for (let i = 0; i < n.husks; i++) queues.husk.push({ count: 1, type: "husk" });
-    for (let i = 0; i < n.anvils; i++) queues.anvil.push({ count: 1, type: "anvil" });
-    // the radar heavies land as singles like their parents; the radarDart is
-    // never its own group — the LAST packs each carry ONE, as member 0, so the
-    // body wearing the cyan ring leads a pack the player meets late in the
-    // wave. Deterministic, and no rand() consumed.
-    for (let i = 0; i < n.radarHarriers; i++) queues.radarHarrier.push({ count: 1, type: "radarHarrier" });
-    for (let i = 0; i < n.radarChargers; i++) queues.radarCharger.push({ count: 1, type: "radarCharger" });
-    for (let i = 0; i < Math.min(n.radarDarts, queues.dart.length); i++) {
-      queues.dart[queues.dart.length - 1 - i].radar = 1;
+    if (wave >= 10) {
+      // THE REPLACEMENT DEAL. From wave 10 the ladder upgrades bodies IN
+      // PLACE: the same body count per family as wave 9's terminal deal, with
+      // tier-1 bodies replaced by tier-2 and tier-3 bodies — never more
+      // bodies, because COUNT is the bandwidth cost (R3's law: 420 + 78 ×
+      // enemies kbit/s) and MIX is free. Dart packs become HOMOGENEOUS TYPED
+      // PACKS (packs of darts, then packs of radarDarts, then packs of
+      // eliteDarts — the sharper aim still arrives late); the member-0
+      // radar-stamp mechanism below stays the waves 2-9 deal and RETIRES
+      // here. Heavies keep dealing as count-1 singles; the tier-2/3 aimed
+      // heavies join the DEALLAST tail their radar parents always closed the
+      // wave on. Deterministic, and no rand() consumed.
+      for (const fam of ["dart", "harrier", "charger", "husk", "anvil"]) {
+        const row = tierRow(fam, wave);
+        for (let t = 0; t < 3; t++) {
+          const type = TIER_TYPES[fam][t];
+          if (fam === "dart") {
+            for (let left = row[t]; left > 0; left -= 3) {
+              queues.dart.push({ count: Math.min(3, left), type });
+            }
+          } else {
+            const q = t > 0 && (fam === "harrier" || fam === "charger")
+              ? "radar" + fam.charAt(0).toUpperCase() + fam.slice(1) : fam;
+            for (let i = 0; i < row[t]; i++) queues[q].push({ count: 1, type });
+          }
+        }
+      }
+    } else {
+      const n = countsFor(wave);
+      for (let left = n.darts; left > 0; left -= 3) queues.dart.push({ count: Math.min(3, left), type: "dart" });
+      for (let i = 0; i < n.harriers; i++) queues.harrier.push({ count: 1, type: "harrier" });
+      for (let i = 0; i < n.chargers; i++) queues.charger.push({ count: 1, type: "charger" });
+      for (let i = 0; i < n.husks; i++) queues.husk.push({ count: 1, type: "husk" });
+      for (let i = 0; i < n.anvils; i++) queues.anvil.push({ count: 1, type: "anvil" });
+      // the radar heavies land as singles like their parents; the radarDart is
+      // never its own group — the LAST packs each carry ONE, as member 0, so the
+      // body wearing the cyan ring leads a pack the player meets late in the
+      // wave. Deterministic, and no rand() consumed. This stamp path is the
+      // waves 2-9 deal EXACTLY as it always was — the ladder branch above
+      // never stamps, so those waves' committed group hashes never moved.
+      for (let i = 0; i < n.radarHarriers; i++) queues.radarHarrier.push({ count: 1, type: "radarHarrier" });
+      for (let i = 0; i < n.radarChargers; i++) queues.radarCharger.push({ count: 1, type: "radarCharger" });
+      for (let i = 0; i < Math.min(n.radarDarts, queues.dart.length); i++) {
+        queues.dart[queues.dart.length - 1 - i].radar = 1;
+      }
     }
     // round-robin over the ordinary types, one group per non-empty queue per
     // pass. The total bounds the loop, so a queue running dry can never spin it.
@@ -2311,10 +2425,14 @@
   // is a row here and not a nested conditional. The same set names the heavy
   // SPAWN cue, for the same reason — the lone body arriving on the edge is
   // either something big or it is not.
-  const HEAVY = { charger: true, radarCharger: true, anvil: true, husk: true };
+  const HEAVY = { charger: true, radarCharger: true, anvil: true, husk: true,
+                  eliteCharger: true, wardAnvil: true, eliteAnvil: true,
+                  packHusk: true, eliteHusk: true };
 
-  // A husk's death burst: three shards on a seeded fan, ONE rand() draw for the
-  // base angle and 120° between them, each pushed clear of the corpse and given
+  // A husk's death burst: `stats.split` shards on a seeded fan — the husk
+  // tiers' currency, 3/4/5 by tier — ONE rand() draw for the
+  // base angle whatever the count, evenly spaced, each pushed clear of the
+  // corpse and given
   // outward velocity. It deliberately does NOT route through spawnEnemy: a husk
   // killed in your face is SUPPOSED to burst in your face, and the
   // minPlayerDist push-out that protects a scheduled spawn would teleport the
@@ -2347,7 +2465,9 @@
       emit(HEAVY[e.type] ? "killheavy" : "kill", e, undefined, e.lastAtk);
       for (let k = 0; k < e.orbDrop; k++) { // 1 a dart or a shard, 2 a charger or a
                                             // harrier, 3 an anvil, 1 the husk itself —
-                                            // whose three shards make the burst pay 4
+                                            // whose split shards each pay 1 more, so a
+                                            // tier-1 burst pays 4 and the tiers pay up
+                                            // the split line
         const a = rand() * Math.PI * 2; // each drop dealt its own drift
         E.orbs.push({ id: nextId(), x: e.x, y: e.y, vx: Math.cos(a) * ECFG.orb.drift, vy: Math.sin(a) * ECFG.orb.drift });
       }
@@ -3128,9 +3248,15 @@
 
   // One draw function per type, dispatched off a table instead of a chain of
   // type tests. Every silhouette is Canvas primitives in the palette the whole
-  // game already speaks — no assets, and no unique hue per enemy: motion, size
-  // and telegraph carry the distinction instead. Draw only: nothing here
+  // game already speaks — no assets. SILHOUETTE says archetype, COLOUR says
+  // tier (the shard excepted — one tier): the plate below is the ONE lookup
+  // every body block reads, steel 1 / radar cyan 2 / gold 3, and the light
+  // layer picks its halo off the same tier field, so ink and light can never
+  // disagree. The clay centre dot stays clay on every tier — clay is the
+  // attack channel, never a tier. Draw only: nothing here
   // mutates sim state and nothing here draws randomness.
+  const TIER_INK = { 1: C.steel, 2: C.radar, 3: C.gold };
+  const tierInk = (e) => TIER_INK[e.stats && e.stats.tier] || C.steel;
   function drawDart(e) {
     const L = ECFG.lance;
     if (e.mode === "tele") {
@@ -3168,7 +3294,7 @@
     ctx.save();
     ctx.translate(e.x, e.y);
     ctx.rotate(bodyAngle(e));
-    ctx.fillStyle = e.flash > 0 ? C.bright : "#9aa3b2";
+    ctx.fillStyle = e.flash > 0 ? C.bright : tierInk(e);
     ctx.beginPath(); // the dart: nose toward the player, notched tail
     ctx.moveTo(8, 0);
     ctx.lineTo(-6, 5.5);
@@ -3204,7 +3330,7 @@
         ctx.translate(e.x - Math.cos(e.lockA) * g * CH.dashSpeed, e.y - Math.sin(e.lockA) * g * CH.dashSpeed);
         ctx.rotate(e.lockA);
         ctx.globalAlpha = 0.28 - g * 0.07;
-        ctx.fillStyle = "#9aa3b2";
+        ctx.fillStyle = tierInk(e);
         chargerPath();
         ctx.fill();
         ctx.restore();
@@ -3217,7 +3343,7 @@
     // the windup body flash quickens as the dash nears — with the
     // brightening line, two independent tells for one attack
     const per = e.mode === "windup" ? Math.max(2, 10 - Math.floor((1 - e.t / CH.windup) * 8)) : 0;
-    ctx.fillStyle = e.flash > 0 || (per > 0 && e.t % per < per / 2) ? C.bright : "#9aa3b2";
+    ctx.fillStyle = e.flash > 0 || (per > 0 && e.t % per < per / 2) ? C.bright : tierInk(e);
     chargerPath();
     ctx.fill();
     ctx.fillStyle = C.clay;
@@ -3254,7 +3380,7 @@
     ctx.save();
     ctx.translate(e.x, e.y);
     ctx.rotate(bodyAngle(e));
-    ctx.fillStyle = e.flash > 0 ? C.bright : "#9aa3b2";
+    ctx.fillStyle = e.flash > 0 ? C.bright : tierInk(e);
     ctx.beginPath(); // a long nose over a deeply notched tail — nothing like a dart
     ctx.moveTo(10, 0);
     ctx.lineTo(1, 3.5);
@@ -3278,7 +3404,7 @@
     ctx.save();
     ctx.translate(e.x, e.y);
     ctx.rotate(bodyAngle(e));
-    ctx.fillStyle = e.flash > 0 ? C.bright : "#9aa3b2";
+    ctx.fillStyle = e.flash > 0 ? C.bright : tierInk(e);
     ctx.beginPath();
     ctx.moveTo(11, 0);   // the armored prow
     ctx.lineTo(3, 9);
@@ -3304,7 +3430,7 @@
     ctx.save();
     ctx.translate(e.x, e.y);
     ctx.rotate(bodyAngle(e));
-    ctx.fillStyle = e.flash > 0 ? C.bright : "#9aa3b2";
+    ctx.fillStyle = e.flash > 0 ? C.bright : tierInk(e);
     ctx.beginPath();
     ctx.arc(0, 0, e.r - 1, 0, Math.PI * 2);
     ctx.fill();
@@ -3331,7 +3457,7 @@
     ctx.save();
     ctx.translate(e.x, e.y);
     ctx.rotate(bodyAngle(e));
-    ctx.fillStyle = e.flash > 0 ? C.bright : "#9aa3b2";
+    ctx.fillStyle = e.flash > 0 ? C.bright : tierInk(e);
     ctx.beginPath();
     ctx.moveTo(6, 0);
     ctx.lineTo(-4, 3.6);
@@ -3350,17 +3476,13 @@
   function drawRadarAccent(e) {
     ctx.save();
     ctx.translate(e.x, e.y);
-    ctx.fillStyle = C.radar; // the cyan core over the parent's clay dot
+    ctx.fillStyle = C.radar; // the cyan core over the parent's clay dot — on a
+    // gold elite this dot still says "this one leads your aim". The rim SWEEP
+    // that used to walk here is DELETED (owner, the tier pass): the tier
+    // colour now carries what the sweep said.
     ctx.beginPath();
     ctx.arc(0, 0, 2, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = C.radar;
-    ctx.globalAlpha = 0.55;
-    ctx.lineWidth = 1.2;
-    const sa = E.waveTick * 0.09; // the sweep — a short arc walking the rim
-    ctx.beginPath();
-    ctx.arc(0, 0, e.r + 4, sa, sa + 1.2);
-    ctx.stroke();
     ctx.restore();
     if (e.predT > 0) {
       const p = 1 - e.predT / 20; // expands and fades over the 20-tick ping
@@ -3387,7 +3509,15 @@
   const DRAW_BODY = { dart: drawDart, charger: drawCharger, harrier: drawHarrier,
                       anvil: drawAnvil, husk: drawHusk, shard: drawShard,
                       radarDart: drawRadarDart, radarCharger: drawRadarCharger,
-                      radarHarrier: drawRadarHarrier };
+                      radarHarrier: drawRadarHarrier,
+                      // the tier rows draw as their parents — the elite aimed
+                      // rows keep the radar accent they carry, the husk and
+                      // anvil tiers keep the parent silhouette; COLOUR is what
+                      // says tier (tierInk), never a new shape
+                      eliteDart: drawRadarDart, eliteCharger: drawRadarCharger,
+                      eliteHarrier: drawRadarHarrier,
+                      packHusk: drawHusk, eliteHusk: drawHusk,
+                      wardAnvil: drawAnvil, eliteAnvil: drawAnvil };
 
   // the missile, and the trail that is the actual UI for it: a bare dot moving
   // 4 px/tick reads as a teleport, while a tapering 14-sample tail shows the
@@ -3452,7 +3582,10 @@
   function lights(view) {
     LIGHTS.length = 0;
     if (E.state === "idle") return LIGHTS;
-    for (const e of (view && view.enemies) || E.enemies) LIGHTS.push({ x: e.x, y: e.y, r: e.r, t: e.type });
+    // enemy records carry `tier` so the halo reads the SAME table the plate
+    // ink reads; missile records stay tier-LESS — the fx pick must keep its
+    // name test for them or every radar missile's halo goes clay
+    for (const e of (view && view.enemies) || E.enemies) LIGHTS.push({ x: e.x, y: e.y, r: e.r, t: e.type, tier: e.stats && e.stats.tier });
     for (const m of (view && view.missiles) || E.missiles) LIGHTS.push({ x: m.x, y: m.y, r: m.r, t: m.radar ? "radarMissile" : "missile" });
     for (const o of (view && view.orbs) || E.orbs) LIGHTS.push({ x: o.x, y: o.y, r: ECFG.orb.r, t: "orb" });
     return LIGHTS;
@@ -5214,14 +5347,15 @@
   // except contact.dmgToPlayer (damage integers are design decisions, not dials).
   // Secondary knobs (per-kind steer/band/sepR beyond dart+shard, husk.push,
   // missile hp/trail, orbDrop) stay out too — the rows below are the feel set.
-  // statsFor's hard floors (dart cooldown 72, harrier cooldown 90, charger
-  // rest 54) stay in statsFor — sliders move the baselines under them.
+  // statsFor is a CONSTANT table now — no wave curve and no cadence floor
+  // stands between a slider's baseline and the resolved stat: the value a
+  // row writes is the value every wave deals.
   const TUNING = {
     groups: [ // display order; one titled section per group in the enemies tab
       { key: "dart", label: "DART + LANCE", rows: [
         { id: "dart-hp", label: "hp", min: 1, max: 12, step: 1,
           get: () => ECFG.enemy.hp, set: (v) => { ECFG.enemy.hp = v; },
-          fmt: (v) => v + " base · " + (E.stats ? E.stats.dart.hp + " live @ w" + E.wave : "no wave") + " · +1 per 3 waves (cap +4)" },
+          fmt: (v) => v + " base · " + (E.stats ? E.stats.dart.hp + " live @ w" + E.wave : "no wave") + " · flat at every wave" },
         { id: "dart-max-speed", label: "max speed", min: 1.2, max: 6, step: 0.05,
           get: () => ECFG.enemy.maxSpeed, set: (v) => { ECFG.enemy.maxSpeed = v; },
           fmt: (v) => v.toFixed(2) + " px/tick base · " + (E.stats ? E.stats.dart.maxSpeed.toFixed(2) + " live @ w" + E.wave : "no wave") },
@@ -5257,7 +5391,7 @@
           fmt: (v) => v + " ticks beam live" },
         { id: "dart-lance-cooldown", label: "lance cooldown", min: 60, max: 360, step: 1,
           get: () => ECFG.lance.cooldown, set: (v) => { ECFG.lance.cooldown = v; },
-          fmt: (v) => v + " ticks base · " + (E.stats ? E.stats.dart.cooldown + " live @ w" + E.wave : "no wave") + " · floor 72" },
+          fmt: (v) => v + " ticks base · " + (E.stats ? E.stats.dart.cooldown + " live @ w" + E.wave : "no wave") + " · flat at every wave" },
       ]},
       { key: "charger", label: "CHARGER", rows: [
         { id: "charger-hp", label: "hp", min: 1, max: 20, step: 1,
@@ -5283,7 +5417,7 @@
           fmt: (v) => v + " ticks · " + Math.round(v * ECFG.charger.dashSpeed) + " px of travel" },
         { id: "charger-rest", label: "rest", min: 45, max: 300, step: 1,
           get: () => ECFG.charger.rest, set: (v) => { ECFG.charger.rest = v; },
-          fmt: (v) => v + " ticks base · " + (E.stats ? E.stats.charger.rest + " live @ w" + E.wave : "no wave") + " · floor 54" },
+          fmt: (v) => v + " ticks base · " + (E.stats ? E.stats.charger.rest + " live @ w" + E.wave : "no wave") + " · flat at every wave" },
         { id: "charger-cooldown", label: "cooldown", min: 10, max: 120, step: 1,
           get: () => ECFG.charger.cooldown, set: (v) => { ECFG.charger.cooldown = v; },
           fmt: (v) => v + " seek ticks before the next lunge" },
@@ -5312,7 +5446,7 @@
           fmt: (v) => v + " ticks planted · " + (v / 60).toFixed(2) + " s" },
         { id: "harrier-cooldown", label: "cooldown", min: 75, max: 480, step: 1,
           get: () => ECFG.harrier.cooldown, set: (v) => { ECFG.harrier.cooldown = v; },
-          fmt: (v) => v + " ticks base · " + (E.stats ? E.stats.harrier.cooldown + " live @ w" + E.wave : "no wave") + " · floor 90" },
+          fmt: (v) => v + " ticks base · " + (E.stats ? E.stats.harrier.cooldown + " live @ w" + E.wave : "no wave") + " · flat at every wave" },
       ]},
       { key: "missile", label: "SEEKER MISSILE", rows: [
         { id: "missile-speed", label: "speed", min: 3, max: 12, step: 0.05,
@@ -5792,6 +5926,10 @@
       waveGroups,
       countsFor,
       statsFor,
+      TIER_LADDER,
+      TIER_TYPES,
+      tierRow,
+      tierInk,
       // the direct hooks that can emit outside a step: each drains after the
       // call, so a suite's log assertions see the cue on the same call — and
       // each keeps its exact return value
@@ -5928,7 +6066,23 @@
       setBounce: (v) => { BOUNCE = !!v; },
       edgeArrows: computeEdgeArrows, // the resolved arrow list, straight off live state
       arrowCfg: ARROWS,              // inset/cap/buckets — checks read these, never copy them
-      tunables: () => ({ BCOOL, BLIFE, AUTOFIRE, BSPEED, BMAX, VMAX, TICK, BDMG, CONTACTCD, BLASTR, BLASTGAIN, COMETDMG, COMETCD, PVPORBS, PVPREWIND }),
+      // ENEMY is the fixture oracle's window onto the enemy constants: the
+      // golden fixtures' section M compares this whole record, and without it
+      // an ECFG hull retune would red every hash while the diagnosis line
+      // stayed green — "hashes failing alone means the code moved" would be a
+      // lie. A compact per-type serialization (hp, split, arc, tier), plus
+      // the shard's speed — the constants this pass made load-bearing.
+      tunables: () => ({ BCOOL, BLIFE, AUTOFIRE, BSPEED, BMAX, VMAX, TICK, BDMG, CONTACTCD, BLASTR, BLASTGAIN, COMETDMG, COMETCD, PVPORBS, PVPREWIND,
+        ENEMY: (() => {
+          const S = statsFor(1);
+          const m = { shardSpeed: ECFG.shard.maxSpeed };
+          for (const t of ROSTER) {
+            m[t] = { hp: S[t].hp, tier: S[t].tier };
+            if (S[t].split !== undefined) m[t].split = S[t].split;
+            if (S[t].arc !== undefined) m[t].arc = S[t].arc;
+          }
+          return m;
+        })() }),
                        // PVPORBS rides here too, and for the same reason COMETCD does:
                        // the ENCOUNTER is what reads it (deathToll deals the orbs — on
                        // EVERY death now, which is why the name still says PvP and the

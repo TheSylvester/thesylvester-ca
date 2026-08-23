@@ -75,7 +75,7 @@
   // reaches it through window like it reaches Flight
   const AB_FIRE = Abilities.bit(Abilities.ABILITY.FIRE);
   const AB_COMET = Abilities.bit(Abilities.ABILITY.COMET);
-  const NET_V = 9; // MUST equal server/snapshot.mjs's SNAPSHOT_VERSION — a
+  const NET_V = 10; // MUST equal server/snapshot.mjs's SNAPSHOT_VERSION — a
                    // classic script cannot import it, so this mirrors it by
                    // hand; the s.v gate below silently drops every snapshot
                    // if the two ever drift, and a stale hello meets 4001
@@ -400,11 +400,14 @@
   // Mirrored BY HAND from server/snapshot.mjs's ENEMY_TYPES / ENEMY_MODES, for
   // the same reason NET_V is mirrored: a classic script cannot import the
   // module. Order is the wire contract — these two literals and the server's
-  // must stay identical, and the enum tests on both sides pin them. The decode
+  // must stay identical, and server/snapshot.test.mjs reads THIS file's source
+  // and pins this literal to ENEMY_TYPES by text. The decode
   // hands back the SAME STRINGS the wire used to carry, so nothing downstream
   // of apply() — render, the scorer's buckets, the rig's samples — moved.
   const WIRE_TYPES = ["dart", "harrier", "radarHarrier", "charger",
-    "radarCharger", "husk", "anvil", "shard", "radarDart"];
+    "radarCharger", "husk", "anvil", "shard", "radarDart",
+    "packHusk", "wardAnvil", "eliteDart", "eliteHarrier", "eliteCharger",
+    "eliteHusk", "eliteAnvil"];
   const WIRE_MODES = ["seek", "tele", "pulse", "lockon", "windup",
     "dash", "tired"];
   // an index neither table knows (the encoder's -1) names itself as the
@@ -1887,7 +1890,7 @@
     // the dash is a CONSTANT across waves and far above any seek speed, so a
     // charger's ceiling is the dash whatever mode it is currently in — the
     // guard is a sanity bound, not a mode-dependent physics rule
-    if (type === "charger" || type === "radarCharger") {
+    if (type === "charger" || type === "radarCharger" || type === "eliteCharger") {
       return Math.max(base, cfg.charger.dashSpeed);
     }
     return base;
