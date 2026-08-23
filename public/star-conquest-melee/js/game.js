@@ -2126,9 +2126,14 @@ function fire(seat = 0) {
   // behind the ship. Deliberately NOT in BULLET_HASH (a declared allow-list —
   // see the contract above it): it describes where the round came from, never
   // what the simulation will do next, and the wire never carries it either.
+  //   The muzzle is the NOSE — centre + SHIP_R along the fire direction — so
+  // the tail and the glow leave the nozzle, not the cockpit. The HASHED spawn
+  // x/y stays the CENTRE: the nose is a look, never a sim fact. This puts the
+  // origin AHEAD of the round at spawn, which is why every streak clamp is a
+  // signed projection along the velocity and never a bare distance.
   G.bullets.push({ id: window.Encounter ? Encounter.nextId() : 0,
                    x: P.ship.x, y: P.ship.y, px: P.ship.x, py: P.ship.y, vx, vy,
-                   ox: P.ship.x, oy: P.ship.y,
+                   ox: P.ship.x + d.x * SHIP_R, oy: P.ship.y + d.y * SHIP_R,
                    r: 2.2, dmg: BDMG, owner: seat, dead: false, spent: false,
                    ttl: Math.max(1, Math.round(BLIFE * 1000 / TICK)) }); // no upgrade touches lifetime — BLIFE is the only knob
   // the phase-15 lag REBATE, at spawn and only at spawn: a vt-bearing frame's
@@ -2161,16 +2166,17 @@ function fire(seat = 0) {
 // other. Rule 4 holds too: the remote look is declared here — direction and
 // speed replicate for free through the round's own position, which is the one
 // thing the wire is generous about.
-//   WHAT THE WIRE DOES NOT CARRY IS THE LOOK ITSELF, and that is now a stated
-// gap rather than a silence. `ink` and `streak` are stamped on the local round
-// from the record and the encoder sends neither, so on a NET client — its own
-// rounds included, once the authoritative bullet takes over — a rifle shot
-// draws as an ordinary white dot. The honest fix is the same one the
-// speculative tracer needs (js/net.js's spawnCue is hardcoded to the standard
-// round's ballistics), so both land together in the round that teaches the
-// presentation side to read this catalog. The SOUND does not wait for it: the
-// cue below rides the wire's event stream as a plain kind, and the predictor
-// sounds the own shot on the press edge.
+//   WHAT THE WIRE DOES NOT CARRY IS THE LOOK ITSELF, and the gap is REMOTE
+// only now. `ink` and `streak` are stamped on the local round from the record
+// and the encoder sends neither — but the OWN seat's picture no longer waits
+// for the wire: js/net.js's spawnCue reads this catalog, the press edge shows
+// a tracer flying this function's exact ballistics in the record's ink, and
+// the hand-off stamps that look onto the adopted authoritative round and into
+// the carry. What remains true is the OTHER seats' view: a remote pilot's
+// rifle round still draws as an ordinary white dot until the wire carries the
+// record (R7, v11 — with the heading). The SOUND never waited: the cue below
+// rides the wire's event stream as a plain kind, and the predictor sounds the
+// own shot on the press edge.
 //
 // A cooldown paid for a shot the field then refuses is deliberate. The
 // predictor models the arm and the cooldown from the same slice and cannot know
@@ -2205,8 +2211,9 @@ function abilityFire(seat, id) {
     G.bullets.push({ id: window.Encounter ? Encounter.nextId() : 0,
                      x: P.ship.x, y: P.ship.y, px: P.ship.x, py: P.ship.y,
                      vx: Math.cos(a) * spd, vy: Math.sin(a) * spd,
-                     ox: P.ship.x, oy: P.ship.y, // the muzzle — render-only, and
-                                    // out of BULLET_HASH like every other round's
+                     ox: P.ship.x + dir.x * SHIP_R, // the muzzle, at the NOSE —
+                     oy: P.ship.y + dir.y * SHIP_R, // render-only, and out of
+                                    // BULLET_HASH like every other round's
                      r: sp.r, dmg: sp.dmg, owner: seat, dead: false, spent: false,
                      ttl: sp.ttl,
                      // ...and the record's LOOK, render-only and out of
@@ -3167,9 +3174,12 @@ function drawTracers(list) {
   if (!list || !list.length) return;
   for (const tr of list) {
     ctx.globalAlpha = 0.75;
-    ctx.fillStyle = C.bright;
+    // a cue spawned off an ability record carries that record's render-only
+    // look (js/net.js spawnCue); the DOT and its one-step trail wear the ink,
+    // the muzzle glow below keeps C.clay for both guns
+    ctx.fillStyle = tr.ink || C.bright;
     ctx.beginPath();
-    ctx.arc(tr.x, tr.y, 2.2, 0, Math.PI * 2);
+    ctx.arc(tr.x, tr.y, tr.r || 2.2, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = 0.3; // the one-step trail, along the velocity it left on
     ctx.beginPath();
@@ -4018,7 +4028,14 @@ function render() {
     if (b.dead || b.spent) continue; // consumed or expired — the next sweep removes it
     const h = b.streak > 0 ? Math.hypot(b.vx, b.vy) : 0;
     if (h > 0) {
-      const len = Math.min(b.streak, Math.hypot(b.x - b.ox, b.y - b.oy));
+      // the flown distance is a SIGNED PROJECTION along the velocity, not a
+      // bare hypot: the muzzle sits at the NOSE, ahead of the spawn pose, so a
+      // newborn round reads ~-SHIP_R and a distance would paint that as a
+      // backward streak through the hull — the exact defect the clamp exists
+      // to prevent. Negative clamps to zero: no tail until the round clears
+      // its own nozzle.
+      const len = Math.min(b.streak,
+        Math.max(0, ((b.x - b.ox) * b.vx + (b.y - b.oy) * b.vy) / h));
       if (len > 0) {
         ctx.save(); // the line join and width may not leak onto the dots below
         ctx.strokeStyle = b.ink || C.bright;

@@ -707,7 +707,13 @@
   // against it) — pass fires muzzle + tracer from the predicted nose,
   // refuse shows nothing. Deliberately does NOT touch K.cool: the caller's
   // modelFire owns the state, this owns only the promise on screen.
-  function spawnCue(K, terms) {
+  //   `rec` is an ability record's SPAWN block (js/abilities.js) — the cue
+  // flies that record's ballistics and wears its render-only look. No rec is
+  // the standard gun, byte-for-byte the shipped behavior. The dead gate, the
+  // budget and the direction ladder are shared: they are the same field gates
+  // abilityFire runs (minus the frozen overlay, which the predictor cannot
+  // see — that miss is the documented pay-then-refuse residue).
+  function spawnCue(K, terms, rec) {
     void terms;
     const newest = buf.length ? buf[buf.length - 1] : null;
     if (newest && newest.hud && newest.hud.state === "dead") return false;
@@ -718,7 +724,12 @@
     if (!d) return false;
     const sp = Math.hypot(K.vel.x, K.vel.y);
     let vx, vy;
-    if (BMODE === "cq-scale") {
+    if (rec) {
+      // abilityFire's exact speed rule: the record scales the BSPEED slider,
+      // and BMODE is deliberately NOT read — no cq-scale arithmetic and no
+      // stationary refusal, because the sim's ability path has neither
+      vx = d.x * BSPEED * rec.spd; vy = d.y * BSPEED * rec.spd;
+    } else if (BMODE === "cq-scale") {
       if (sp < MIN_FIRE_V) return false;
       vx = d.x * sp * BFACTOR; vy = d.y * sp * BFACTOR;
     } else {
@@ -733,8 +744,16 @@
     // depth that drifted away from a hard-coded 3 would mis-size this window in
     // both directions, and row 2's cue accounting is exactly what that breaks
     const ttl = Math.ceil(((rtt > 0 ? rtt * 1.25 : 320) + delayTicks() * TICK + 300) / TICK);
-    tracers.push({ x: K.ship.x, y: K.ship.y, ox: K.ship.x, oy: K.ship.y,
-      vx, vy, age: 0, ttl });
+    // ...the record's LOOK rides on the tracer — render-only fields, undefined
+    // for the standard gun, so the draw stays one `|| C.bright` and the
+    // hand-off knows which cues carry a look to stamp. The muzzle is the
+    // predicted NOSE (centre + SHIP_R along the fire direction), matching the
+    // sim spawns, so the glow and the tail leave the nozzle on both surfaces;
+    // the tracer's own pose stays the centre, where the predicted round is.
+    tracers.push({ x: K.ship.x, y: K.ship.y,
+      ox: K.ship.x + d.x * SHIP_R, oy: K.ship.y + d.y * SHIP_R,
+      vx, vy, age: 0, ttl,
+      ink: rec && rec.ink, streak: rec && rec.streak, r: rec && rec.r });
     spec.cueShown += 1;
     return true;
   }
@@ -788,28 +807,33 @@
     // rests on, restated here because this is a raw index into a trimmed vector.
     PRED_CTX.owned = myOw;
     PRED_CTX.keyThrust = () => (terms ? terms.keyThrust !== false : true);
-    // `ability` withholds the PICTURE and no longer withholds the SOUND, and
-    // the two halves have different reasons. The picture stays out because the
-    // speculative tracer is hardcoded to the standard round's ballistics
-    // (spawnCue), so cueing an ability through it would draw a normal bullet
-    // for a shot that is not one — and an unmatched tracer expires as
-    // spec.cueRefused, which corrupts the row-2 refusal instrument. NONE of
-    // that touches ownCue: it is one Sfx.cue call, it spawns nothing, and it
-    // increments no counter in `spec`. So the sound rides the press edge like
-    // the gun's does, and the WIRE's copy of the same shot is suppressed as an
-    // own-echo below.
-    //   It is a PROMISE the server may still refuse. abilityFire's refusal
-    // ladder (a frozen overlay, a dead seat, a full bullet cap, no aim
-    // direction) runs past the arm this sink sits behind, and the predictor
-    // cannot see any of it — so a refused shot sounds anyway. That is the
-    // pay-then-refuse feel defect one file over, heard instead of merely felt;
-    // it is not new, it is not a desync, and the trade is deliberate: total
-    // silence at 200 ms is what made the ability undiscoverable.
+    // `ability` shows the PICTURE and the SOUND on the press edge, exactly as
+    // the gun's `fire` does. spawnCue reads the record's spawn block now, so
+    // the cue flies the ability's own ballistics and wears its own ink — the
+    // two reasons the picture used to be withheld (a wrong-shaped tracer, and
+    // an unmatched one corrupting row 2's refusal instrument) are both gone:
+    // the hand-off matches ability cues like any other, and the cue joins the
+    // same spec.cueShown/cueMatched/cueRefused counters. The sound rides the
+    // tracer's gates, the rule the gun states above: a refused picture is a
+    // refused sound, so the dead gate, the budget and the direction ladder
+    // answer the same on both channels — mirroring abilityFire, which skips
+    // its `fire` emit with the spawn. A record with NO spawn block keeps the
+    // old sound-only path: there is no round to promise a picture of.
+    //   It is still a PROMISE the server may refuse. abilityFire's frozen-
+    // overlay gate runs past the arm this sink sits behind, and the predictor
+    // cannot see it — so that shot cues anyway, and its tracer now fades
+    // unmatched as spec.cueRefused where it used to be audible-only. That is
+    // the pay-then-refuse feel defect one file over, visible now; it is not
+    // new, it is not a desync, and the trade is deliberate.
     //   The ARM and its COOLDOWN were always modelled here, because the drain
     // slice does both before it reaches this sink.
     const fx = cueing
       ? { fire: () => { if (specFire(K, terms)) ownCue("fire", K.ship); },
-          ability: (id) => { ownCue(Abilities.cueFor(id), K.ship); },
+          ability: (id) => {
+            const def = Abilities.def(id);
+            const rec = def && def.spawn;
+            if (!rec || spawnCue(K, terms, rec)) ownCue(Abilities.cueFor(id), K.ship);
+          },
           // the sink hands the flight slice's own two numbers straight
           // through — the same world position and pre-bounce magnitude
           // FLIGHT_FX.thud gives Encounter.emit in the sim
@@ -998,6 +1022,10 @@
           pendingAutofireCue = false;
           spec.cueRetracted += 1;
         } else {
+          // ...popped blind to WEAPON — the second no-shot-id site beside the
+          // hand-off's oldest-first match: a gun mispredict inside the window
+          // can retract the rifle's cue here, and the stale gun phantom later
+          // transplants white onto the real slug. Same accepted risk.
           const yt = tracers[tracers.length - 1];
           if (yt && yt.age <= 4) {
             tracers.pop();
@@ -2408,16 +2436,29 @@
       // a sim fact the wire does not carry, and the server's lag rebate has
       // already flown the round most of a round trip before its first snapshot.
       // The own shot is the exception and it is handled at the hand-off below.
+      //   The NOSE is out of reach here for the same reason the remote plates
+      // hold nose-right: the wire carries no heading until R7 (v11), so a
+      // remote round's nozzle cannot be honest yet — first-seen seeding is the
+      // owner-accepted split-brain, restated for the nozzle.
       const ox = was ? was.ox : x, oy = was ? was.oy : y;
-      bCarry.set(b0.id, { vx, vy, ox, oy }); // ...for the next deal to read. A
-                            // round that stops appearing simply stops being
-                            // written, so the map is swept by the rebuild
-                            // itself and never by a live-id pass.
+      // ...and the round's LOOK rides the carry the same way: the wire sends
+      // no ink (the encoder's { id, x, y, o } band), so the only look a wire
+      // round can wear on this screen is the one the hand-off below stamped
+      // from its own tracer — a REMOTE seat's rifle round stays a white dot
+      // until the wire learns to carry the record (R7's business, with the
+      // heading). Undefined for every round the hand-off never touched.
+      const ink = was ? was.ink : undefined, streak = was ? was.streak : undefined;
+      const br = (was && was.r) || 2.2;
+      bCarry.set(b0.id, { vx, vy, ox, oy, ink, streak, r: was && was.r });
+                            // ...for the next deal to read. A round that stops
+                            // appearing simply stops being written, so the map
+                            // is swept by the rebuild itself, never by a
+                            // live-id pass.
       // v4: the wire's owner seat replaces the hard-coded "player" stamp —
       // bulletSeat() reads the int directly, and the legacy-string alias
       // stays for local mode's suite synthetics only
-      return { id: b0.id, x, y, px: x, py: y, vx, vy, ox, oy,
-        r: 2.2, dmg: 0, owner: Number.isInteger(b0.o) ? b0.o : 0,
+      return { id: b0.id, x, y, px: x, py: y, vx, vy, ox, oy, ink, streak,
+        r: br, dmg: 0, owner: Number.isInteger(b0.o) ? b0.o : 0,
         ttl: 1, dead: false, spent: false };
     });
     // the tracer HAND-OFF: the FIRST authoritative own bullet appearing in
@@ -2437,9 +2478,25 @@
           const cue = tracers.shift();
           b.ox = cue.ox;
           b.oy = cue.oy;
+          // ...and the cue's LOOK, so the slug the player watched keeps its
+          // clay ink and streak past the hand-off instead of turning into the
+          // wire's white dot — render-only fields, stamped only where the cue
+          // carried them, so a gun cue changes nothing.
+          //   ACCEPTED RISK (owner, 2026-08-22): the match is OWNER + WINDOW,
+          // oldest tracer first, no shot id — safe while every own round flew
+          // alike, which stops being true here. A gun round confirming first
+          // can eat a rifle cue (a slug in WHITE) and the reverse (a gun round
+          // in CLAY); watch for it in play, do not redesign the matching.
+          if (cue.ink !== undefined) {
+            b.ink = cue.ink;
+            b.streak = cue.streak;
+            if (cue.r) b.r = cue.r;
+          }
           const c = bCarry.get(b.id); // ...and into the carry, or the next deal
-          if (c) { c.ox = b.ox; c.oy = b.oy; } // re-seeds it at the round's own
-                                // pose and the transplant lasts exactly one frame
+          if (c) {                    // re-seeds it at the round's own pose and
+            c.ox = b.ox; c.oy = b.oy; // the transplant lasts exactly one frame
+            c.ink = b.ink; c.streak = b.streak; c.r = b.r;
+          }
           spec.cueMatched += 1;
         }
       }

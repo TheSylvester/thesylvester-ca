@@ -701,15 +701,18 @@
       // flies as a speculative TRACER that starts life at the ship's own pose.
       // A tail longer than the flight is a tail drawn where the round never was.
       const K = 2.4 * (0.35 + TRAILS);
-      // `flown` is the world distance from the round's origin, or a NEGATIVE
-      // number for a round that has none — unknown keeps the full length, which
-      // is exactly what shipped before the clamp, so a synthetic round in a
-      // suite is drawn as it always was. This layer is the only forgiving
-      // reader: the flat pass's tracer glow spells tr.ox/tr.oy straight into an
-      // arc (js/game.js drawTracers) and would throw NaN at a cue without one.
-      // Straight-line DISPLACEMENT, not path length — a round that folds must
-      // re-stamp its origin at the fold, which is what the BOUNCE branch of the
-      // bullet integrator does.
+      // `flown` is the SIGNED PROJECTION of the round's displacement from its
+      // origin onto its own velocity, or -1 for a round that has none —
+      // unknown keeps the full length, which is exactly what shipped before
+      // the clamp, so a synthetic round in a suite is drawn as it always was.
+      // This layer is the only forgiving reader: the flat pass's tracer glow
+      // spells tr.ox/tr.oy straight into an arc (js/game.js drawTracers) and
+      // would throw NaN at a cue without one. A projection and never a bare
+      // distance, because the muzzle sits at the NOSE, ahead of the spawn
+      // pose: a distance reads ~SHIP_R on a newborn round and paints a tail
+      // BEHIND the hull; the projection reads negative there and clamps to
+      // zero. A round that folds must still re-stamp its origin at the fold,
+      // which is what the BOUNCE branch of the bullet integrator does.
       const streak = (x, y, dx, dy, flown) => {
         if (!dx && !dy) return;
         const k = flown >= 0 ? Math.min(K, flown / Math.hypot(dx, dy)) : K;
@@ -733,15 +736,18 @@
       // the origin is READ, never kept: a frame copy carries ox/oy through
       // Object.assign untouched, and a round without them is drawn exactly as
       // it was before this clamp existed.
-      const flownFrom = (o) => (typeof o.ox === "number" && typeof o.oy === "number"
-        ? Math.hypot(o.x - o.ox, o.y - o.oy) : -1);
+      const flownFrom = (o, dx, dy) => {
+        if (typeof o.ox !== "number" || typeof o.oy !== "number") return -1;
+        const hv = Math.hypot(dx, dy);
+        return hv > 0 ? Math.max(0, ((o.x - o.ox) * dx + (o.y - o.oy) * dy) / hv) : 0;
+      };
       for (const b of (view && view.bullets) || G.bullets) {
         if (b.dead || b.spent) continue;
         // the round's OWN per-tick velocity, never (x - px): on a frame copy x
         // is the interpolated pose and px the last tick's, so the difference is
         // alpha-scaled and the streak would pulse from nothing to full length
         // once per tick. vx/vy is the same vector at alpha 1 and constant under it.
-        streak(b.x, b.y, b.vx || 0, b.vy || 0, flownFrom(b));
+        streak(b.x, b.y, b.vx || 0, b.vy || 0, flownFrom(b, b.vx || 0, b.vy || 0));
       }
       // ...and the SPECULATIVE rounds, which is why every one of these is fresh.
       // A tracer can be matched, expire, be retracted mid-flight, or vanish in a
@@ -759,7 +765,7 @@
           // and the drawn hull does not, so the clamp is against the shot's own
           // origin and never against the ship: anchoring this ink to the hull is
           // what would break the hand-off.
-          streak(tr.x, tr.y, tr.vx || 0, tr.vy || 0, flownFrom(tr));
+          streak(tr.x, tr.y, tr.vx || 0, tr.vy || 0, flownFrom(tr, tr.vx || 0, tr.vy || 0));
         }
       }
     }
