@@ -13,8 +13,25 @@
 // it stays hot. That shipped once, in the clay era; it is why the two tables
 // are named apart instead of merged.
 //   Where the two passes genuinely agree (steel, dim), `hot` REFERENCES the
-// flat entry rather than re-typing the byte. Every byte in the game's palette
-// is written down exactly once in this file.
+// flat entry rather than re-typing the byte. Every byte these two tables carry
+// is therefore written down exactly ONCE, here — but the tables are not the
+// whole page. Colour that is out of the palette's scope still lives at its own
+// site by design, and a retune must sweep those sites BY HAND. Grep the byte
+// — line numbers drift, the bytes do not:
+//   #9aa3b2 — js/game.js (a star row, the wall burst, the death-shatter
+//             shard tint in drawShipBlasts); js/encounter.js (the arrow ink,
+//             the scoreboard row); js/net.js (the banner's own CSS and its
+//             plain state); index.html (the dev-panel and menu text)
+//   #d97757 — js/net.js (the banner's accent state); index.html (the slider
+//             and button accent, the live tab's border); js/abilities.js (the
+//             rifle round's `ink`, a SIM file, held equal to flat.clay by a
+//             pin in server/names.test.mjs)
+//   #313a4e — js/net.js (the banner's border); index.html (the panel borders)
+// index.html is the largest of these by site count and the easiest to forget,
+// because a stylesheet is not a script: the page's own CSS is DOM chrome, the
+// same scope js/net.js's banner sits in, and no `C` lookup can reach it.
+// The claim this file makes is single-sourcing WITHIN C and PAL, not that no
+// byte is spelled anywhere else.
 //
 // LOAD ORDER, and why this file is not a sim file. index.html loads this
 // FIRST, ahead of js/abilities.js, so every consumer sees it. The headless sim

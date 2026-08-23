@@ -2577,7 +2577,9 @@
       // ram inference ONLY — it strips every ability cue kind itself, because
       // the own rail already tapped on the predicted edge in ownCue above and
       // the wire's copy here would double it.
-      if (window.Shake) Shake.cue(e.k, e.seat);
+      // `at` rides along because a KILL is culled by distance there, on the
+      // same falloff js/audio.js attenuates this queue's sound with.
+      if (window.Shake) Shake.cue(e.k, e.seat, at);
       if (!at) continue;
       if (e.k === "hit" || e.k === "boom") spawnImpactFx(at.x, at.y, 0, -1, "enemy");
       else if (e.k === "clang" || e.k === "wall") spawnImpactFx(at.x, at.y, 0, -1, "wall");

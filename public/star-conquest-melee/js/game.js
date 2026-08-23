@@ -737,6 +737,14 @@ const SHAKE_KILLHEAVY = 3.5; // the emit strips e.r, so heavy rides its kind)
 const SHAKE_RAM = 4.5;     // comet ram, INFERRED (see shakeCueLocal)
 const SHAKE_RAIL = 1.2;    // own railshot — a punctuation tap
 const SHAKE_CLEAR = 3;     // wave clear — celebratory, not violent
+// ...and HOW FAR a death is still felt. A kill is a WORLD event, so it needs
+// the same cull the sound of it already gets: js/audio.js's att() silences a
+// cue past FAR, and a screen that jumps for a kill nobody can hear is a jump
+// with no cause on screen. Linear, full inside NEAR, zero at FAR — FAR is
+// audio's number deliberately, so the felt reach and the heard reach are one
+// distance. ESTIMATES, judged in play like the rest of the shake tune.
+const SHAKE_NEAR = 400;    // px — full amplitude
+const SHAKE_FAR = 1100;    // px — nothing; mirrors js/audio.js's FAR
 let SHAKEAMP = 1;          // master amplitude, 0..2 (slider; 0 = off exactly)
 let SHAKEDECAY = 18;       // ticks a full impulse takes to settle (slider)
 const SHAKE = { amp: 0, peak: 0, age: 0, seed: 0, ox: 0, oy: 0, prevFlash: 0 };
@@ -751,13 +759,33 @@ function shakeImpulse(px) {
   SHAKE.amp = Math.min(SHAKE_MAX, SHAKE.amp + a);
   if (SHAKE.amp > SHAKE.peak) SHAKE.peak = SHAKE.amp;
 }
+// how much of a world event's impulse survives the trip to this screen. The
+// listener is the LOCAL SHIP'S PRESENTED POSE — the pose the pilot is looking
+// at this frame, not the sim pose behind it — and it is the same ship
+// js/audio.js measures from, so a cue that is silent is also still.
+// A positionless event keeps its full impulse: no place means no distance to
+// cull on, and the caller that has none (the wave clear) is a room fact.
+function shakeFalloff(at) {
+  if (!at) return 1;
+  const P = localPlayer();
+  const r = PRES.ships.get(P.id);
+  const lx = r ? r.cx : P.ship.x;
+  const ly = r ? r.cy : P.ship.y;
+  const d = Math.hypot(at.x - lx, at.y - ly);
+  if (d <= SHAKE_NEAR) return 1;
+  if (d >= SHAKE_FAR) return 0;
+  return 1 - (d - SHAKE_NEAR) / (SHAKE_FAR - SHAKE_NEAR);
+}
 // the event intake, solo-drain flavour: EVERY kind, the own-rail tap included.
 // The net wire drain must NOT reach the ability branch (its own rail already
 // tapped on the predicted edge through Shake.own) — it enters through
 // shakeWireCue below, which strips ability kinds first.
-function shakeCueLocal(kind, seat) {
-  if (kind === "kill") shakeImpulse(SHAKE_KILL);
-  else if (kind === "killheavy") shakeImpulse(SHAKE_KILLHEAVY);
+// `at` is the event's world position, the same field js/audio.js attenuates
+// on. Only the two KILL kinds read it: a hull hit and a rail tap are already
+// own-seat facts, and a wave clear is a room fact with no place at all.
+function shakeCueLocal(kind, seat, at) {
+  if (kind === "kill") shakeImpulse(SHAKE_KILL * shakeFalloff(at));
+  else if (kind === "killheavy") shakeImpulse(SHAKE_KILLHEAVY * shakeFalloff(at));
   else if (kind === "clear") shakeImpulse(SHAKE_CLEAR);
   else if (kind === "hit" || kind === "hurt") {
     // the COMET RAM INFERENCE: a ram emits a plain "hit" (indistinguishable
@@ -771,9 +799,9 @@ function shakeCueLocal(kind, seat) {
     if (me !== null && (seat | 0) === me) shakeImpulse(SHAKE_RAIL);
   }
 }
-function shakeWireCue(kind, seat) { // js/net.js's fireEvents enters here
+function shakeWireCue(kind, seat, at) { // js/net.js's fireEvents enters here
   if (window.Abilities && Abilities.CUE_KINDS.indexOf(kind) >= 0) return;
-  shakeCueLocal(kind, seat);
+  shakeCueLocal(kind, seat, at);
 }
 function shakeOwnCue(kind) { // js/net.js's ownCue — the predicted rail edge.
   // With the predictor parked (predOn false / predIdle) this never fires and
@@ -3136,7 +3164,12 @@ function drawShip(x, y, seat, H) {
   // nose-right, frozen, until R7 lands the `hd` heading key on wire v11: a
   // remote seat's aim is simply not on the wire this week, and a guessed
   // heading would be a lie the pilot never told.
-  const rot = seat === localSeat() ? ownHeading() : 0;
+  //   The gate is grantedSeat(), NEVER localSeat(): a seatless spectator folds
+  // to 0 through localSeat(), and its cursor would then turn seat 0's plate —
+  // another pilot's hull answering this page's mouse. A null grant rotates
+  // nothing, which is the truth: this page flies no seat.
+  const g = grantedSeat();
+  const rot = g !== null && seat === g ? ownHeading() : 0;
   // no record to read, or an untouched hull: the original draw, untouched
   if (!H || (H.hull >= H.hullMax && H.flash <= 0)) {
     withHeading(x, y, rot, (px, py) => drawHull(px, py, K));
@@ -3214,7 +3247,17 @@ function drawFieldCrown(x, y) {
 }
 
 function drawAim() {
-  const P = localPlayer(); // VIEW: the marker orbits the ship this client flies
+  // WHOSE marker, gated on grantedSeat() and never localSeat(): a seatless
+  // spectator folds to seat 0 through localPlayer(), and the triangle would
+  // then orbit another pilot's hull, pointed by THIS page's mouse (the
+  // cursorAim branch) or by that pilot's velocity (markerDir). A page with no
+  // seat aims nothing, so it draws nothing — there is no seat-0 fallback.
+  // Solo is untouched: grantedSeat() answers 0 there.
+  const g = grantedSeat();
+  if (g === null) return;
+  const P = players[g];
+  if (!P) return; // a granted seat with no player record is a caller's bug
+
   // THE DRAWN marker anchors on the FRAME ship and, when the pointer drives
   // it, resolves its direction through FRAME.cam — pixels agree with pixels.
   // The INPUT path is deliberately untouched: refreshPointerWorld/lcurWorld
@@ -4296,7 +4339,7 @@ function drainCues() {
     // skip above is a conjunct on the Sfx statement, not a loop continue, so
     // this carries its own.
     if (ev.kind !== "termChange" && window.FX) FX.cue(ev);
-    shakeCueLocal(ev.kind, ev.seat); // the shake machine's solo intake — the
+    shakeCueLocal(ev.kind, ev.seat, ev.at); // the shake machine's solo intake — the
                                      // FULL kind set, own rail included; the
                                      // net drain enters through Shake.cue,
                                      // which strips ability kinds instead
