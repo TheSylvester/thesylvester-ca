@@ -785,6 +785,12 @@
   // bullet the rebase withdrew.
   function ownCue(kind, at, gain) {
     if (window.Sfx) Sfx.cue(kind, at, gain, mySeat);
+    // the screen shake's own-ability tap, on the same predicted edge the
+    // sound rides — Shake.own takes ONLY ability cue kinds, so fire and thud
+    // pass through silently. The wire's copy of the same shot re-enters
+    // through fireEvents a round trip later, where Shake.cue strips ability
+    // kinds — the pair cannot double.
+    if (window.Shake) Shake.own(kind);
   }
 
   // one predicted kernel tick, in the server's exact per-tick order:
@@ -2566,6 +2572,12 @@
       // starvation drain empties a whole window against one flag, and the
       // instrument's tripwire must not fire on the mismatched ones.
       noteCometCue(e.k, e.seat, tick === appliedTick);
+      // ...and the screen shake, a fourth consumer of the same queue. This
+      // doorway (Shake.cue) covers kill/killheavy, clear and the local-seat
+      // ram inference ONLY — it strips every ability cue kind itself, because
+      // the own rail already tapped on the predicted edge in ownCue above and
+      // the wire's copy here would double it.
+      if (window.Shake) Shake.cue(e.k, e.seat);
       if (!at) continue;
       if (e.k === "hit" || e.k === "boom") spawnImpactFx(at.x, at.y, 0, -1, "enemy");
       else if (e.k === "clang" || e.k === "wall") spawnImpactFx(at.x, at.y, 0, -1, "wall");

@@ -704,6 +704,110 @@ function cometView(s, pool) {
     wind: r.phase === CP_WIND ? Math.min(1, (r.t + 1) / COMET_WIND_TICKS) : 0,
     flash: r.phase === CP_LIVE ? Math.max(0, 1 - r.t / COMET_FLASH_TICKS) : 0 };
 }
+// ---- SCREEN SHAKE ----------------------------------------------------------
+// Render-only presentation state, the comet machine's camera-space sibling:
+// a small offset composed into FRAME.cam (never `cam` — the input path reads
+// cam every client tick, and a shaken aim point would move where bullets go).
+// The machine advances ONCE PER PLAYED TICK from capturePresent(), beside
+// cometPresTick and on the same clock rationale: a net client never runs
+// step(), so no simTick and no wall clock can serve. The offset is a pure
+// function of (seed, age) through hash32 under this layer's OWN salt — never
+// a wall-clock jitter, never the sim's seeded rand() stream — so two renders of one
+// tick paint identical bytes (the render-side law above, and the hull kick's
+// precedent). Nothing here is hashed and nothing rides the wire.
+//
+// COMPOSE RULE: impulses ADD into one accumulator, clamped at SHAKE_MAX, and
+// the decay is linear at peak/SHAKEDECAY per tick off the episode's running
+// peak — the Math.max(0, ...) hard-zero shape, never an asymptotic ease. A
+// second hit mid-decay raises the amplitude by its own size (never a silent
+// restart-from-max) and stretches the tail only by what it added. The shake
+// AGES WHILE FROZEN deliberately: capturePresent still runs per played tick
+// under a frozen overlay, and a paused screen settling to rest is correct
+// feel. SHAKEAMP scales at INTAKE and gates the offset — at 0 the machine
+// contributes EXACTLY (0, 0), which is the isolating lever the pixel suites
+// drive.
+const SHAKE_SEED = 0x5A11C3B7; // this machine's own salt — never HULL_SEED's
+                               // or FX_SALT's stream position
+const SHAKE_MAX = 14;      // px — the summed-impulse ceiling
+// the per-event sizes, in px of camera offset at master amplitude 1 — the
+// starting tune, judged in play (the owner's feel pass moves these)
+const SHAKE_HIT = 7;       // own hull hit — the one the pilot must FEEL
+const SHAKE_KILL = 2;      // an enemy dies (kind is the only size channel —
+const SHAKE_KILLHEAVY = 3.5; // the emit strips e.r, so heavy rides its kind)
+const SHAKE_RAM = 4.5;     // comet ram, INFERRED (see shakeCueLocal)
+const SHAKE_RAIL = 1.2;    // own railshot — a punctuation tap
+const SHAKE_CLEAR = 3;     // wave clear — celebratory, not violent
+let SHAKEAMP = 1;          // master amplitude, 0..2 (slider; 0 = off exactly)
+let SHAKEDECAY = 18;       // ticks a full impulse takes to settle (slider)
+const SHAKE = { amp: 0, peak: 0, age: 0, seed: 0, ox: 0, oy: 0, prevFlash: 0 };
+function shakeImpulse(px) {
+  const a = px * SHAKEAMP;
+  if (a <= 0) return;
+  if (SHAKE.amp <= 0) { // a fresh episode reseeds off stable ints: the seat,
+    SHAKE.age = 0;      // the machine tick of impulse, and this layer's salt
+    const me = grantedSeat();
+    SHAKE.seed = hash32(me === null ? 0 : me, cometClock, 17, SHAKE_SEED);
+  }
+  SHAKE.amp = Math.min(SHAKE_MAX, SHAKE.amp + a);
+  if (SHAKE.amp > SHAKE.peak) SHAKE.peak = SHAKE.amp;
+}
+// the event intake, solo-drain flavour: EVERY kind, the own-rail tap included.
+// The net wire drain must NOT reach the ability branch (its own rail already
+// tapped on the predicted edge through Shake.own) — it enters through
+// shakeWireCue below, which strips ability kinds first.
+function shakeCueLocal(kind, seat) {
+  if (kind === "kill") shakeImpulse(SHAKE_KILL);
+  else if (kind === "killheavy") shakeImpulse(SHAKE_KILLHEAVY);
+  else if (kind === "clear") shakeImpulse(SHAKE_CLEAR);
+  else if (kind === "hit" || kind === "hurt") {
+    // the COMET RAM INFERENCE: a ram emits a plain "hit" (indistinguishable
+    // from a bullet's), so the estimate is "the local seat's own hit while its
+    // comet is live". A bullet landed mid-burn shakes too — accepted for v1;
+    // the true ram event is R7 wire material.
+    const me = grantedSeat();
+    if (me !== null && (seat | 0) === me && cometPres(me).phase === CP_LIVE) shakeImpulse(SHAKE_RAM);
+  } else if (window.Abilities && Abilities.CUE_KINDS.indexOf(kind) >= 0) {
+    const me = grantedSeat();
+    if (me !== null && (seat | 0) === me) shakeImpulse(SHAKE_RAIL);
+  }
+}
+function shakeWireCue(kind, seat) { // js/net.js's fireEvents enters here
+  if (window.Abilities && Abilities.CUE_KINDS.indexOf(kind) >= 0) return;
+  shakeCueLocal(kind, seat);
+}
+function shakeOwnCue(kind) { // js/net.js's ownCue — the predicted rail edge.
+  // With the predictor parked (predOn false / predIdle) this never fires and
+  // the own rail gets no shake in net mode — accepted for a degraded link.
+  if (window.Abilities && Abilities.CUE_KINDS.indexOf(kind) >= 0) shakeImpulse(SHAKE_RAIL);
+}
+// one tick of the machine, from capturePresent() — the flash latch, the
+// decay, and the tick's ONE offset (per tick, never per render)
+function shakePresTick() {
+  // own hull hit: the hitFlash EDGE. The record rides the wire in net mode
+  // and is the sim's own in solo, so a RISE latched per tick is a fresh hit
+  // in both modes.
+  const me = grantedSeat();
+  const H = me === null ? null : seatHealth(me);
+  const f = H ? H.flash | 0 : 0;
+  if (f > SHAKE.prevFlash) shakeImpulse(SHAKE_HIT);
+  SHAKE.prevFlash = f;
+  if (SHAKE.amp > 0) {
+    SHAKE.age++;
+    SHAKE.amp = Math.max(0, SHAKE.amp - SHAKE.peak / Math.max(1, SHAKEDECAY));
+    if (SHAKE.amp === 0) SHAKE.peak = 0;
+  }
+  if (SHAKE.amp > 0 && SHAKEAMP > 0) {
+    const k = hash32(SHAKE.seed, SHAKE.age, 17, SHAKE_SEED);
+    SHAKE.ox = ((k & 0xff) / 127.5 - 1) * SHAKE.amp;
+    SHAKE.oy = (((k >>> 8) & 0xff) / 127.5 - 1) * SHAKE.amp;
+  } else {
+    SHAKE.ox = 0; // EXACT zero, not a small number — the lever's contract
+    SHAKE.oy = 0;
+  }
+}
+// the wire drains' doorway (game.js loads before net.js; both hooks are
+// guarded with the window.FX idiom so a stubbed page stands down cleanly)
+window.Shake = { cue: shakeWireCue, own: shakeOwnCue };
 // ---- the comet INSTRUMENT -------------------------------------------------
 // The page's own answer to "how far did the ask lead the confirm, and did
 // anything hurt me in between?". Monotone counters plus a small ring of
@@ -3759,6 +3863,8 @@ function capturePresent() {
   cometPresTick(); // the comet presentation machine rides the SAME per-tick
                    // boundary as the pose caches — one tick, one advance, and
                    // never a wall clock (see the owner block above)
+  shakePresTick(); // ...and the screen-shake machine beside it, on the same
+                   // clock for the same reason
   // the camera's own per-tick prev/cur — updateCamera (or a frozen hold) has
   // already settled cam for this tick
   const c = PRES.cam;
@@ -3851,8 +3957,12 @@ function buildFrameView() {
   if (LOOP_RENDER && window.Net && Net.active() && Net.noteDrawn) Net.noteDrawn(liveB ? 1 : RALPHA, liveB);
   if (liveB) {
     FRAME.live = true;
-    FRAME.cam.x = cam.x;
-    FRAME.cam.y = cam.y;
+    // the shake composes into the PRESENTED camera only — `cam` itself never
+    // moves, so the aim path is untouched. Every FRAME.cam reader (the world
+    // translate, the stars, the nebula, the minimap rect, drawn.camR) shakes
+    // together by construction.
+    FRAME.cam.x = cam.x + SHAKE.ox;
+    FRAME.cam.y = cam.y + SHAKE.oy;
     FRAME.ships.length = players.length;
     for (const P of players) FRAME.ships[P.id] = P.ship;
     FRAME.enemies = m ? m.enemies : null;
@@ -3887,8 +3997,11 @@ function buildFrameView() {
     rx = c.cx + (c.cx - c.px) * a;
     ry = c.cy + (c.cy - c.py) * a;
   } else { rx = cam.x; ry = cam.y; }
-  FRAME.cam.x = Math.max(0, Math.min(WW - FW, rx));
-  FRAME.cam.y = Math.max(0, Math.min(WH - FH, ry));
+  // the shake composes AFTER the world clamp, deliberately: a wall-pinned
+  // ship must still shake, at the accepted price of a few px of void showing
+  // at a world wall mid-shake
+  FRAME.cam.x = Math.max(0, Math.min(WW - FW, rx)) + SHAKE.ox;
+  FRAME.cam.y = Math.max(0, Math.min(WH - FH, ry)) + SHAKE.oy;
   // the world bodies: pose-shadowed SHALLOW COPIES of the live objects — the
   // per-type draw functions read them unedited, and predX/predY/predT (the
   // radar's held historical ping) pass through untouched
@@ -4183,6 +4296,10 @@ function drainCues() {
     // skip above is a conjunct on the Sfx statement, not a loop continue, so
     // this carries its own.
     if (ev.kind !== "termChange" && window.FX) FX.cue(ev);
+    shakeCueLocal(ev.kind, ev.seat); // the shake machine's solo intake — the
+                                     // FULL kind set, own rail included; the
+                                     // net drain enters through Shake.cue,
+                                     // which strips ability kinds instead
   }
 }
 let raf = 0;
@@ -4824,6 +4941,8 @@ function showTuner() {
   out("leadblend-out", "vel " + Math.round((1 - LEADBLEND) * 100) + "% / aim " + Math.round(LEADBLEND * 100) + "%");
   out("leaddz-out", LEADDZ + " ms to commit a reversal · 0 = off");
   out("edgemargin-out", EDGEMARGIN + " px the ship keeps from the view edge");
+  out("shakeamp-out", SHAKEAMP === 0 ? "0 — screen shake off" : SHAKEAMP.toFixed(1) + "× shake amplitude");
+  out("shakedecay-out", SHAKEDECAY + " ticks · " + (SHAKEDECAY * TICK / 1000).toFixed(2) + " s to settle");
   out("stardens-out", STARDENS.toFixed(1) + " stars per cell (avg)");
   out("contactcd-out", CONTACTCD + " ticks · " + (CONTACTCD * TICK / 1000).toFixed(2) + " s between contact hits on one body");
   out("pvp-rewind-out", PVPREWIND === 0 ? "0 — shots hit only where players ARE now" :
@@ -5018,6 +5137,10 @@ bind("aimlead", (v) => { AIMLEAD = v; }).value = String(AIMLEAD);
 bind("leadblend", (v) => { LEADBLEND = v; }).value = String(LEADBLEND);
 bind("leaddz", (v) => { LEADDZ = v; }).value = String(LEADDZ);
 bind("edgemargin", (v) => { EDGEMARGIN = v; }).value = String(EDGEMARGIN);
+// the shake rows stay LIVE in net mode like every camera row — render-only
+// state, so NET_LOCKED_IDS deliberately excludes them
+bind("shakeamp", (v) => { SHAKEAMP = v; }).value = String(SHAKEAMP);
+bind("shakedecay", (v) => { SHAKEDECAY = v; }).value = String(SHAKEDECAY);
 bind("stardens", (v) => { STARDENS = v; render(); }).value = String(STARDENS); // the idle sky repaints live
 bind("minimap", (v) => { MINIMAP = v; render(); }).checked = MINIMAP;
 bind("edgearrows", (v) => { EDGEARROWS = v; render(); }).checked = EDGEARROWS;
@@ -5285,7 +5408,11 @@ window.__test = { G, players, cam, step: clientStep, setCamMode, render, WW, WH,
   // locked+tick+lag intentionally mixes the immediate pointer mirror with the
   // delayed simulation direction; consumers must not assert they agree.
   aimState: () => ({ AIMMODE, mouse: { ...G.mouse }, direction: fireDir(), aiming: aiming(), rightHeld: G.rightHeld, cursorHidden: cursorHidden(), locked: locked() }),
-  camState: () => ({ CAMMODE, CAMEASE, CAMBOX, CAMLEAD, LEADSRC, AIMLEAD, LEADBLEND, LEADDZ, EDGEMARGIN }) };
+  camState: () => ({ CAMMODE, CAMEASE, CAMBOX, CAMLEAD, LEADSRC, AIMLEAD, LEADBLEND, LEADDZ, EDGEMARGIN }),
+  // the screen-shake machine, read-only: the two sliders and the live episode
+  // state, so a check can assert the offset against drawn.camR
+  shakeState: () => ({ SHAKEAMP, SHAKEDECAY, amp: SHAKE.amp, peak: SHAKE.peak,
+    age: SHAKE.age, ox: SHAKE.ox, oy: SHAKE.oy }) };
 
 // ---- refactor instrument: state hash, input record/replay ------------------
 // An instrument, not a feature: everything below is reachable only through
