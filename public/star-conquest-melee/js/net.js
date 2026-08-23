@@ -128,12 +128,12 @@
     : params.has("mp") ? mpDefault(location)
     : "";
 
-  // ---- the display name ------------------------------------------------------
-  // The ONE piece of state this repository keeps across visits, and the only
-  // localStorage key it writes anywhere (js/fx.js's flag comment names the
-  // exception). It is a LOBBY fact: the server sanitizes it, stores it per
-  // SOCKET and fans it out on the `you` roster — it never enters the sim, the
-  // snapshot, or any hash, so no trace and no golden fixture can move for it.
+  // ---- the lobby preferences -------------------------------------------------
+  // This module keeps two lobby values across visits: `scmelee.name` and
+  // `scmelee.skin`. The server sanitizes them, stores them per SOCKET and fans
+  // them out on the `you` roster — neither enters the sim, the snapshot, or any
+  // hash, so no trace and no golden fixture can move for them. game.js
+  // separately owns `scmelee.sfxvol` and `scmelee.sfxmute` through storeAudio.
   //
   // The READ has to live HERE, ahead of connect(): the hello fires from the
   // socket's own open handler moments after this module loads, long before any

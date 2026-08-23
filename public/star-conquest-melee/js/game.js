@@ -198,7 +198,8 @@ let ENRECH = 0.25;  // RECHARGER, per rank: the same deal for ENREGEN (slider, e
 // synthesis, this file owns the numbers, and a page without js/audio.js still
 // has a complete, harmless audio tab whose sliders drive nothing (the master
 // readout prints the layer's own gain when audio.js is loaded, "—" when it is not).
-let SFXVOL = 0.65;   // master, 0..1 — audio.js applies SFXVOL^1.6 × MASTER_TRIM (0.5 today, one copy, in js/audio.js), the ancestor's own curve
+const SFXVOL_DEF = 0.65;
+let SFXVOL = SFXVOL_DEF; // master, 0..1 — audio.js applies SFXVOL^1.6 × MASTER_TRIM (0.5 today, one copy, in js/audio.js), the ancestor's own curve
 let SFXMUTE = false; // the hard switch: a muted page allocates no voices at all, it does not gain them to zero
 let SFXSHOT = 1;     // bus trim — fire, wall ticks, hits, kills, the blast splash
 let SFXFOE = 0.7;    // bus trim — lance and lunge tells, spawns, damage taken, death.
@@ -248,16 +249,16 @@ const SFXMUTE_KEY = "scmelee.sfxmute";
 function storedVol() {
   try {
     const raw = window.localStorage.getItem(SFXVOL_KEY);
-    if (typeof raw !== "string" || raw.trim() === "") return 0.65; // absent, or an empty string that Number() would read as 0
+    if (typeof raw !== "string" || raw.trim() === "") return SFXVOL_DEF; // absent, or an empty string that Number() would read as 0
     const v = Number(raw);
-    if (!Number.isFinite(v)) return 0.65;
+    if (!Number.isFinite(v)) return SFXVOL_DEF;
     return Math.round(Math.max(0, Math.min(1, v)) * 20) / 20;
-  } catch { return 0.65; }
+  } catch { return SFXVOL_DEF; }
 }
 function storedMute() {
   try {
     const raw = window.localStorage.getItem(SFXMUTE_KEY);
-    return raw === "1" ? true : false; // "0", absent and garbage all read unmuted
+    return raw === "1"; // "0", absent and garbage all read unmuted
   } catch { return false; }
 }
 function storeAudio() {
@@ -273,20 +274,14 @@ const FLAME_EASE = 0.3; // per-tick easing of the engine flame toward the thrust
 const FLAME_GAIN = 80;  // flame px per px/tick² of thrust
 const FLAME_MAX = 20;   // flame length cap, px
 
-const C = {
-  pageBg: "#12151f",
-  fieldBg: "#0e1119",
-  wall: "#313a4e",
-  bright: "#f2f3f5",
-  clay: "#d97757",
-  dim: "#5c6370",
-  radar: "#4fd1c5", // the radar variants' sensor cyan — reads as "looks ahead",
-                    // and collides with nothing: clay is attack, steel is hull
-  steel: "#9aa3b2", // the tier-1 enemy PLATE — the byte every body always wore,
-                    // named so the tier ink lookup holds no bare literal
-  gold: "#f2cf4a",  // tier 3's plate — the owner chose yellow over red: hue
-                    // distance beats a heat ramp beside cyan and steel
-};
+// The flat pass's ink, and the light layer's, both from js/palette.js — the
+// one file a game colour is spelled in. THE VM CONTRACT: js/game.js is a sim
+// file and js/palette.js is not, so the headless host loads this script with
+// no PALETTE in scope; the guard yields empty tables there. That is safe
+// because the sim never draws — a colour reaches no hashed field. In the
+// browser index.html loads js/palette.js first, so both tables are real.
+const C = typeof PALETTE !== "undefined" ? PALETTE.flat : {};
+const HOT = typeof PALETTE !== "undefined" ? PALETTE.hot : {};
 const FONT = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 
 const canvas = document.getElementById("field");
@@ -2706,18 +2701,17 @@ function woundAt(x, y, seat, b, k) {
 // construction (the tier-2 body IS the radar variant), and a cyan husk claims
 // no sensor it lacks: it claims a tier.
 //   `glow` IS NOT A `C` COLOUR. It feeds js/fx.js's light layer, and that
-// layer burns in its OWN palette — PAL, "the HOT palette, warmer and brighter
-// than the flat pass's C, because light reads as light only when it sits above
-// the ink it surrounds". Hull 0's halo burns PAL.bright by owner ruling — the
-// white plate carries a white light — and js/game.js cannot see PAL, so the
-// row carries the hot byte LITERALLY and the alarm in server/names.test.mjs is
-// what keeps the two spellings equal. Writing a C byte here instead reads
-// correct and is not — C and PAL spell a colour in DIFFERENT BYTES, and a hull
-// that borrowed the flat ink would cool its biggest mark while every flame
-// beside it stayed hot. That shipped once, in the clay era (glow: C.clay); the
-// pin exists so it cannot twice.
+// layer burns in its OWN palette — the HOT table, warmer and brighter than the
+// flat pass's C, because light reads as light only when it sits above the ink
+// it surrounds. Hull 0's halo burns the hot bright by owner ruling — the white
+// plate carries a white light — and it reads `HOT.bright` from js/palette.js,
+// the single source both tables now come from, so there is no second spelling
+// left to drift. Writing a C byte here instead reads correct and is not — C
+// and HOT spell a colour in DIFFERENT BYTES, and a hull that borrowed the flat
+// ink would cool its biggest mark while every flame beside it stayed hot. That
+// shipped once, in the clay era (glow: C.clay).
 const HULLS = [
-  { id: 0, label: "UFO",      plate: C.bright,  glow: "#ffffff", mark: C.clay, sides: 0, turn: 0, ring: 4.4, pips: 8, dot: 1.2 },
+  { id: 0, label: "UFO",      plate: C.bright,  glow: HOT.bright, mark: C.clay, sides: 0, turn: 0, ring: 4.4, pips: 8, dot: 1.2 },
   { id: 1, label: "DELTA",    plate: "#7fb2f0", glow: "#7fb2f0", mark: C.clay, sides: 3, turn: 0, ring: 2.2, pips: 3, dot: 1.1 },
   { id: 2, label: "DIAMOND",  plate: "#8fd18a", glow: "#8fd18a", mark: C.clay, sides: 4, turn: 0, ring: 3.6, pips: 4, dot: 1.2 },
   { id: 3, label: "PENTAGON", plate: "#c99adf", glow: "#c99adf", mark: C.clay, sides: 5, turn: 0, ring: 3.8, pips: 5, dot: 1.2 },

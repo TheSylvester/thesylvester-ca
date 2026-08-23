@@ -230,6 +230,7 @@
   const NOISE_SEED = 0xA53C9D11;
   const NOISE = [];
   let nix = 0;
+  const lcgNext = (h) => (Math.imul(h, 1664525) + 1013904223) >>> 0;
 
   // cue VARIATION — the five repeat cues (flagged `vary` in the table:
   // fire, hit, wall, clang, kill) take a small pitch and level jitter so a
@@ -251,9 +252,9 @@
   let vix = 0;
   function varyAt(i) {
     let h = hash32(i, 0, 0, NOISE_SEED);
-    h = (Math.imul(h, 1664525) + 1013904223) >>> 0;
+    h = lcgNext(h);
     const u1 = h / 0x100000000;
-    h = (Math.imul(h, 1664525) + 1013904223) >>> 0;
+    h = lcgNext(h);
     const u2 = h / 0x100000000;
     return { pitch: 1 + (u1 * 2 - 1) * VARY_PITCH, vol: 1 + (u2 * 2 - 1) * VARY_VOL };
   }
@@ -435,7 +436,7 @@
                                                  ["b", 495, 495, 0.10, "sine", 0.22, 0.08]] },
     // the reference's gateOpen() verbatim — this game's one victory phrase
     // was its ancestor's too.
-    clear: { bus: "ui", gap: 600, pri: 2, steps: [["b", 392, 392, 0.09, "sine", 0.40, 0],
+    clear: { bus: "ui", gap: 600, pri: 2, room: true, steps: [["b", 392, 392, 0.09, "sine", 0.40, 0],
                                                   ["b", 587, 587, 0.11, "sine", 0.40, 0.09],
                                                   ["b", 784, 784, 0.16, "sine", 0.40, 0.20]] },
     // two notes of that triad at half the level: a smaller door than a
@@ -582,14 +583,11 @@
       if (typeof panArg === "number" && typeof ac.createStereoPanner === "function") {
         p = ac.createStereoPanner();
         p.pan.value = panArg;
-        g.gain.setValueAtTime(Math.max(0.001, vol * Math.SQRT2), t);
-        g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-        o.connect(g).connect(p).connect(busNode);
-      } else {
-        g.gain.setValueAtTime(Math.max(0.001, vol), t);
-        g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-        o.connect(g).connect(busNode);
       }
+      const gv = p ? vol * Math.SQRT2 : vol;
+      g.gain.setValueAtTime(Math.max(0.001, gv), t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      (p ? o.connect(g).connect(p) : o.connect(g)).connect(busNode);
       o.start(t);
       o.stop(t + dur + 0.02);
       const v = { nodes: p ? [o, g, p] : [o, g], end: t + dur + 0.02 };
@@ -619,14 +617,11 @@
       if (typeof panArg === "number" && typeof ac.createStereoPanner === "function") {
         p = ac.createStereoPanner();
         p.pan.value = panArg;
-        g.gain.setValueAtTime(Math.max(0.001, vol * Math.SQRT2), t);
-        g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-        src.connect(f).connect(g).connect(p).connect(busNode);
-      } else {
-        g.gain.setValueAtTime(Math.max(0.001, vol), t);
-        g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-        src.connect(f).connect(g).connect(busNode);
       }
+      const gv = p ? vol * Math.SQRT2 : vol;
+      g.gain.setValueAtTime(Math.max(0.001, gv), t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      (p ? src.connect(f).connect(g).connect(p) : src.connect(f).connect(g)).connect(busNode);
       src.start(t);
       src.stop(t + dur + 0.02);
       const v = { nodes: p ? [src, f, g, p] : [src, f, g], end: t + dur + 0.02 };
@@ -658,6 +653,22 @@
   // the gates run in this exact order, and the order is load-bearing: mute
   // sits ABOVE the context checks precisely so a headless suite with no
   // context at all can still observe the mute gate through the log.
+  function positionAt(rec, at) {
+    let factor = 1, stereo = 0;
+    if (!rec.room && at && Number.isFinite(at.x) && Number.isFinite(at.y)) {
+      factor = att(at);
+      if (factor !== 0) stereo = pan(at);
+    }
+    return { far: factor === 0, factor, pan: stereo };
+  }
+  function peakAt(steps, bus, k, panComp, varyHi) {
+    let peak = 0;
+    for (const s of steps) {
+      const tag = (s[0] === "b" ? s[7] : s[5]) || bus;
+      peak = Math.max(peak, (s[0] === "b" ? s[5] : s[2]) * k * varyHi * (tag === "ui" ? 1 : panComp));
+    }
+    return peak;
+  }
   function cue(name, at, mag, seat) {
     try {
       const rec = CUES[name];
@@ -672,13 +683,10 @@
       const last = lastAt[key];
       if (last !== undefined && (now - last) * 1000 < rec.gap) return log(name, false, "gap");
       let k = Number.isFinite(mag) ? Math.max(0.15, Math.min(1, mag)) : 1;
-      let p = 0; // the pan — 0 for a positionless cue; the ui gate is per step, below
-      if (at && Number.isFinite(at.x) && Number.isFinite(at.y)) {
-        const a = att(at);
-        if (a === 0) return log(name, false, "far"); // nothing was allocated
-        k *= a;
-        p = pan(at);
-      }
+      const position = positionAt(rec, at);
+      if (position.far) return log(name, false, "far"); // nothing was allocated
+      k *= position.factor;
+      const p = position.pan; // 0 for a room/positionless cue; the ui gate is per step, below
       // the bus gate reads each step's EFFECTIVE bus — the per-step override
       // when one carries one, the recipe's bus otherwise, the same resolution
       // the step loop below uses. test is why the distinction matters: its
@@ -707,11 +715,7 @@
       // audible.
       const panComp = typeof ac.createStereoPanner === "function" ? Math.SQRT2 : 1;
       const varyHi = rec.vary && varyOn() ? 1 + VARY_VOL : 1;
-      let peak = 0;
-      for (const s of liveSteps) {
-        const tag = (s[0] === "b" ? s[7] : s[5]) || rec.bus;
-        peak = Math.max(peak, (s[0] === "b" ? s[5] : s[2]) * k * varyHi * (tag === "ui" ? 1 : panComp));
-      }
+      const peak = peakAt(liveSteps, rec.bus, k, panComp, varyHi);
       if (peak <= 0.001) return log(name, false, "far");
       applyLevels(now); // the knobs are live — an admitted cue plays at the
                         // sliders' CURRENT values, not last frame's
@@ -879,7 +883,7 @@
             const d = buf.getChannelData(0);
             let h = hash32(i, 0, 0, NOISE_SEED);
             for (let j = 0; j < d.length; j++) {
-              h = (Math.imul(h, 1664525) + 1013904223) >>> 0;
+              h = lcgNext(h);
               d[j] = (h / 0x100000000) * 2 - 1;
             }
             NOISE.push(buf);
@@ -1021,6 +1025,8 @@
       clearLog: () => { LOG.length = 0; },
       names: () => Object.keys(CUES),
       recipe: (n) => CUES[n],                // the table itself — read, never copied
+      position: positionAt,                  // room identity and the live distance cull, one body
+      peak: peakAt,                          // the live audibility-floor estimate, pure math
       levels: () => ({ SFXVOL, SFXMUTE, SFXSHOT, SFXFOE, SFXUI, SFXENG, SFXLOOK: lookMs(),
                        SFXVARY: varyOn(), SFXPAN: panWidth() }),
       look: lookMs,                          // the read the step players make — the skew fallback, assertable

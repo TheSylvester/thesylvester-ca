@@ -52,11 +52,10 @@
   // fx suite, and it is the whole contract. `?fx=0` reaches the flat look, and
   // this flag keeps no localStorage of its own: the look must be reproducible
   // from the URL alone, or a rig run and a player's tab stop agreeing.
-  //   The blanket claim that once stood here — that the repository keeps no
-  // localStorage at all — is no longer true. js/net.js keeps exactly ONE key,
-  // `scmelee.name`, the player's typed display name, so a returning player does
-  // not retype it. That key is a lobby fact: it never reaches the sim, a
-  // snapshot or a hash, and it does not reach this file at all.
+  // js/net.js owns the lobby preferences `scmelee.name` and `scmelee.skin`.
+  // They are lobby facts: neither reaches the sim, a snapshot or a hash, and
+  // neither reaches this file. game.js's storeAudio separately owns
+  // `scmelee.sfxvol` and `scmelee.sfxmute`; neither changes this flag.
   let ON = new URLSearchParams(location.search).get("fx") !== "0";
 
   // ---- the shipping look ---------------------------------------------------
@@ -82,12 +81,11 @@
   const HALF = 0.5;
 
   const TAU = Math.PI * 2;
-  // The HOT palette. Warmer and brighter than the flat pass's C, because light
-  // reads as light only when it sits above the ink it surrounds.
-  const PAL = { clay: "#ff8a4a", radar: "#3ef2dd", bright: "#ffffff",
-                steel: "#9aa3b2", dim: "#5c6370",
-                gold: "#ffdf6b" }; // tier 3's hot twin of C.gold #f2cf4a —
-                                  // an ESTIMATE the owner judges under bloom
+  // The HOT palette, from js/palette.js — warmer and brighter than the flat
+  // pass's C, because light reads as light only when it sits above the ink it
+  // surrounds. No guard is needed here: js/fx.js never loads in the headless
+  // vm, and index.html loads the palette ahead of every other script.
+  const PAL = PALETTE.hot;
 
   const FX_SALT = 0x7EE1A5E0; // this layer's own hash salt — never FX_SEED's
   const RING_N = 100;         // the cosmetic pose ring: a FIXED ring buffer with

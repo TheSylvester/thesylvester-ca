@@ -4442,6 +4442,7 @@
     ctx.fillStyle = C.clay; // the wallet — the number every click is decided against
     ctx.fillText("XP " + localSeatRec().xp, L.w - 8, P.headerBase);
     const down = !seatAlive(localSeat()); // a downed local seat browses; nothing sells
+    const warm = E.state === "cleared";
     let anyBuyable = false; // feeds the hint's warm colour after the loop
     SHOP.forEach((row, i) => {
       const c = L.cards[i];
@@ -4459,7 +4460,6 @@
       // clay, which would erase the hover step exactly when clicks are wanted.
       // Keyed on the discrete state, never a clock: two renders in one tick
       // must paint identical bytes for the gutter pixel probes.
-      const warm = E.state === "cleared";
       ctx.strokeStyle = hot ? (buyable ? C.clay : C.dim)
                             : (buyable ? (warm ? C.bright : C.dim) : C.wall);
       ctx.strokeRect(c.x + 0.5, c.y + 0.5, c.w - 1, c.h - 1);
@@ -4500,7 +4500,7 @@
       ctx.font = "400 " + P.detailPx + "px " + FONT;
       // a broke player's panel does not warm — telling someone with no money
       // to shop is nagging
-      ctx.fillStyle = (E.state === "cleared" && anyBuyable) ? C.clay : C.dim;
+      ctx.fillStyle = (warm && anyBuyable) ? C.clay : C.dim;
       ctx.fillText(B.text, L.w / 2, B.base);
     }
     ctx.restore();
