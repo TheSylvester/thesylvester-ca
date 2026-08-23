@@ -108,7 +108,10 @@ const ABILITY_DEFS = [
     // and a cue the ear cannot separate teaches nothing. A record with no
     // `cue` sounds as `fire`, so the two shipped rows are unchanged.
     cue: "rail",
-    spawn: { n: 1, spd: 4, ttl: 6, r: 2.2, dmg: 2.5, spread: 0,
+    // `dmg` is the fourth: 5.0 is FIVE TIMES the basic LMB round (BDMG 1) —
+    // owner ruling 2026-08-22, "the railgun should just kill anything. Almost
+    // anything." The 2.5 it replaces read as a merely-better bullet.
+    spawn: { n: 1, spd: 4, ttl: 6, r: 2.2, dmg: 5.0, spread: 0,
              ink: "#d97757", streak: 11 }, // ...the two render-only ones sit in
                           // the SPAWN block beside `r`, because they describe
                           // the ROUND; `cue` above is the ABILITY's and stays
