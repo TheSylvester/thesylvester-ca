@@ -2659,20 +2659,34 @@ function woundAt(x, y, seat, b, k) {
 // reaches the sim, the snapshot or a trace: flight, hull points and weapons are
 // identical for every row. A stats block hangs off the same id in a
 // post-milestone round, and pays a recapture then like any other sim change.
-//   HULL 0 IS THE INCUMBENT, byte for byte — the circle of C.bright with the
-// eight-dot clay rosette this file has drawn since the beginning. A seat with
-// no pick, a seat nobody is flying and a build with no Net at all all resolve
-// to it, which is why every pixel baseline this repository already carries
-// stayed green through this round with nothing re-captured.
+//   THE ROSTER IS THE OWNER'S RULED SET: UFO the circle, DELTA the triangle,
+// DIAMOND the 4-gon, PENTAGON the 5-gon. Every row sits at `turn: 0`, so a
+// polygon's first vertex — its nose — points along +x, and the OWN ship's
+// rotate (see drawShip) lands that nose on the aim under one plain
+// rotate(angle). The other three seats hold nose-right, frozen, until R7 puts
+// a heading key (`hd`) on wire v11. Hull 0 is still the fallback every no-pick
+// and no-Net path resolves to — the circle of C.bright with the clay rosette.
 //   A ROW IS: `plate` and `mark`, the two inks on the flat layer; `glow`, the
-// colour js/fx.js burns this hull's halo in — see below, it is the channel that
-// actually carries at range; `sides`/`turn`, the plate's
-// silhouette — 0 is the circle, any other value an N-gon inscribed in the SAME
-// SHIP_R at `turn` radians, so no hull buys a bigger or a smaller ship than
-// another; and `ring`/`pips`/`dot`, the rosette that sits inside it. The
-// rosette shrinks with the plate's INRADIUS and not with its radius: a triangle
-// inscribed in SHIP_R only has 3.5 px of room to its own edge, and the eight
-// dots at 4.4 the circle carries would spill straight off three sides of it.
+// colour js/fx.js burns this hull's halo in — see below, it is the channel
+// that actually carries at range; a SHAPE; and `ring`/`pips`/`dot`, the
+// rosette inside the plate.
+//   THE SHAPE IS POLYMORPHIC, and this table is the ONE shape source. Three
+// spellings, compiled by compileHulls below: `sides`/`turn` — 0 is the circle,
+// any other value an N-gon whose vertices the loader bakes to a point list;
+// `pts`, an author's own point list, normalised to circumradius 1 at load; or
+// `d`, an SVG path authored in unit space, which MUST bring a `pts` fallback
+// beside it — the headless test vm has no Path2D, and `new Path2D` never
+// throws on junk, it silently draws nothing, so the LOADER is where a bad
+// string dies loudly. Every silhouette draws at the SAME SHIP_R: identity and
+// never reach, so no row of the table can buy a bigger or a smaller ship than
+// another. The point list stays OPEN — no repeated first vertex; the fill
+// closes it.
+//   The rosette shrinks with the plate's INRADIUS and not with its radius: a
+// triangle inscribed in SHIP_R only has 3.5 px of room to its own edge, and
+// the eight dots at 4.4 the circle carries would spill straight off three
+// sides of it. The pentagon has 5.66 px of room (cos(pi/5) x SHIP_R), so its
+// five dots ride at ring 3.8 — the dot's outer edge at 5.0 keeps the same
+// order of margin to the inradius that the 4-gon's rosette keeps to its 4.95.
 //   TWO CHANNELS, on purpose. Colour is the primary one because at a 14 px ship
 // it is the only one that survives a glance across a four-way brawl, and the
 // silhouette is the secondary one so the four stay attributable in a greyscale
@@ -2684,29 +2698,75 @@ function woundAt(x, y, seat, b, k) {
 // as an enemy's tier 2 — for the aimed families the two meanings coincide by
 // construction (the tier-2 body IS the radar variant), and a cyan husk claims
 // no sensor it lacks: it claims a tier.
-//   `glow` IS NOT A `C` COLOUR, and hull 0's is the reason to say so out loud.
-// It feeds js/fx.js's light layer, and that layer burns in its OWN palette —
-// PAL, "the HOT palette, warmer and brighter than the flat pass's C, because
-// light reads as light only when it sits above the ink it surrounds". The ship
-// halo has always burned PAL.clay (#ff8a4a), never C.clay (#d97757), so hull 0
-// carries the hot byte LITERALLY: js/game.js cannot see PAL, and the alarm in
-// server/names.test.mjs is what keeps the two copies honest. Writing C.clay
-// here instead reads correct and is not — it quietly cools the default ship's
-// biggest mark while the comet halo and the engine flame beside it, which still
-// read PAL.clay, stay hot. That shipped once; the pin exists so it cannot twice.
+//   `glow` IS NOT A `C` COLOUR. It feeds js/fx.js's light layer, and that
+// layer burns in its OWN palette — PAL, "the HOT palette, warmer and brighter
+// than the flat pass's C, because light reads as light only when it sits above
+// the ink it surrounds". Hull 0's halo burns PAL.bright by owner ruling — the
+// white plate carries a white light — and js/game.js cannot see PAL, so the
+// row carries the hot byte LITERALLY and the alarm in server/names.test.mjs is
+// what keeps the two spellings equal. Writing a C byte here instead reads
+// correct and is not — C and PAL spell a colour in DIFFERENT BYTES, and a hull
+// that borrowed the flat ink would cool its biggest mark while every flame
+// beside it stayed hot. That shipped once, in the clay era (glow: C.clay); the
+// pin exists so it cannot twice.
 const HULLS = [
-  { id: 0, label: "DART",   plate: C.bright, glow: "#ff8a4a", mark: C.clay, sides: 0, turn: 0,             ring: 4.4, pips: 8, dot: 1.2 },
-  { id: 1, label: "WEDGE",  plate: "#7fb2f0", glow: "#7fb2f0", mark: C.clay, sides: 3, turn: Math.PI / 2,  ring: 2.2, pips: 3, dot: 1.1 },
-  { id: 2, label: "NEEDLE", plate: "#8fd18a", glow: "#8fd18a", mark: C.clay, sides: 4, turn: -Math.PI / 2, ring: 3.6, pips: 4, dot: 1.2 },
-  { id: 3, label: "DELTA",  plate: "#c99adf", glow: "#c99adf", mark: C.clay, sides: 3, turn: -Math.PI / 2, ring: 2.2, pips: 3, dot: 1.1 },
+  { id: 0, label: "UFO",      plate: C.bright,  glow: "#ffffff", mark: C.clay, sides: 0, turn: 0, ring: 4.4, pips: 8, dot: 1.2 },
+  { id: 1, label: "DELTA",    plate: "#7fb2f0", glow: "#7fb2f0", mark: C.clay, sides: 3, turn: 0, ring: 2.2, pips: 3, dot: 1.1 },
+  { id: 2, label: "DIAMOND",  plate: "#8fd18a", glow: "#8fd18a", mark: C.clay, sides: 4, turn: 0, ring: 3.6, pips: 4, dot: 1.2 },
+  { id: 3, label: "PENTAGON", plate: "#c99adf", glow: "#c99adf", mark: C.clay, sides: 5, turn: 0, ring: 3.8, pips: 5, dot: 1.2 },
 ];
+// THE LOADER — the body table's one gate, run once at script load, in place.
+// It compiles every spelling of a shape down to what the draw needs: an N-gon
+// bakes its vertices to `pts` (the same cos/sin the old per-frame loop
+// computed, so the polygon plates paint the exact bytes they always painted);
+// an authored `pts` list is validated and normalised to circumradius 1, so the
+// footprint rule holds by construction once the draw scales by SHIP_R; and a
+// `d` string is validated HERE, char by char, because `new Path2D` accepts any
+// junk silently — a `d` row must also carry `pts`, the fallback the headless
+// vm (no Path2D) and the pixel probes draw. A bad row THROWS at load: the
+// table is static authored data, and a loud death at the first script beats a
+// hull that quietly draws nothing.
+function compileHulls(rows) {
+  for (const row of rows) {
+    if (row.d !== undefined) {
+      if (typeof row.d !== "string" || !/^\s*[Mm]/.test(row.d)
+        || !/^[MmLlHhVvZzCcSsQqTtAa0-9eE+\-.,\s]+$/.test(row.d))
+        throw new Error("HULLS row " + row.id + ": `d` is not a usable SVG path");
+      const nums = row.d.match(/-?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/g) || [];
+      if (!nums.length || nums.some((n) => !Number.isFinite(Number(n))))
+        throw new Error("HULLS row " + row.id + ": `d` carries a non-finite number");
+      if (!Array.isArray(row.pts))
+        throw new Error("HULLS row " + row.id + ": a `d` shape must bring a `pts` fallback — the headless vm has no Path2D");
+    }
+    if (Array.isArray(row.pts)) {
+      if (row.pts.length < 3 || row.pts.some((p) => !Array.isArray(p)
+        || !Number.isFinite(p[0]) || !Number.isFinite(p[1])))
+        throw new Error("HULLS row " + row.id + ": `pts` must be 3+ finite [x, y] pairs");
+      const far = Math.max(...row.pts.map((p) => Math.hypot(p[0], p[1])));
+      if (!(far > 0)) throw new Error("HULLS row " + row.id + ": `pts` has no reach to normalise");
+      row.pts = row.pts.map((p) => [p[0] / far, p[1] / far]);
+    } else if (row.sides) {
+      // baked, not normalised: cos/sin of these angles ARE unit vectors, and a
+      // divide-by-max here would perturb the doubles the old loop produced
+      row.pts = [];
+      for (let i = 0; i < row.sides; i++) {
+        const a = row.turn + (i / row.sides) * Math.PI * 2;
+        row.pts.push([Math.cos(a), Math.sin(a)]);
+      }
+    }
+    // no `pts` after all of that means sides 0 (or absent): the circle, and
+    // platePath draws it with the one arc call it always has
+  }
+  return rows;
+}
+compileHulls(HULLS);
 // The hull a SEAT is flying, as a row of the table above. R2's roster is the
 // source and the only one: Net.seatSkin(seat) answers the id that seat's pilot
 // chose, and NULL for a seat nobody is flying — which is not the same sentence
 // as hull 0. A null, an id outside the table and a build with no Net at all all
 // fall back to HULLS[0], so a screen never has a ship with no hull to draw.
 //   NEVER `Net.seatSkin(seat) && ...` and never `id || 0`: hull 0 is FALSY, and
-// both idioms would refuse to ever adopt DART. The test is for an INTEGER in
+// both idioms would refuse to ever adopt the UFO. The test is for an INTEGER in
 // range, which is the only test that tells a chosen 0 from an absent one.
 //   A plain read with no allocation — it is on the per-seat per-frame path.
 function hullFor(seat) {
@@ -2714,18 +2774,18 @@ function hullFor(seat) {
   if (!Number.isInteger(id) || id < 0 || id >= HULLS.length) return HULLS[0];
   return HULLS[id];
 }
-// The plate's OUTLINE. sides 0 draws the circle this game has always drawn —
-// the same one call, so hull 0 paints the bytes it always painted — and any
-// other value draws an N-gon inscribed in the SAME SHIP_R at `turn` radians.
-// The silhouette is identity and never reach: every hull keeps one footprint,
-// so no row of the table can buy a bigger or smaller ship than another.
+// The plate's OUTLINE. A row with no compiled point list is the circle this
+// game has always drawn — the same one arc call, so hull 0 paints the bytes it
+// always painted — and any other row is its `pts`, unit vectors the loader
+// baked or normalised, drawn scaled by r. The silhouette is identity and never
+// reach: every hull keeps one footprint, so no row of the table can buy a
+// bigger or smaller ship than another.
 function platePath(x, y, r, K) {
   ctx.beginPath();
-  if (!K.sides) { ctx.arc(x, y, r, 0, Math.PI * 2); return; }
-  for (let i = 0; i < K.sides; i++) {
-    const a = K.turn + (i / K.sides) * Math.PI * 2;
-    const px = x + Math.cos(a) * r;
-    const py = y + Math.sin(a) * r;
+  if (!K.pts) { ctx.arc(x, y, r, 0, Math.PI * 2); return; }
+  for (let i = 0; i < K.pts.length; i++) {
+    const px = x + K.pts[i][0] * r;
+    const py = y + K.pts[i][1] * r;
     if (i === 0) ctx.moveTo(px, py);
     else ctx.lineTo(px, py);
   }
@@ -2737,8 +2797,20 @@ function drawHull(x, y, K, tint) {
                                    // while SHOW_HULL_DAMAGE is off, so the
                                    // hull's own plate is what a living ship
                                    // paints today
-  platePath(x, y, SHIP_R, H);
-  ctx.fill();
+  if (H.d && typeof Path2D === "function") {
+    // the SVG spelling, browser only: the Path2D is built LAZILY, once per
+    // row, because the headless vm has no Path2D at all — there, and in every
+    // pixel probe, the `pts` fallback below is the shape that draws
+    if (!H.p2d) H.p2d = new Path2D(H.d);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(SHIP_R, SHIP_R);
+    ctx.fill(H.p2d);
+    ctx.restore();
+  } else {
+    platePath(x, y, SHIP_R, H);
+    ctx.fill();
+  }
   ctx.fillStyle = H.mark; // the rosette ring, sized to THIS plate's room
   for (let i = 0; i < H.pips; i++) {
     const a = (i / H.pips) * Math.PI * 2;
@@ -2911,6 +2983,36 @@ function drawHitShock(x, y, flash) {
 // true restores the whole look, and __test.setHullDamage flips it so the pixel
 // legs in wave1-checks section S can still prove the parked draw works.
 let SHOW_HULL_DAMAGE = false;
+// The OWN plate's presented heading, in radians — 0 when there is nothing to
+// point at. It is the angle of fireDir() — the SHOT truth: the stored
+// aimAngle in every aim mode except live cursor aim, where the pointer owns
+// the aim (aimAngle is only SNAPSHOTTED there, on mode edges). So the nose
+// agrees with the MUZZLE always, and with the drawn aim marker only outside
+// locked tick mode: there markerDir() resolves the LIVE cursor while
+// fireDir() resolves the DELAYED banked one, so under input lag the marker
+// holds the hand's line and the nose trails it by that lag. Owner judges
+// the feel; the pairing is nose = shot truth, marker = live hand.
+//   NOTE for probes: with `aimed` false fireDir() falls back to the VELOCITY
+// direction, so a never-aimed ship noses along its flight path — "identity
+// at rest" means not aiming AND not moving.
+// A pure read — nothing here writes aim state, so the hashed sim bytes
+// cannot move.
+function ownHeading() {
+  const d = fireDir();
+  return d ? Math.atan2(d.y, d.x) : 0;
+}
+// Rotate a draw about (x, y) — or, at rot 0, do not touch the transform at
+// all: rotate(0) is an exact identity, but skipping the save/rotate/restore
+// keeps the untouched path literally untouched, so every probe and every
+// seat that never aims paints the bytes it always painted.
+function withHeading(x, y, rot, draw) {
+  if (!rot) { draw(x, y); return; }
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rot);
+  draw(0, 0);
+  ctx.restore();
+}
 // THE ENTRY POINT the render loop calls, once per seat. Four states, in the
 // order they matter: down, hit, damaged, pristine.
 // H is the seat's health record — seatHealth(seat) — read ONCE by the draw
@@ -2923,8 +3025,21 @@ function drawShip(x, y, seat, H) {
   // seat is already a parameter — the render loop has always handed it in for
   // the damage hashes — so identity needed no new thread through this call.
   const K = hullFor(seat);
+  // ...and WHICH WAY it points. The OWN seat's plate rotates to face the aim
+  // (owner option b): every hull row sits at turn 0 — nose on +x — so one
+  // plain rotate lands the nose on the cursor. The other three seats hold
+  // nose-right, frozen, until R7 lands the `hd` heading key on wire v11: a
+  // remote seat's aim is simply not on the wire this week, and a guessed
+  // heading would be a lie the pilot never told.
+  const rot = seat === localSeat() ? ownHeading() : 0;
   // no record to read, or an untouched hull: the original draw, untouched
-  if (!H || (H.hull >= H.hullMax && H.flash <= 0)) { drawHull(x, y, K); return; }
+  if (!H || (H.hull >= H.hullMax && H.flash <= 0)) {
+    withHeading(x, y, rot, (px, py) => drawHull(px, py, K));
+    return;
+  }
+  // the WRECK does not rotate, deliberately: a dead seat has no live aim, its
+  // husk is a chewed disc with no nose to point, and the respawn countdown it
+  // wears must stay upright to be read
   if (H.hull <= 0) { drawWreck(x, y, H, seat); return; }
   let hx = x;
   let hy = y;
@@ -2949,8 +3064,15 @@ function drawShip(x, y, seat, H) {
       ? null                      // the look is parked, so no override at all
                                   // and the hull's own plate stands
       : hullTint(H.hull / Math.max(1, H.hullMax), K);
-  if (!SHOW_HULL_DAMAGE || H.hull >= H.hullMax) drawHull(hx, hy, K, tint); // flashing, but not yet hurt
-  else drawDamagedHull(hx, hy, H, seat, tint);
+  // the kick rides OUTSIDE the rotation: it is an impact shudder in screen
+  // space, not a heading, so the plate rotates about its kicked centre and
+  // the shudder never bends with the nose. drawHitShock above already stays
+  // on the TRUE position, as its own comment demands.
+  if (!SHOW_HULL_DAMAGE || H.hull >= H.hullMax) {
+    withHeading(hx, hy, rot, (px, py) => drawHull(px, py, K, tint)); // flashing, but not yet hurt
+  } else {
+    withHeading(hx, hy, rot, (px, py) => drawDamagedHull(px, py, H, seat, tint));
+  }
 }
 
 // THE FIELD CROWN — who LEADS, over the leader's own ship.
@@ -5056,8 +5178,21 @@ window.__test = { G, players, cam, step: clientStep, setCamMode, render, WW, WH,
   // a different plate" by diffing pixels alone could not tell WHICH hull it
   // got, and a leg that re-derived the fallback itself would be testing its own
   // copy of the rule instead of the one that ships.
-  hulls: () => HULLS.map((h) => ({ ...h })),
+  // ...and the copy is honest for what a test would poke: `pts` is cloned
+  // per row (a shared array would let a probe bend the shipping silhouette),
+  // and the lazily built p2d cache is never handed out.
+  hulls: () => HULLS.map((h) => {
+    const c = { ...h };
+    if (c.pts) c.pts = c.pts.map((p) => [p[0], p[1]]);
+    delete c.p2d;
+    return c;
+  }),
   hullFor,
+  // the body-table loader itself, published so the identity legs can prove
+  // its three contracts on rows that never ship: an N-gon bakes to unit pts,
+  // an authored list normalises to circumradius 1, and a junk `d` string —
+  // which new Path2D would swallow silently — dies at load instead
+  compileHulls,
   setFxInt: (v) => { FXINT = v; },
   setFxDur: (v) => { FXDUR = v; },
   // the LIGHT LAYER's two seams: its suppression lever and its counters. Both

@@ -4926,28 +4926,32 @@
   // The glyphs are drawn HERE and not through drawHull, and they stay that way:
   // a 30x20 strip glyph and a 14 px field hull are genuinely DIFFERENT DATA,
   // not one shape written twice. The strip glyph points RIGHT because a card is
-  // read as a catalogue of ships and a catalogue draws them facing; the field
-  // plate has no heading at all to draw, because the ship's own heading is
-  // carried by the flame and the aim marker and never by the plate. Calling
-  // drawHull from here would also paint field ink into a card at card scale.
+  // read as a catalogue of ships and a catalogue draws them facing — and since
+  // the ruled roster the field agrees: every hull row sits at turn 0, nose on
+  // +x, and the OWN ship's plate now rotates that nose onto the aim (see
+  // drawShip). So the four glyphs are REDRAWN as the field's own shapes —
+  // circle, triangle, diamond, pentagon, all nose right — and the card and the
+  // field stop disagreeing about what a hull looks like. Calling drawHull from
+  // here would still be wrong: it would paint field ink into a card at card
+  // scale.
   //   What is NOT duplicated is the part that could drift: the id set and the
   // labels are read straight off js/game.js's HULLS, the one place a hull is
-  // declared. This table adds a glyph per id and nothing else, so a hull can
-  // never be offered here under a name or an id the field does not know.
-  // (Classic scripts share one global lexical environment and js/game.js loads
-  // first — index.html:496 — so HULLS is a plain read here, as C and SHIP_R
-  // already are.)
+  // declared. This table adds a glyph per id and nothing else — glyph 0 says
+  // `sides: 0` so the drawer gives the UFO its arc, every other glyph is a
+  // point list — so a hull can never be offered here under a name or an id
+  // the field does not know. (Classic scripts share one global lexical
+  // environment and js/game.js loads first — index.html:496 — so HULLS is a
+  // plain read here, as C and SHIP_R already are.)
   const SKINGLYPHS = [
-    { id: 0, pts: [[1, 0], [-0.7, 0.62], [-0.4, 0], [-0.7, -0.62]] },
-    { id: 1, pts: [[1, 0], [-0.6, 0.85], [-1, 0], [-0.6, -0.85]] },
-    { id: 2, pts: [[1, 0], [-0.95, 0.38], [-0.65, 0], [-0.95, -0.38]] },
-    { id: 3, pts: [[1, 0], [-0.55, 0.9], [-0.55, -0.9]] },
+    { id: 0, sides: 0 },
+    { id: 1, pts: [[1, 0], [-0.5, 0.866], [-0.5, -0.866]] },
+    { id: 2, pts: [[1, 0], [0, 1], [-1, 0], [0, -1]] },
+    { id: 3, pts: [[1, 0], [0.309, 0.951], [-0.809, 0.588], [-0.809, -0.588], [0.309, -0.951]] },
   ];
-  const SKINS = HULLS.map((h) => ({
-    id: h.id,
-    label: h.label,
-    pts: (SKINGLYPHS.find((g) => g.id === h.id) || SKINGLYPHS[0]).pts,
-  }));
+  const SKINS = HULLS.map((h) => {
+    const g = SKINGLYPHS.find((gl) => gl.id === h.id) || SKINGLYPHS[0];
+    return { id: h.id, label: h.label, pts: g.pts, sides: g.sides };
+  });
   const SKINCELL = { w: 30, h: 20, gap: 4, r: 8 };
   // The strip's own width, derived rather than written down twice — a cell count
   // that disagreed with a hardcoded width would put the hit test beside the draw.
@@ -4976,12 +4980,17 @@
       ctx.strokeRect(x0 + 0.5, y0 + 0.5, SKINCELL.w - 1, SKINCELL.h - 1);
       ctx.fillStyle = on ? C.bright : C.dim;
       ctx.beginPath();
-      sk.pts.forEach((pt, i) => {
-        const px = x0 + SKINCELL.w / 2 + pt[0] * SKINCELL.r;
-        const py = cy + pt[1] * SKINCELL.r;
-        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-      });
-      ctx.closePath();
+      if (sk.pts) {
+        sk.pts.forEach((pt, i) => {
+          const px = x0 + SKINCELL.w / 2 + pt[0] * SKINCELL.r;
+          const py = cy + pt[1] * SKINCELL.r;
+          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        });
+        ctx.closePath();
+      } else {
+        // sides 0 — the UFO's arc, at the same reach the point glyphs use
+        ctx.arc(x0 + SKINCELL.w / 2, cy, SKINCELL.r, 0, Math.PI * 2);
+      }
       ctx.fill();
       skinCellRects.push({ id: sk.id, x0, y0, x1: x0 + SKINCELL.w, y1: y0 + SKINCELL.h });
       x += SKINCELL.w + SKINCELL.gap;
