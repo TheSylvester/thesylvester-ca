@@ -289,6 +289,45 @@
   const noop = function () {};
   let sink = { state: noop, caption: noop };
 
+  // The input plane, one level below the sink: the sink carries state OUT, this
+  // carries a pilot's decisions IN. AUTO is the default at module load, and with
+  // no provider installed every expression below reads exactly as the frozen
+  // demo-v2 reference does.
+  let pilot = null;
+  const fin = function (v) { return Number.isFinite(v) ? v : 0; };
+
+  // setInput(fn) installs the pilot provider; setInput(null), or anything that is
+  // not a function, removes it and returns the kernel to AUTO.
+  //
+  // The provider is called EXACTLY ONCE PER LIVE PLAYER TICK, from updatePlayer,
+  // after the death branch has returned. It is NOT called on a tick where the
+  // player is dead, so a caller that counts ticks by counting provider calls will
+  // undercount by the length of every death.
+  //
+  // It returns a frame: { x, y, aimX, aimY, fire }. x/y are the thrust axes; the
+  // kernel normalizes them, so their magnitude does not matter and a diagonal need
+  // not be pre-scaled. aimX/aimY are a WORLD point, not a screen point. fire is
+  // truthy while the trigger is held.
+  //
+  // Every numeric field is hardened HERE, at the kernel boundary, with a finite
+  // test and never with `v || 0`: +undefined || 0 is 0, but Infinity || 0 is
+  // Infinity, and one infinite axis puts the ship at NaN forever. This repo has
+  // shipped that exact defect once already (bf2c961, server input hardening). The
+  // aim pair takes the finite test directly with p.angle as its fallback, because
+  // fin's 0 would snap the aim at the world origin, and that is not "straight
+  // ahead". A malformed or missing frame (null, a non-object) from an INSTALLED
+  // pilot is "no keys held, not firing, aim straight ahead" — an empty HUMAN
+  // frame. It never falls through to AUTO for the tick, and it is never an error.
+  // Each field is read exactly once per tick, so a frame built from accessors sees
+  // one getter call apiece; a provider or a frame getter that THROWS is a page bug
+  // and stays loud — the kernel does not contain it — and a wire-delivered frame is
+  // JSON-parsed and so cannot carry accessors at all.
+  //
+  // The provider is the page's business, never the kernel's: nothing here reads
+  // document, window or navigator, because this file also boots inside
+  // server/sim-host.mjs's vm sandbox over server/dom-stub.mjs.
+  function setInput(fn) { pilot = typeof fn === "function" ? fn : null; }
+
   function setSink(next) {
     next = next || {};
     sink = {
@@ -696,6 +735,14 @@
 
     const target = nearestTarget();
     p.target = target ? target.id : 0;
+    // One provider call, one tick — never inside a loop, never twice. With a pilot
+    // installed a null or malformed return becomes the EMPTY frame, which is HUMAN
+    // semantics with nothing held; it never hands the tick back to the autopilot.
+    let input = null;
+    if (pilot) {
+      const f = pilot();
+      input = f && typeof f === "object" ? f : {};
+    }
     let moveX = Math.cos(S.time * 0.43 + S.seed * 0.00001);
     let moveY = Math.sin(S.time * 0.37 + 1.2);
     let aimAngle = Math.atan2(moveY, moveX);
@@ -708,6 +755,34 @@
       const rangeBias = targetDistance > 270 ? 0.8 : targetDistance < 135 ? -1.1 : 0.05;
       moveX = direct.x * rangeBias + -direct.y * 0.78;
       moveY = direct.y * rangeBias + direct.x * 0.78;
+    }
+
+    // HUMAN mode overrides the autopilot's two decisions — where to go and where
+    // to aim — by overwriting them AFTER the block above has run. The block above
+    // is therefore untouched text: a reviewer reads it and sees the reference.
+    // leadTarget and playerAimTarget still run in HUMAN mode. All four aim helpers
+    // are RNG-free, so this costs arithmetic only, and it keeps both modes drawing
+    // from the RNG stream identically inside updatePlayer — which the AUTO-vs-HUMAN
+    // comparison at PORT-S will want. targetDistance keeps whatever AUTO computed;
+    // under rulings H2 and H3 nothing in HUMAN mode reads it.
+    //
+    // The aim angle goes through delta() and the ARGUMENT ORDER is load-bearing:
+    // delta(from, to, size) returns the wrapped to - from, so the player is the
+    // `from` argument. The world is toroidal until PORT-W, and a raw aimY - p.y
+    // swings the ship the long way round whenever the cursor and the ship sit on
+    // opposite sides of a wrap seam. A non-finite aim keeps p.angle.
+    //
+    // Each frame field is read EXACTLY ONCE per tick, into a local, and only the
+    // local is validated and used — so an accessor cannot pass the finite test and
+    // then substitute a different value on the read that follows it.
+    if (input) {
+      moveX = fin(input.x);
+      moveY = fin(input.y);
+      const aimX = input.aimX;
+      const aimY = input.aimY;
+      aimAngle = Number.isFinite(aimX) && Number.isFinite(aimY)
+        ? Math.atan2(delta(p.y, aimY, H), delta(p.x, aimX, W))
+        : p.angle;
     }
 
     // Predictive projectile avoidance. The pilot examines the closest point on
@@ -808,20 +883,32 @@
         danger += w;
       }
     }
-    if (danger > 0.08) {
+    // Ruling H1: no auto-dodge in HUMAN mode. The whole avoidance sweep above KEEPS
+    // RUNNING in both modes on purpose — it draws no RNG, it costs one pass over
+    // ~30 bodies, and leaving it in place removes any question about whether this
+    // seam moved the stream. HUMAN simply ignores its output. Do not "optimize" it
+    // behind the branch in a later round; that trade is a divergence, not a saving.
+    if (!input && danger > 0.08) {
       moveX += avoidX * 2.8;
       moveY += avoidY * 2.8;
     }
+    // norm(0, 0) returns m = 1, not 0, so move.m cannot be the idle test, and with
+    // no key held Math.atan2(0, 0) is 0 — which would pin the exhaust trail to world
+    // angle 0 while the ship coasts. Guard on the raw axes. In AUTO the guard is
+    // !input, always true, so this line keeps its exact reference behaviour.
     const move = norm(moveX, moveY);
-    p.thrustAngle = Math.atan2(move.y, move.x);
-    p.angle = rotateToward(p.angle, aimAngle, dt * (danger > 0.6 ? 8.5 : 6.4));
-    const thrust = danger > 0.5 ? 410 : target ? (targetDistance > 160 ? 300 : 210) : 160;
+    if (!input || moveX !== 0 || moveY !== 0) p.thrustAngle = Math.atan2(move.y, move.x);
+    // Rulings H1 and H3: calm turn rate always, one fixed thrust, no 295 tier. Each
+    // AUTO sub-expression is preserved character for character to the right of the
+    // `input ?`.
+    p.angle = rotateToward(p.angle, aimAngle, dt * (input ? 6.4 : danger > 0.6 ? 8.5 : 6.4));
+    const thrust = input ? 300 : danger > 0.5 ? 410 : target ? (targetDistance > 160 ? 300 : 210) : 160;
     p.vx += move.x * thrust * dt;
     p.vy += move.y * thrust * dt;
     const drag = Math.pow(0.985, dt * 60);
     p.vx *= drag;
     p.vy *= drag;
-    const maxSpeed = danger > 0.6 ? 295 : 245;
+    const maxSpeed = !input && danger > 0.6 ? 295 : 245;
     const v = norm(p.vx, p.vy);
     if (v.m > maxSpeed) { p.vx = v.x * maxSpeed; p.vy = v.y * maxSpeed; }
     p.x = wrap(p.x + p.vx * dt, W);
@@ -837,7 +924,12 @@
         rand() < 0.25 ? "magenta" : "cyan", range(0.22, 0.5), range(1.2, 2.7), "trail");
     }
 
-    if (target && playerMayFireAt(target) && p.fire <= 0 && Math.abs(angleDelta(p.angle, aimAngle)) < 0.32 && targetDistance < Math.max(W, H) * 0.7) {
+    // Ruling H2: the human trigger is COOLDOWN ONLY. LMB fires along the nose, with
+    // no target, no alignment window and no range gate — firePlayer fires along
+    // p.angle and never reads the target, so it needs nothing else.
+    if (input
+      ? (input.fire && p.fire <= 0)
+      : (target && playerMayFireAt(target) && p.fire <= 0 && Math.abs(angleDelta(p.angle, aimAngle)) < 0.32 && targetDistance < Math.max(W, H) * 0.7)) {
       firePlayer();
       p.fire = Math.max(0.075, 0.13 - (S.level - 1) * 0.003);
     }
@@ -2232,6 +2324,7 @@
     reset: resetRun,
     step: step,
     setSink: setSink,
+    setInput: setInput,
     S: S,
     W: W, H: H, STEP: STEP, TAU: TAU, BASE_SEED: BASE_SEED,
     C: C, RGB: RGB,
