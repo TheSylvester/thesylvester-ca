@@ -1,0 +1,126 @@
+export const article = {
+  title: "My JSONL File Became Jira for Agents",
+  description:
+    "A tiny append-only tracker became the durable project memory behind my agent workflow. The useful part is not JSONL; it is making decisions recoverable.",
+  publishedAt: "2026-08-24",
+  updatedAt: "2026-08-24",
+  status: "published",
+  kind: "guide",
+  topics: ["project-memory", "tooling", "orchestration"],
+  guideOrder: 2,
+  featured: true,
+  readingMinutes: 7,
+};
+
+One of the most load-bearing tools in my agent workflow started because my brain needed a better to-do list. I had the agents make the simplest thing that might help: a little project tracker backed by append-only JSONL files.
+
+I sometimes describe it as a poor person’s Jira for agents. That description is useful because it explains the role, but it also makes the tool sound more impressive than it is. A skill gives agents a small set of tracker operations. The first implementation used a script to append JSONL records. The tracker survives sessions, so a new agent can discover what is open and read the context attached to each item.
+
+That is most of the trick.
+
+The value is not the file extension. The value is moving project intent out of one chat window and into state that the next agent can read.
+
+## Chat is where I think, not where state should die
+
+I have long conversations with agents before implementation. We discuss what I want, examine the code, question the plan, and change our minds. A single dense explanation can take a long time to work through point by point, but that process produces the decisions that matter.
+
+Without a durable system, those decisions are trapped in the conversation that produced them. The next session has to rediscover them, or I have to repeat myself, or the implementation agent fills the gap with a plausible guess.
+
+The tracker gives the conversation somewhere to land.
+
+As we discuss an item, the agent updates it with the context another agent would need. By the time an orchestrator arrives, it does not need a heroic summary from me. It can inspect the open work, understand the decisions already made, identify dependencies, and choose what can run serially or in parallel.
+
+The tracker is not a to-do list pasted onto an AI workflow. In my workflow, it became the shared boundary between product discussion and execution.
+
+## Why JSONL was enough to start
+
+JSONL is one JSON value per line. That makes it a pleasantly boring format for an append-only event log.
+
+I started with it because a small script could append a record without needing a database service or a large application. It stuck because it worked. It is easy for command-line tools to inspect, easy for an agent skill to operate, and easy to keep with the project’s normal development workflow.
+
+An event might represent creating an item, adding context, changing its state, or recording evidence. In an event-sourced version, the current item can be reconstructed by replaying those events. The following is deliberately not my tracker’s schema; it is the smallest illustration of the idea:
+
+```json
+{"event":"created","id":"T-123","title":"Make retries observable"}
+{"event":"context-added","id":"T-123","text":"Preserve the current default; expose failure reasons before changing policy."}
+{"event":"started","id":"T-123"}
+{"event":"completed","id":"T-123","evidence":"tests and commit recorded here"}
+```
+
+That is an illustration, not a required schema. You can store current objects instead of events. You can use Markdown, YAML, SQLite, a hosted issue tracker, or an API. The orchestration outcome is information-driven, not format-driven.
+
+JSONL happens to have a few properties I like:
+
+- append-only writes make the history easy to reason about;
+- plain text is inspectable when the helper script fails;
+- agents can use a narrow command-line interface instead of improvising edits;
+- the data does not depend on a particular chat session;
+- a lightweight tool is easier to carry from project to project.
+
+None of those properties turns bad tracker content into good context. A perfect event log full of vague tickets is still vague.
+
+Plain append-only files also stop being boring when several writers or worktrees touch them at once. You need a policy for IDs, concurrent appends, branch merges, and conflict recovery. A narrow script can own those rules for a small setup; beyond that, a different storage layer may be the cheaper choice. I care about keeping the agent-facing interface stable, not defending JSONL after the workload outgrows it.
+
+## The item is a decision packet
+
+The part I care about is what goes into an item.
+
+Before I let an orchestrator treat an item as ready, I want the discussion to answer the questions that would otherwise be left to the implementer. Depending on the work, that can include:
+
+- What outcome am I actually trying to create?
+- What current behaviour must be preserved?
+- Which product or technical choices have I already made?
+- Which apparent requirements did we explicitly reject?
+- What uncertainty remains, and how should it be resolved?
+- What other work must happen first?
+- What evidence would make us believe the item is complete?
+
+I do not fill out a ceremony-heavy template by hand. I discuss the work with the agent and have it capture the useful answers as they emerge. I also ask it to question me. If an item sounds complete only because both of us are skating over an ambiguity, that is exactly the ambiguity I want exposed before execution.
+
+This changes what “ready” means. Ready does not mean the title is polished. It means another capable agent can read the item, inspect the repository, and reconstruct my intent without guessing at an important decision.
+
+## A tracker lets orchestration begin from state
+
+Once the items are trustworthy, orchestration becomes much simpler.
+
+I can ask a lead agent to read the tracker, decide which work is blocked, identify what can run independently, and scope a path to the next milestone. The agent is planning from current project state, not from a massive prompt I wrote earlier.
+
+That timing matters. Dependencies change as work lands. Investigations settle questions. One item can make another unnecessary. An orchestrator looking at the tracker now can make a better scheduling decision than a static master plan written several steps ago.
+
+The tracker also makes context portable across execution shapes. The next worker could be a sub-agent, a fresh Claude Code session, a Codex process, or simply me tomorrow morning. They all begin from the same durable item instead of a retelling.
+
+## Keep the interface narrower than the storage
+
+I do not want every agent opening the backing file and inventing a new way to modify it. The script and its skill form the interface.
+
+Conceptually, the operations can stay small:
+
+```text
+list open items
+show one item with its context
+create an item
+add a decision or note
+start, block, or complete an item
+attach completion evidence
+```
+
+A narrow interface creates useful pressure. If “complete” requires evidence, the agent has to return with something checkable. If updates append rather than silently replacing history, a later agent can understand how the work changed. If the skill tells the agent to read the tracker at the start of a multi-step task, project memory becomes part of the workflow rather than an optional chore.
+
+The skill matters at least as much as the script. The script supplies mechanics; the skill supplies policy: when to read, when to write, what belongs in an item, and what proof is required before closing it.
+
+## What I would build first
+
+If you are starting from nothing, do not begin by cloning an enterprise issue tracker.
+
+Create one file and one tiny command. Support adding an item, listing open items, and appending context to an item. Then give your coding agent project-local instructions that say:
+
+1. Read the tracker before planning multi-step work.
+2. Capture settled decisions as they emerge.
+3. Do not mark work complete without evidence.
+4. Treat the backing file as an implementation detail; use the command.
+
+Use it on actual work. You will quickly discover which fields and transitions you need. Those discoveries are more useful than designing a comprehensive schema in advance.
+
+You may eventually decide that a database or hosted service is the right backend. That is fine. My claim is not that JSONL is the universal answer. My claim is that agents become much more useful when they inherit durable, structured intent instead of an empty context window.
+
+The little tracker that began in JSONL stuck because it made the right thing easy: turning a conversation into project memory that the next agent can act on.

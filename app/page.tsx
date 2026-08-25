@@ -6,8 +6,11 @@ import HomeAnchor from "@/components/home-anchor";
 import RevealInit from "@/components/reveal-init";
 import ScrollSentinel from "@/components/scroll-sentinel";
 import StatusBar from "@/components/status-bar";
+import { publishedArticles } from "@/lib/articles";
 
 export default function Home() {
+  const latestArticle = publishedArticles[0];
+
   return (
     <div
       style={{
@@ -61,7 +64,10 @@ export default function Home() {
             WORK
           </a>
           <Link href="/guide" className="hov-nav" style={{ color: "#c8ccd4" }}>
-            CLAUDE CODE GUIDE
+            GUIDE
+          </Link>
+          <Link href="/blog" className="hov-nav" style={{ color: "#c8ccd4" }}>
+            BLOG
           </Link>
           <a href="#about" className="hov-nav" style={{ color: "#c8ccd4" }}>
             ABOUT
@@ -189,7 +195,7 @@ export default function Home() {
                 <span>
                 &gt;<span data-blink="">_</span>
               </span>{" "}
-              MY CLAUDE CODE GUIDE
+              MY CODING AGENT GUIDE
               </Link>
               <a
                 href="#work"
@@ -212,6 +218,15 @@ export default function Home() {
                 EXPLORE MY WORK
               </a>
             </div>
+
+            {latestArticle ? (
+              <div style={{ marginTop: 22, color: "#687186", fontSize: "11.5px", lineHeight: 1.7 }}>
+                <span style={{ color: "#d97757", letterSpacing: ".1em" }}>LATEST / </span>
+                <Link href={latestArticle.href} className="hov-footer" style={{ color: "#9aa3b2" }}>
+                  {latestArticle.title} <span aria-hidden="true">→</span>
+                </Link>
+              </div>
+            ) : null}
 
             <div
               style={{

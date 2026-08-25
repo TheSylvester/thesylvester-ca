@@ -1,0 +1,130 @@
+export const article = {
+  title: "The Big Prompt Still Exists—I Just Stopped Writing It",
+  description:
+    "I stopped treating prompt-writing as the hard part of agentic software engineering. My job is to supply decisions; the lead agent turns them into an execution prompt.",
+  publishedAt: "2026-08-24",
+  updatedAt: "2026-08-24",
+  status: "published",
+  kind: "guide",
+  topics: ["orchestration", "prompting", "decision-making"],
+  guideOrder: 1,
+  featured: true,
+  readingMinutes: 7,
+};
+
+For a while, “using AI to write software” meant writing a very large prompt. You tried to anticipate every requirement, edge case, file, and acceptance criterion before the model touched the code. If the result was wrong, the obvious response was to make the next prompt even more elaborate.
+
+I no longer work that way.
+
+The large prompt has not disappeared. A serious implementation still needs detailed context, settled decisions, boundaries, and a definition of done. The difference is that I am usually not the person assembling all of that into one carefully structured instruction. I give a lead agent the information only I can provide. By “lead agent,” I mean the session responsible for researching, clarifying decisions, and preparing bounded work for an implementation agent. It reads the repository, recovers earlier decisions, exposes uncertainty, and writes the implementation handoff when the work is ready.
+
+## There are two prompt layers
+
+I think of my workflow as having two layers.
+
+The first is the **human-facing layer**. My messages here can be short and informal. They carry things like:
+
+- what I want the software to feel like;
+- what looks or behaves wrong;
+- which trade-off I prefer;
+- what must not change;
+- which risk I am willing to accept;
+- whether an experiment answered the question I actually had.
+
+These messages are not implementation specifications. They are decisions, observations, and taste—the parts of the problem that the agent cannot discover by reading the repository.
+
+The second is the **executor-facing layer**. This is the big prompt: code-anchored, explicit, and ready for an implementation agent to follow. It can identify relevant files, constraints, dependencies, verification steps, and worktree boundaries. A lead agent writes this after it has read the code and after we have resolved the important ambiguity.
+
+That division lets each participant do the work they are best positioned to do. I do not need to pretend I already know the exact implementation. The agent does not need to guess what “better” means to me.
+
+## The hard part is not prompt syntax
+
+I do not spend much time worrying about magic phrases, formatting rituals, or whether two extra spaces will change the result. The models I use need information more than ceremony.
+
+The useful question is not, “How do I word this perfectly?” It is, “Have we made the decisions the implementer will need?”
+
+Those decisions often emerge from conversation. I ask the lead to explain a proposed plan point by point because a wall of plausible text can hide misunderstandings. I once spent about two hours working through a nine-point explanation that way. It was slow, but the questions produced decisions I would have missed by nodding at the whole thing. That is where I find accidental assumptions and where product ideas become engineering decisions.
+
+Sometimes the answer should not be another paragraph. If I am unsure how an effect should look, the lead might build a playground or expose a few toggles. If I am worried about performance, it can measure. If two approaches have different consequences, it can show me the smallest version of each. I would rather make a decision from evidence than freeze a guess into a specification.
+
+Once a decision is real, it goes into durable project state. It might be attached to a tracker item or recorded alongside the work. The exact container matters less than whether the next agent can recover the decision and its boundaries.
+
+## A typical piece of work
+
+A real workflow looks roughly like this:
+
+1. I describe the desired outcome, an observed problem, or a strategic question.
+2. The lead agent reads the repository, recalls earlier discussions, and inspects the tracker.
+3. It explains the meaningful choices and researches anything we do not yet know.
+4. We turn ambiguity into a decision, an experiment, or a clearly tracked unknown.
+5. The lead records what we decided so the answer survives the chat session.
+6. When the scope is ready, the lead writes the detailed implementation handoff.
+7. Another agent can review that handoff, attack its assumptions, or execute it in an isolated worktree.
+8. The result is independently verified before I authorize merging or deployment.
+
+Notice where the large prompt appears: step six, not step one.
+
+If I write it at step one, I have to invent details that the repository and the investigation have not revealed yet. If the lead writes it at step six, the prompt is a compiled artifact of everything we learned.
+
+## What I actually say to the lead
+
+My instructions are often closer to these than to a formal specification:
+
+```text
+Explain the real scope of this change and the risks to the work already in progress.
+Are there smaller levels we could evaluate first?
+```
+
+```text
+Show me the smallest experiment that would let me make this decision.
+```
+
+```text
+Make sure the tracker contains what another agent would need to continue.
+```
+
+```text
+Use what we learned to write the implementation handoff.
+Have another agent review it, then execute in an isolated worktree.
+Merging is a separate decision.
+```
+
+These are not clever prompts. They work because the lead has access to the code, the project history, and a durable record of our decisions. A short instruction at the end of a long decision process is not actually context-free.
+
+## The lead agent is not just a typist
+
+The lead has several jobs before implementation begins.
+
+It must **recover context** instead of making me repeat it. That can mean reading the tracker, searching prior sessions, and inspecting the current code.
+
+It must **make uncertainty visible**. A confident-looking plan is not useful if it silently chooses product behavior I have never approved.
+
+It must **turn discussion into durable decisions**. Chat is a good place to think, but a bad place to store the only copy of project state.
+
+It must **choose an execution shape**. Some items depend on others. Some can run in parallel. Some deserve an isolated agent with fresh context. The person—or agent—who can see the current tracker is in a better position to choose than I was several conversations earlier.
+
+Finally, it must **verify**. “An implementation agent said it finished” is not the same as evidence that the change works.
+
+Calling this role an orchestrator can make it sound more exotic than it is. It is a software lead that can read quickly, maintain context, delegate bounded work, and return with evidence.
+
+## What remains my responsibility
+
+Delegating the executor prompt does not mean delegating ownership.
+
+I still decide what should exist. I still make taste calls. I still choose which risks are acceptable. I still decide whether an experiment is convincing. Agents may create commits when I authorize that execution boundary. Merging, deployment, and the next phase remain separate decisions.
+
+The agent can make a technically coherent plan that leads to a product I do not want. No amount of prompt structure fixes missing human judgment.
+
+This is why I care so much about separating decisions from implementation details. I do not read every line of every generated plan or handoff. I have the lead explain the consequential decisions one at a time, give me evidence where possible, and preserve the answers for whoever implements them. That is where my attention changes the result.
+
+## Start smaller than this
+
+You do not need a multi-agent system to use this idea. Start with one Claude Code or Codex session and one piece of work.
+
+Ask the agent to inspect the repository before planning. Have it identify the product and engineering decisions that are still unresolved. Discuss those point by point. Tell it to record the decisions somewhere durable. Only then ask it to write an implementation-ready handoff for a fresh session.
+
+Open that handoff in a new session and see what is missing.
+
+The goal is not to remove the big prompt. The goal is to stop writing it before the information exists—and to stop making yourself manually assemble context that an agent can recover more accurately from the project.
+
+The big prompt still exists. I just treat it as build output now.

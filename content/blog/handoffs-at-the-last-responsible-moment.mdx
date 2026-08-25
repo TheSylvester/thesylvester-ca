@@ -1,0 +1,143 @@
+export const article = {
+  title: "Write Agent Handoffs at the Last Responsible Moment",
+  description:
+    "I used to write implementation handoffs several steps ahead. Now the current orchestrator writes them just in time, after decisions and repository state have settled.",
+  publishedAt: "2026-08-24",
+  updatedAt: "2026-08-24",
+  status: "published",
+  kind: "guide",
+  topics: ["handoffs", "orchestration", "context-management"],
+  guideOrder: 3,
+  featured: false,
+  readingMinutes: 7,
+};
+
+I used to write agent handoffs too many steps ahead. By a handoff, I mean the task packet one agent prepares for the next: the outcome, current terrain, boundaries, and proof the next agent should return.
+
+The intent was reasonable. If I could prepare every implementation prompt during planning, the system would have a neat queue of self-contained work. An orchestrator could dispatch those prompts one after another.
+
+The problem was timing. By the time a later handoff became executable, earlier work had changed the repository. We had learned things. Dependencies had shifted. A choice that looked settled from a distance now had concrete consequences. The handoff was polished, but stale.
+
+Now I write handoffs just in time—more precisely, I have the current orchestrator write them at the last responsible moment.
+
+The decisions can be made early. The executor prompt should be assembled late.
+
+## A handoff is a boundary artifact
+
+I do not use a handoff for every change of topic or every new agent.
+
+If an agent can read the relevant session or recover the work directly from the tracker and repository, another summary can just add noise. I reserve a formal handoff for a real execution boundary: passing a defined implementation to a fresh worker, moving into an isolated worktree, or relaying orchestration to a new context window at a natural pause.
+
+This distinction matters because a handoff has a job. It should transform durable project state into an executable assignment for a particular next agent.
+
+That means it depends on two kinds of information:
+
+- relatively stable intent: outcomes, decisions, non-goals, risk boundaries, and acceptance evidence;
+- current execution state: what is already implemented, which files now matter, what is blocked, and what can safely run alongside other work.
+
+The first kind belongs in durable project state as soon as we settle it—for me, usually the tracker. The second kind is most accurate immediately before dispatch. A just-in-time handoff combines both.
+
+## Why early handoffs decay
+
+Imagine three related items: first establish a new internal boundary, then migrate one subsystem, then build a feature on top of it.
+
+It is tempting to write all three implementation prompts at once. But the first item might reveal that the proposed boundary is wrong. The migration might uncover an invariant that the feature has to respect. Tests might show that two items can no longer run in parallel.
+
+An early handoff has no way to know those things. It either contains guesses or becomes another document that an agent must reconcile with reality.
+
+I do not want a lead agent to manufacture a master implementation specification before it has researched the code. Detail is not automatically accuracy. Detail written at the wrong time can create false confidence.
+
+The safer sequence is:
+
+1. Make product and engineering decisions as early as they are useful.
+2. Record those decisions with the relevant tracker item.
+3. Let preceding work change the repository and produce evidence.
+4. When the next item is actually ready, have the current orchestrator inspect the live state.
+5. Write and review the handoff for that execution boundary.
+6. Dispatch it into an isolated environment when isolation is appropriate.
+
+The handoff becomes a fresh projection of the project, not a fossil from the planning meeting.
+
+My practical rule is usually one implementation handoff per worktree or branch stage. I review what that stage produced before the orchestrator writes the next one. The boundary gives the prompt a concrete repository state instead of a predicted one.
+
+## What “ready” means
+
+I want the orchestrator to write the handoff only when it can answer a few questions.
+
+**Is the desired outcome decided?** The worker should not silently make a taste or product choice that still belongs to me.
+
+**Are the dependencies in a known state?** If another branch has to land first, the prompt is not ready for independent execution.
+
+**Has important uncertainty been resolved or deliberately delegated?** Research can be part of a handoff, but the worker should know which questions are open and what authority it has to answer them.
+
+**Can the work be bounded?** The next agent needs to know what it owns and what it must leave alone.
+
+**Can completion be verified?** The handoff should ask for evidence appropriate to the work, not just a declaration that it is done.
+
+If those answers are available, the orchestrator can produce a much better prompt than I could have written several steps ago.
+
+## What goes into the handoff
+
+I do not treat a handoff as a transcript summary. The next agent does not need every conversational turn. It needs the decisions and the terrain.
+
+A useful implementation handoff usually carries:
+
+- the outcome and why it matters;
+- the tracker item or other durable source of truth;
+- decisions already made, including rejected alternatives when they prevent a likely mistake;
+- relevant repository discoveries and code locations;
+- scope boundaries and explicit non-goals;
+- dependencies and parallel-work constraints;
+- the expected execution environment, such as an isolated worktree;
+- verification requirements;
+- which actions remain under human authority, especially merging or deployment.
+
+The current orchestrator can gather this from the tracker and repository. It can also ask another agent to review the proposed handoff for missing assumptions before anything is launched.
+
+That review is more valuable to me than obsessing over the prose. I care whether the handoff reflects reality and preserves intent, not whether it sounds formal.
+
+## Fresh context is a feature
+
+Long-running orchestration eventually accumulates too much history. Starting a fresh window can be the right move, but only at a natural boundary.
+
+When one section of work is complete, the outgoing orchestrator can write a relay for the next one. The new orchestrator gets a cleaner context while the tracker and repository preserve the durable state. It can then inspect what actually happened and create later implementation handoffs as those items become ready.
+
+This avoids two opposite problems:
+
+- carrying an enormous conversation forever and hoping the important details stay salient;
+- resetting context without leaving enough durable state for the next agent to continue.
+
+The relay is not the project memory. It is a map into project memory.
+
+That is also why I separate orchestrator handoffs from implementation handoffs. An orchestrator needs enough context to lead the next phase and manufacture current assignments. An implementation agent needs a bounded task. Giving both of them the same giant prewritten prompt wastes the advantages of each role.
+
+## Isolation without surrendering authority
+
+When the handoff is ready, I often want execution isolated from the main working tree. A worktree or separate branch gives the implementation agent room to edit and commit without colliding with ongoing work.
+
+Isolation is not the same as trust without verification. I can authorize an agent to complete the work and create commits while explicitly withholding merge authority. The lead—or another reviewer—can inspect the diff, run relevant checks, and verify the behavior. I decide whether that evidence is enough to merge.
+
+This makes the boundary concrete:
+
+```text
+Prepare the implementation handoff from the current tracker item and repository state.
+Have it reviewed for missing decisions and unsafe assumptions.
+Execute it in an isolated worktree and commit the result there.
+Return with verification evidence. Merging is separate.
+```
+
+Again, the wording is not magic. The surrounding system makes it meaningful: durable decisions, a current orchestrator, an isolated executor, independent verification, and retained human authority.
+
+## A practical way to try this
+
+Pick a piece of work that has at least two dependent stages.
+
+Discuss both stages now, and record the decisions for each. Write the handoff only for the first stage. Execute and verify it. Then open a fresh agent, point it at the tracker and the resulting repository state, and ask it to write the second handoff.
+
+Compare that second prompt with what you would have written before stage one. Look for changed file paths, newly discovered constraints, removed assumptions, or a better verification strategy.
+
+That difference is the value of just-in-time handoffs.
+
+I still believe in detailed executor prompts. I just do not treat them as planning documents or permanent truth. They are disposable execution artifacts, compiled from durable decisions at the moment a particular agent is ready to act.
+
+Write decisions early. Write handoffs late.

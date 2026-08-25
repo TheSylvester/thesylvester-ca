@@ -1,0 +1,4 @@
+interface:
+  display_name: "Blog"
+  short_description: "Draft and publish privacy-safe field notes"
+  default_prompt: "Use $blog to turn this idea or source material into a reviewed article for this site."

@@ -1,98 +1,84 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import CopyEmail from "@/components/copy-email";
+import ArticleCard from "@/components/article-card";
+import PublicationShell from "@/components/publication-shell";
+import { guideArticles } from "@/lib/articles";
 
 export const metadata: Metadata = {
-  title: "My Claude Code Guide — Sylvester Wong",
+  title: "My Coding Agent Guide — Sylvester Wong",
+  description:
+    "A living, opinionated guide to using Claude Code, Codex, and coding agents for serious software engineering.",
+  alternates: { canonical: "/guide" },
+  openGraph: {
+    title: "My Coding Agent Guide — Sylvester Wong",
+    description: "A living guide to context, delegation, handoffs, verification, and engineering judgment.",
+    url: "/guide",
+    images: [
+      {
+        url: "/blog/opengraph-image",
+        width: 1200,
+        height: 630,
+        alt: "Sylvester Wong — Coding Agent Field Notes",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "My Coding Agent Guide — Sylvester Wong",
+    description: "A living guide to context, delegation, handoffs, verification, and engineering judgment.",
+    images: ["/blog/opengraph-image"],
+  },
 };
 
 export default function Guide() {
   return (
-    <div
-      style={{
-        position: "relative",
-        minHeight: "100vh",
-        background: "#12151f",
-        color: "#c8ccd4",
-        display: "flex",
-        flexDirection: "column",
-        boxSizing: "border-box",
-        padding: "clamp(28px,4vh,56px) clamp(28px,4vw,72px)",
-      }}
-    >
-      <div style={{ maxWidth: 760, width: "100%", margin: "0 auto", flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-        <Link href="/" className="hov-footer" style={{ color: "#9aa3b2", fontSize: 13 }}>
-          ← thesylvester.ca
-        </Link>
-
-        <div style={{ marginTop: 48, fontSize: 12, letterSpacing: ".3em", color: "#d97757" }}>MY CLAUDE CODE GUIDE</div>
-        <h1
-          style={{
-            margin: "16px 0 0",
-            fontSize: "clamp(22px,2.1vw,32px)",
-            fontWeight: 700,
-            color: "#f2f3f5",
-            lineHeight: 1.2,
-            textWrap: "balance",
-          }}
-        >
-          How I actually use AI to build software.
-        </h1>
-        <p
-          style={{
-            margin: "16px 0 0",
-            fontSize: "13.5px",
-            lineHeight: 1.75,
-            color: "#9aa3b2",
-            maxWidth: 640,
-            textWrap: "pretty",
-          }}
-        >
-          The working method behind the site — context-isolated task handoffs, self-testing sub-agents, automated
-          review validation. Notes are being written — coming soon.
+    <PublicationShell active="guide">
+      <section className="publication-hero guide-hero">
+        <div className="publication-kicker">MY CODING AGENT GUIDE / LIVING DOCUMENT</div>
+        <h1>How I actually use AI to build software.</h1>
+        <p>
+          This is the durable version of what I usually explain in conversations: an opinionated path from intent to
+          implementation, with context isolation, agent handoffs, verification, and human merge authority.
         </p>
-
-        <div
-          style={{
-            marginTop: 22,
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 0,
-            alignItems: "center",
-            fontSize: "12.5px",
-            color: "#c8ccd4",
-          }}
-        >
-          <span style={{ border: "1px solid #3a4152", borderRadius: 6, padding: "7px 12px" }}>research</span>
-          <span style={{ color: "#d97757", padding: "0 8px" }}>→</span>
-          <span style={{ border: "1px solid #3a4152", borderRadius: 6, padding: "7px 12px" }}>plan</span>
-          <span style={{ color: "#d97757", padding: "0 8px" }}>→</span>
-          <span style={{ border: "1px solid #3a4152", borderRadius: 6, padding: "7px 12px" }}>delegate</span>
-          <span style={{ color: "#d97757", padding: "0 8px" }}>→</span>
-          <span style={{ border: "1px solid #3a4152", borderRadius: 6, padding: "7px 12px" }}>review</span>
-          <span style={{ color: "#d97757", padding: "0 8px" }}>→</span>
-          <span style={{ border: "1px solid #3a4152", borderRadius: 6, padding: "7px 12px" }}>retain</span>
+        <div className="guide-pipeline" aria-label="Workflow">
+          {["intent", "deliberate", "retain", "handoff", "implement", "verify"].map((step, index) => (
+            <span key={step}>
+              <b>{step}</b>
+              {index < 5 ? <i aria-hidden="true">→</i> : null}
+            </span>
+          ))}
         </div>
+      </section>
 
-        <div
-          style={{
-            marginTop: 48,
-            paddingTop: 26,
-            borderTop: "1px solid #262c3d",
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "16px 28px",
-            fontSize: "12.5px",
-          }}
-        >
-          <CopyEmail className="hov-footer" style={{ color: "#9aa3b2" }}>
-            sylvester@thesylvester.ca
-          </CopyEmail>
-          <a href="https://github.com/TheSylvester" className="hov-footer" style={{ color: "#9aa3b2" }}>
-            github.com/TheSylvester
-          </a>
+      <section className="guide-intro" aria-labelledby="how-to-read">
+        <div>
+          <span className="guide-intro-number">00</span>
+          <h2 id="how-to-read">How to read this</h2>
         </div>
-      </div>
-    </div>
+        <p>
+          Start at the top if you are building your first repeatable workflow. If you already run multiple agents,
+          jump to the failure mode you recognize. These chapters change as the method changes; dated field notes stay
+          in the <Link href="/blog">blog</Link>.
+        </p>
+      </section>
+
+      <section className="article-list guide-list" aria-labelledby="guide-chapters-heading">
+        <div className="section-heading">
+          <h2 id="guide-chapters-heading">The method</h2>
+          <span>{guideArticles.length} chapters</span>
+        </div>
+        {guideArticles.map((article, index) => (
+          <ArticleCard article={article} index={index} key={article.slug} showIndex />
+        ))}
+      </section>
+
+      <aside className="guide-note">
+        <span>NOTE</span>
+        <p>
+          This is a working guide, not a universal recipe. I keep the parts that survive real use, revise the parts
+          that do not, and write down the tradeoffs so you can decide what fits your own work.
+        </p>
+      </aside>
+    </PublicationShell>
   );
 }
