@@ -4826,12 +4826,28 @@ document.addEventListener("keydown", (e) => {
     // falling through to the browser, whose lock exit is that mode's only pause
     return;
   }
-  // the shop/death overlays own the keys: a frozen sim keeps G.running true,
-  // so without this gate every ring press below would still enter G.keys and
-  // rewrite the stored aim behind the overlay — and only pause() ever clears
-  // the set, so a hand resting on the ring through a shop visit would lurch
-  // the ship on continue. openShop() clears the set for the keys already
-  // held; this return keeps new ones out for the whole visit.
+  // the DEATH overlay owns the keys — and it is the only overlay left that
+  // freezes anything: frozen() is `E.state === "dead"` and nothing else
+  // (js/encounter.js:1141), because the modal shop went away with the panel
+  // shop — "No state freezes for a shop: the panel is live at every moment of
+  // play, so a purchase is just buy()" (js/encounter.js:2752-2757). A frozen
+  // sim keeps G.running true, so without this gate every ring press below would
+  // still enter G.keys and rewrite the stored aim behind the overlay.
+  //
+  // THIS RETURN KEEPS NEW PRESSES OUT FOR THE WHOLE FREEZE, AND THAT IS ALL IT
+  // DOES. Nothing AUTOMATICALLY clears the keys already down when the freeze
+  // begins — pause() (:4521-4522) and the window `blur` handler (:4971) are the
+  // only two sites in this file that clear G.keys and heldAbilityKeys wholesale,
+  // and a freeze is neither — but ordinary keyup still releases its own key:
+  // the listener at :4886 is unguarded and deletes the code from both sets
+  // whether the sim is frozen or not. So the lurch is narrower than "held into
+  // the freeze": a key KEPT DOWN through the R restart stays in the set and
+  // reaches the first unfrozen bank, while one let go on the death screen is
+  // gone by then. (This block used to credit an `openShop()` with clearing the
+  // set for the keys already held. No such function is defined anywhere in
+  // js/ — it went with the modal shop — so the sentence described a release
+  // that has never run, next to a sentence describing the lurch it would have
+  // prevented. The lurch is the half that was true, once narrowed.)
   if (window.Encounter && Encounter.frozen()) return;
   if (!G.running) return; // the ring only exists in flight, same as the right button
   // THE BENCH BINDINGS, between the running gate and the aim ring so they
@@ -4934,6 +4950,29 @@ document.addEventListener("pointerlockerror", () => {
 });
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) pause();
+});
+// THE FOCUS HALF of the same hazard, and the half the line above cannot cover:
+// a dialog that steals the focus WITHOUT hiding the document fires `blur` and
+// never `visibilitychange`. Windows raises exactly that dialog off two gestures
+// a pilot makes by accident — Sticky Keys on five Shift presses, FilterKeys on
+// an eight-second Shift hold, which is the shape of any held ability — and the
+// keyup that follows is delivered to the dialog. Every level below then stays
+// set: heldAbilityMask (js/game.js:408) ORs them into every banked frame for the
+// rest of the session, so the seat flies as a stuck turret with nobody holding
+// anything. demo-play.html:482 ships this same line for this same reason.
+//
+// This is pause()'s CLEARING BLOCK and nothing else, because losing the focus is
+// not a pause: the loop keeps running, the pointer lock is the browser's own
+// business (pointerlockchange above has it), and clearTickInput() stays OUT — the
+// accumulator holds real input the pilot made in the milliseconds before the
+// blur and the next tick is entitled to it, which is precisely what is NOT true
+// across a pause. The four writes are a COPY of pause()'s, in pause()'s order,
+// and the two sites are one list: a held level added to either belongs in both.
+window.addEventListener("blur", () => {
+  G.leftHeld = false;
+  setRightHeld(false);
+  G.keys.clear();
+  heldAbilityKeys.clear();
 });
 window.addEventListener("resize", () => {
   resize();
