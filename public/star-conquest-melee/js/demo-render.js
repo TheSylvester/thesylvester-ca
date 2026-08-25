@@ -1257,9 +1257,70 @@
     ctx.restore();
   }
 
+  // `mine` — THE ENTITY DRAW, AND IT IS THE BULLET DRAW VERBATIM.
+  //
+  // The promotion is a storage decision, and D10's own charter keeps the demo's
+  // LOOK: "the look is half the ruling". R6 holds an architecture licence and
+  // not a visual one, so a player must not be able to see that a mine stopped
+  // being a round. The first attempt put the octagon inside drawEnemy's generic
+  // frame and cross-vendor review enumerated what that cost — the entity's
+  // hashed `angle` added to the time/id spin, a different fill and line width,
+  // a 23.1-radius alpha-.12 glow where the round had 28.6 at .36, and the 7px
+  // motion-trail stroke gone entirely.
+  //
+  // So this owns its whole frame instead, and every number below is read off
+  // drawBullet's own branches for a round of r 11 (`b.r >= 9` is true for a
+  // mine, which is what selects the heavier fill, the 2px line and the .36
+  // glow). THE TRAIL LIVES IN THE GLOW PASS, which is why it looked absent:
+  // drawBullet's flat pass explicitly skips the trail for a mine and its GLOW
+  // pass strokes one at 7px for every round of r >= 9.
+  //
+  // THE COLOUR COMES FROM `STATS.mine`, and that is the registry's `present`
+  // obligation doing its job rather than a convenience: the row declares what
+  // draws this kind and what colour it is, and this is the consumer.
+  //
+  // The wrapped-copy radius is the BULLET's (max(24, r * 3)), not drawEnemy's
+  // (max(34, r * 2.4)), because a mine at the seam must produce the same copies
+  // it always did.
+  function drawMine(ctx, e, alpha, glowPass, copyPass) {
+    const p = renderPos(e, alpha);
+    const color = STATS[e.type].color;
+    if (!copyPass) {
+      const offsets = wrappedRenderOffsets(p, Math.max(24, e.r * 3));
+      for (let i = 0; i < offsets.length; i++) {
+        ctx.save(); ctx.translate(offsets[i].x, offsets[i].y);
+        drawMine(ctx, e, alpha, glowPass, true);
+        ctx.restore();
+      }
+    }
+    const prevX = p.x - delta(e.px, e.x, W) * 1.8;
+    const prevY = p.y - delta(e.py, e.y, H) * 1.8;
+    if (glowPass) {
+      glow(ctx, p.x, p.y, Math.max(13, e.r * 2.6), color, 0.36);
+      ctx.strokeStyle = rgba(rgbFor(color), 0.14);
+      lw(ctx, 7);
+      ctx.beginPath(); ctx.moveTo(prevX, prevY); ctx.lineTo(p.x, p.y); ctx.stroke();
+      return;
+    }
+    ctx.strokeStyle = cssFor(color);
+    ctx.fillStyle = "rgba(8,8,18,0.88)";
+    lw(ctx, 2);
+    // ...and NO motion-trail stroke on the flat pass: drawBullet skipped it for
+    // a mine and only a mine, so the octagon sits still on a moving line.
+    ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(S.time * 0.7 + e.id);
+    polygon(ctx, 8, e.r, Math.PI / 8); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = e.armed > 0 ? rgba(RGB.gold, 0.35) : C.ink;
+    lw(ctx, e.armed > 0 ? 1 : 1.7);
+    ctx.beginPath(); ctx.arc(0, 0, e.r + 6 + Math.sin(S.time * 7 + e.id) * 2, 0, TAU); ctx.stroke();
+    ctx.restore();
+  }
+
   function drawEnemy(ctx, e, alpha, glowPass, copyPass) {
     const pos = renderPos(e, alpha);
     const st = STATS[e.type];
+    // BEFORE the generic frame, not inside it — see drawMine. Everything below
+    // this line is the body treatment, and a mine is not a body to look at.
+    if (e.type === "mine") { drawMine(ctx, e, alpha, glowPass, copyPass); return; }
     const scale = e.emerge > 0 ? 0.08 + easeOut(1 - e.emerge / e.emergeMax) * 0.92 : 1;
     const ang = lerpAngle(e.pangle, e.angle, alpha);
     if (!copyPass) {

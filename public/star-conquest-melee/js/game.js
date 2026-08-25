@@ -2224,6 +2224,43 @@ function markerDir() {
   return fireDir();
 }
 
+// ---- P1's `ordnance-step` PASS ---------------------------------------------
+// The primitive the plan rules built in full this round (§2.3 P1): the guarded
+// state block `{hp, trk, phase, flank}` beside BULLET_HASH, and THIS pass, which
+// runs immediately BEFORE `b.px = b.x` in the bullet loop.
+//
+// THE PLACEMENT IS THE WHOLE PRIMITIVE, and it is worth saying why rather than
+// leaving it to the call site's one-line comment. `px -> x` IS THE SWEPT HIT
+// SEGMENT — the encounter's `resolveBulletHits` tests that chord, not the
+// round's position. So a round that turns, splits, phases or re-aims must do it
+// while `px` still holds the PREVIOUS tick's position, or the segment it is
+// tested on describes a path the round did not take: the turn shows on screen a
+// tick before it shows in the collision, and the two disagree for exactly one
+// tick per steering decision. A pass placed one line lower is not "slightly
+// late", it is a different simulation. The ORDER leg in tests/wave1-checks.js
+// pins it, and moving this call below `b.px = b.x` is that leg's sabotage.
+//
+// IT IS INERT TODAY, deliberately. R6 builds the block and the pass; R8a adds
+// the `b.k` kind byte and the CONTENT that uses them (the plan's own division —
+// "R8a then adds only the `b.k` byte and the content that uses the block,
+// instead of overloading the byte to carry state"). So the steppers list below
+// is EMPTY, the first test costs one property read per round per tick, and
+// every committed trace holds.
+//
+// PUBLISHED MUTABLE, on Engine.MATRIX's exact footing: a plane nothing can
+// extend is a plane nobody can test. The ORDER leg registers a stepper, drives
+// one tick and puts it back, and that registration is how the leg reaches a
+// non-zero block at all — nothing the shipped game can create carries one.
+const ORDNANCE_STEP = [];
+function ordnanceStep(b) {
+  if (!ORDNANCE_STEP.length) return; // the shipped path: one read, no allocation
+  // The block gate. A round whose whole block is zero has no ordnance state to
+  // step, which is every round the game can currently create — so the steppers
+  // never see one and R8a's content cannot accidentally fire on a plain bolt.
+  if (!(b.hp || b.trk || b.phase || b.flank)) return;
+  for (const st of ORDNANCE_STEP) st(b);
+}
+
 // one gate for click fire and autofire: cooldown, the bullet cap, the mode.
 // The cap counts the FIRING seat's own live bullets (owner-scoped), so one
 // seat can never starve another — with one seat that count IS the list length.
@@ -2499,6 +2536,7 @@ function step() {
   for (let i = G.bullets.length - 1; i >= 0; i--) {
     const b = G.bullets[i];
     if (b.dead || b.spent) { G.bullets.splice(i, 1); continue; } // consumed by a hit, or expired after its final sweep
+    ordnanceStep(b); // P1 — BEFORE the collapse below, and the order is the point
     b.px = b.x; // previous position — the encounter sweeps this segment for hits
     b.py = b.y;
     b.x += b.vx;
@@ -5536,6 +5574,31 @@ const BULLET_HASH = ["x", "y", "px", "py", "vx", "vy", "r", "dmg", "owner", "ttl
 // EVERY bullet folds, which is the README's collision defense: the array length
 // is already prefixed above, so no two states can hash alike through it.
 const BULLET_HASH_GUARDED = ["blastR"];
+// ...and P1's ORDNANCE STATE BLOCK, in its OWN guarded fold rather than appended
+// to the list above. The plan (§2.3 P1) rules the block built in full: `hp` (what
+// it takes to destroy this round — D10's seventh registry obligation, arriving
+// on the production side inert because production fields no destructible
+// ordnance yet), `trk` (a tracking term), `phase` (where a multi-stage round is
+// in its sequence) and `flank` (a lateral term). All four are ZERO on every
+// round the game can currently create, so this fold costs zero bytes today and
+// every committed trace holds.
+//
+// WHY A SECOND GUARD AND NOT FOUR MORE NAMES IN THE FIRST. The guard is entered
+// on "does any round carry a non-zero value in THIS list", and the two lists
+// answer two different questions: `blastR` asks "did anyone buy BLAST CHARGE",
+// the block asks "does any round carry ordnance state". Merged into one list, a
+// trace that bought BLAST CHARGE would pay the block's four bytes per bullet per
+// tick for nothing — the exact tax the charter rule refuses, and the reason
+// `blastR` was not appended to BULLET_HASH in the first place.
+//
+// THE COLLISION DEFENSE SURVIVES THE SPLIT, which is the thing a second guard
+// has to be checked for. Each block is entered ONCE for the whole array and,
+// once entered, EVERY bullet folds every field in it — so within a block no two
+// states can collide. ACROSS the two blocks they cannot collide either: for n
+// live rounds the first block folds n numbers and the second folds 4n, and
+// n !== 4n for every n >= 1, while at n === 0 both fold nothing and the states
+// are already distinguished by the length prefix above.
+const BULLET_ORDNANCE_GUARDED = ["hp", "trk", "phase", "flank"];
 function hashShip() {
   // a LENGTH-PREFIXED walk over players[] in ascending seat order — the
   // multi-seat extension the old single-seat comment assigned to exactly
@@ -5587,6 +5650,14 @@ function hashBullets() {
     if (anyGuarded) break;
   }
   if (anyGuarded) for (const b of G.bullets) for (const f of BULLET_HASH_GUARDED) h.num(b[f] || 0);
+  // ...and P1's ordnance block, on its own guard for the reason declared beside
+  // BULLET_ORDNANCE_GUARDED. Zero bytes on every trace in the tree today.
+  let anyOrdnance = false;
+  for (const b of G.bullets) {
+    for (const f of BULLET_ORDNANCE_GUARDED) if (b[f]) { anyOrdnance = true; break; }
+    if (anyOrdnance) break;
+  }
+  if (anyOrdnance) for (const b of G.bullets) for (const f of BULLET_ORDNANCE_GUARDED) h.num(b[f] || 0);
   return h;
 }
 // no camera hash: cam and gate are render-side view state now — the sim
@@ -5669,6 +5740,12 @@ function replayInput(script, opts) {
 }
 Object.assign(window.__test, {
   hashState, hashParts,
+  // P1's stepper list, published so the ORDER leg can register one. It is the
+  // Engine.MATRIX arrangement exactly: the declaration is reachable, the leg
+  // makes the edit and puts it back, and that edit IS the leg's sabotage.
+  // Nothing in the shipped game writes here.
+  ORDNANCE_STEP,
+  BULLET_ORDNANCE_GUARDED,
   simTick: () => simTick,
   recordInput, stopInput, replayInput,
   // the headless host's seams (server/sim-host.mjs). stepSim is the raw

@@ -232,6 +232,18 @@ const MATRIX = {
   // omitted so that the day hitPlayer learns its source, the lookup throws and
   // names this comment instead of silently refusing every hit in the game.
   hit: {},
+  // the comet's persistent damaging AREA (D26). Its OWN kind, on the exact
+  // footing `chain` and `beam` took in R5: each new DELIVERY MECHANISM gets a
+  // kind, because folding it into an existing one would make one cell answer
+  // for two mechanisms. An aura is not a shot (nothing was fired), not a blast
+  // (nothing terminated), and not a ram (no hull touched anything) — it is a
+  // volume that overlaps, tick after tick, and that is a fourth mechanism.
+  //   R6 DECLARES THE ROWS AND BUILDS NO SWEEP. The pass is PORT-S's, because
+  // production has nothing for an aura to kill today (there is no enemy round
+  // in production at all). So every row below is INERT: the table records the
+  // decision, and the day the sweep exists it reads these cells rather than
+  // asking someone to decide again.
+  aura: {},
 };
 MATRIX.ram[CLASS.SHIP] = {};
 MATRIX.ram[CLASS.SHIP][CLASS.BODY] = 1;   // contactEvent's ram damage to the body
@@ -268,6 +280,53 @@ MATRIX.blast[CLASS.SHIP][CLASS.ORB] = 0;      // OFF: an orb is a pickup, not a 
 // inventing a factor here would be a balance decision wearing a completeness
 // argument. Undeclared is OFF, and the day a construct exists in the blast's
 // world the row is one line.
+
+// ---- THE AURA'S ROWS (D26). R6 OWES THESE AND THIS IS THEM -----------------
+// R5 declared the AURA class with NO row in any kind, deliberately, so that an
+// aura-sourced effect would reach mayHit and THROW by name — "the class is
+// declared, the rows are owed, and the throw says which round owes them". This
+// is that round, and these are those rows. R5's own leg in tests/wave1-checks.js
+// is re-aimed in this commit, because the red is how R6 was told it owed them.
+MATRIX.aura[CLASS.AURA] = {};
+MATRIX.aura[CLASS.AURA][CLASS.ORDNANCE] = 1; // THE RULING ITSELF. D26: "it should
+                                             // destroy any new projectiles ...
+                                             // with hp and therefore those don't
+                                             // damage the player any more". What
+                                             // the burn eats is decided by the
+                                             // `hp > 0` filter and NEVER by a
+                                             // second destruction path — D10's
+                                             // "the fix is ONE field" depends on
+                                             // that, and so does R7's anti-
+                                             // doubling protection.
+MATRIX.aura[CLASS.AURA][CLASS.BODY] = 1;     // ...and the other half of the same
+                                             // sentence: "or drones with hp".
+                                             // The demo's drone reaches the door
+                                             // as a BODY today (R5 commit F), so
+                                             // THIS row is what covers the owner's
+                                             // drones. If a later round classifies
+                                             // a placed object CONSTRUCT, that row
+                                             // is one line and it is owed then,
+                                             // not invented now.
+MATRIX.aura[CLASS.AURA][CLASS.SHIP] = 0;     // OFF, and PENDING rather than
+                                             // settled: whether a burning pilot's
+                                             // aura hurts a rival pilot is a feel
+                                             // question the comet round owns
+                                             // (§2.11's open items), not one R6
+                                             // may answer by writing a 1 here. It
+                                             // is declared at 0 rather than left
+                                             // undeclared — the ORB precedent
+                                             // above — so the eventual ruling is
+                                             // an edit to a cell that already
+                                             // exists.
+// aura -> ORB and aura -> CONSTRUCT are NOT declared, on `blast -> CONSTRUCT`'s
+// own reasoning: an orb is a pickup and nothing in the game reduces it, and no
+// kind is classified CONSTRUCT today. Undeclared is OFF.
+//
+// THE ORDERING LAW THAT COMES WITH THESE ROWS is not expressible in a factor,
+// so it is declared in the tick-order table below (see PHASE_ORDER): the aura
+// damage pass runs BEFORE the ordnance-vs-player pass on the same tick, so a
+// child spawned inside a burning comet dies the tick after it spawns instead of
+// landing. D26 calls that "part of the ruling"; §2.11 calls it "the law".
 
 // D1 IN FULL (owner-ruled): player -> player splash is ON at factor 1.0. A
 // splashed rival is treated exactly like an enemy body by the blast, and then
@@ -557,10 +616,697 @@ function applyEffect(ev) {
   return amount;
 }
 
+// ---- THE RNG SUBSTREAM MIXER (spec harvest §2.6.3b) ------------------------
+// One shared random stream is a coupling nobody declared. Every draw advances
+// it, so ADDING AN ENTITY OR A BRANCH ANYWHERE SHIFTS EVERY DRAW AFTER IT — a
+// whole bug class, and the bench research already documents an instance of it
+// by name: *"do not copy `splitBody` wholesale... it draws `rand()` for the base
+// angle, and a player-triggered draw shifts every subsequent seeded wave deal"*.
+// The demo kernel has the same shape and worse odds, because its FX consume the
+// gameplay stream: one heavy kill spends about 203 draws on particles alone, so
+// a burst is a bigger perturbation than the wave deal it displaces.
+//
+// THE FIX IS A SUBSTREAM PER PURPOSE. A draw derives its own generator from
+// `(runSeed, waveId, spawnOrdinal, entityId, attackSequence, purposeTag)`, so
+// two draws that should be independent ARE independent, and a new branch can
+// never advance a stream it has nothing to do with.
+//
+// THE IN-REPO PRECEDENT, and it is exact: `makeStars` (js/demo-kernel.js)
+// already builds its own `mulberry32((S.seed ^ 0x91e10da5) >>> 0)` and draws
+// seven times per star without touching the gameplay stream. That is a
+// substream, derived by XOR from the run seed, and it has been shipping since
+// the demo was written. This is the same idea with a wider key.
+//
+// THE CANDIDATE-LIST RULE travels with the mixer and is stated here because it
+// is the half a mixer alone does not buy: **a list is SORTED before it is
+// sampled.** A substream makes the DRAW reproducible; sorting makes the
+// SELECTION reproducible, and a stable draw over an unstable list is still
+// unstable. Adoption happens where draws actually move (commit F); the rule is
+// declared here so it is not rediscovered later as a defect.
+//
+// WHY THE ALGORITHM IS SPELLED HERE and not imported: js/engine.js loads BEFORE
+// js/demo-kernel.js and must not depend on it, and js/encounter.js is the file
+// PORT-S dismantles. So this is a THIRD copy of mulberry32 — and a third copy
+// is only safe if something checks it, which is the repo's own hand-mirrored-
+// copy alarm (NAME_MAX, SKIN_COUNT and the two draw tables all keep one). The
+// leg in test/node-golden.mjs drives all three copies over a pinned seed and
+// asserts they agree step for step.
+// THE BODY IS THE TREE'S, LINE FOR LINE, and it has to be: a "mulberry32" that
+// combined its rounds differently would be a different generator wearing a
+// shared name, which is the worst outcome a mirrored copy can have. The alarm
+// below caught exactly that on this function's first run — the first draft here
+// carried `(t + Math.imul(...)) >>> 0` where the tree carries `... ^ t`, and the
+// two disagree from draw zero. That is the whole argument for the alarm.
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// The purpose vocabulary — the census's own categories, which is the honest
+// place for it to come from. A purpose is what makes two draws independent, so
+// inventing them per call site would put the whole point back where it started.
+const PURPOSE = {
+  DEAL: "deal",         // the wave deal: which bodies, how many, in what shape
+  SPAWN: "spawn",       // one body's own initialisation at birth
+  BEHAVIOR: "behavior", // a living body's decisions
+  SHAPE: "shape",       // a round's shape at spawn — the heavy's curve, the
+                        // cluster's scatter
+  ORB: "orb",           // the death reward's drift
+  FX: "fx",             // EVERY presentation draw. The census is why this one
+                        // exists: FX dominate the stream at run time, so an FX
+                        // substream is what actually kills the coupling.
+};
+
+// ONLY INTEGER OPERATIONS, and that is a cross-runtime requirement rather than
+// a style. Math.imul, xor, shift and the unsigned coercion are exact in every
+// JavaScript engine; a float multiply is not guaranteed to be, and the whole
+// value of a substream is that Node and a browser agree about it. The final
+// division inside mulberry32 is by a power of two, which is exact in binary64.
+function mixIn(h, v) {
+  let x = (h ^ (v >>> 0)) >>> 0;
+  x = Math.imul(x, 0x85ebca6b) >>> 0;
+  x = (x ^ (x >>> 13)) >>> 0;
+  x = Math.imul(x, 0xc2b2ae35) >>> 0;
+  return (x ^ (x >>> 16)) >>> 0;
+}
+// A purpose is a STRING at the call site, because a call site reading
+// `PURPOSE.FX` is self-documenting in a way an integer never is. It folds to an
+// integer here with FNV-1a over its code units — one authority, and no table of
+// magic numbers to keep in step with the vocabulary above.
+function purposeCode(tag) {
+  let h = 0x811c9dc5;
+  const s = String(tag === undefined || tag === null ? "" : tag);
+  for (let i = 0; i < s.length; i++) {
+    h = (h ^ s.charCodeAt(i)) >>> 0;
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h >>> 0;
+}
+// The seed derivation, separated from the generator so a caller can pin, log or
+// compare a substream's KEY without drawing from it — and so the golden vector
+// can assert the seed and the sequence independently.
+function substreamSeed(runSeed, waveId, spawnOrdinal, entityId, attackSequence, purposeTag) {
+  let h = (runSeed >>> 0);
+  h = mixIn(h, waveId >>> 0);
+  h = mixIn(h, spawnOrdinal >>> 0);
+  h = mixIn(h, entityId >>> 0);
+  h = mixIn(h, attackSequence >>> 0);
+  h = mixIn(h, purposeCode(purposeTag));
+  return h >>> 0;
+}
+// ...and the generator itself. SPAWN ORDINALS AND ATTACK SEQUENCES ARE HASHED
+// STATE — the spec says so and it is what makes a substream reproducible across
+// a replay: a key built from an unhashed counter would give a replay a
+// different stream than the run it is replaying.
+function substream(runSeed, waveId, spawnOrdinal, entityId, attackSequence, purposeTag) {
+  return mulberry32(substreamSeed(runSeed, waveId, spawnOrdinal, entityId, attackSequence, purposeTag));
+}
+
+// ---- THE KIND REGISTRY (P2 `unit-list`, P9 `present-class`) ----------------
+// The declaration plane for every entity the two simulations field. One row per
+// KIND, seven obligations per row, and the row is the place a later round reads
+// instead of re-deriving. R7 compiles its codec from here; PORT-S compiles the
+// merged list from here.
+//
+// ---- WHAT THIS IS NOT, AND THE DEBT THAT BUYS IT --------------------------
+// The plan's sentence is *"the four arrays (bullets, enemies, missiles, orbs)
+// become one registry-driven list"*. THE PHYSICAL MERGE IS NOT IN THIS ROUND,
+// and that is a seat ruling with a stated price rather than a corner cut. The
+// production reconnaissance found ten hazards under byte-identity and three of
+// them are structural:
+//
+//   1. `hashEncounter`'s enemy walk folds `h.u32(i)` — the ENEMIES-ONLY ARRAY
+//      INDEX (js/encounter.js). Nothing else in the codebase folds a container
+//      index. A merged list must still answer "what is this body's dense index
+//      among enemies only, in enemies-only insertion order", and deriving it
+//      from a merged position is simply wrong.
+//   2. ENEMIES ARE NOT LENGTH-PREFIXED while missiles and orbs are, and the
+//      asymmetry is load-bearing: a type with zero live members folds NOTHING,
+//      which is what lets ROSTER grow without moving a committed hash. A
+//      uniform registry walk that added a per-KIND header re-keys every trace.
+//   3. FORTY-FIVE synthetic bullet pushes across tests/ and test/ carry no `id`
+//      at all. A registry keyed by id, or one assuming a fixed record shape,
+//      invalidates the very fixtures that prove byte-identity.
+//
+// So a physical merge re-keys every trace — which is exactly the cost D21's own
+// logic routes to PORT-S, where the 25-fixture bill and the ~700-check rewrite
+// are already priced. R6 builds the DECLARATION plane over the existing
+// per-class storage. **THE MERGE IS NAMED DEBT, ASSIGNED TO PORT-S**, and this
+// paragraph is the record of it.
+//
+// ---- THE SEVEN OBLIGATIONS ------------------------------------------------
+// Every kind declares all seven. A kind missing one is RED (the completeness
+// leg in test/node-golden.mjs), because a registry with holes is a registry a
+// consumer has to guess around, and guessing is what the plane exists to stop.
+//
+//   hash        WHERE this kind's hashed field list lives — never a COPY of it.
+//               A copy would be a second authority standing beside the one the
+//               fixtures are actually folded from, and two authorities drift.
+//               `{ where, fields, guarded }`, all by NAME, and `guarded` is a
+//               LIST because a kind can have more than one guarded block. The
+//               bolt has two: `blastR`'s, and P1's `{hp, trk, phase, flank}`.
+//               It was a single string and the bolt named only the first, so
+//               the row was complete BY SHAPE and incomplete IN FACT — a later
+//               registry-driven hash consumer would have folded P1's block out
+//               of existence and nothing would have said so. The pointer oracle
+//               validates every name in the list.
+//   wire        the wire row encoder, by name, or null for a kind that does not
+//               replicate. R7 compiles from this column.
+//   present     P9. The presentation lane the kind is drawn through — which
+//               PRES cache on production, which draw pass in the demo.
+//   clear       `{ store, onRestart }` — the collection the kind lives in, and
+//               what a restart does to it.
+//   cap         the cap policy. Vocabulary and contract: see CAP below.
+//   ownerDeath  `persist | detach | despawn` — what becomes of a live instance
+//               when whatever spawned it dies.
+//   hp          D10's SEVENTH obligation. 0 (the default) means NEVER SHOOTABLE
+//               and the collision pass skips the kind entirely, which is what
+//               buys those kinds zero runtime, zero wire and zero cap
+//               interaction. A string names an external authority for a kind
+//               whose hp is table-driven rather than per-kind constant.
+//
+// EFFECTS AND BUFFS ARE NOT ENTITIES and get no row. They stay plain records —
+// the plan says so in as many words, and the reason is that an entity carries
+// seven obligations an effect has no answer for.
+//
+// ---- WHAT IS ENFORCED TODAY, AND WHAT IS ONLY WRITTEN DOWN ----------------
+// A declaration nothing reads is DEBT, and calling it a gate would be worse
+// than not writing it. Honestly, per column:
+//
+//   ENFORCED
+//     hp        — commit F's bullet-vs-bullet pass filters on it, and a leg
+//                 cross-checks every kernel bullet branch's assigned `hp`
+//                 against the number declared here. The registry is the
+//                 authority; a kernel edit that forgets this table reds.
+//     cap       — commit B's contract, and the kernel's own cap is measured
+//                 against it (it VIOLATED the contract before commit F).
+//     clear     — a leg drives the kernel's `resetRun` and production's
+//                 `restart` and asserts every declared store comes back empty.
+//
+//   DESCRIPTIVE — recorded truth with no consumer in the tree yet
+//     hash      — a leg checks the NAMED list exists where the row says it
+//                 does, which is a spelling gate and not a contents gate. The
+//                 contents consumer is PORT-S's merged fold.
+//     wire      — R7 compiles the codec from this column. Nothing reads it now.
+//     present   — PORT-S's presentation plane reads it. Nothing reads it now.
+//     ownerDeath— PORT-S. Nothing reads it now, and the two divergences it
+//                 already records (see the kernel bullet row) are its first
+//                 pieces of work.
+//
+// ---- TWO SURFACES, ON PURPOSE ---------------------------------------------
+// `production` and `kernel` are separate maps because they are separate entity
+// planes today with colliding names (both field an "orb"), and PORT-S is the
+// round that merges the two. A single flat map would have to invent a
+// namespacing convention this round cannot yet retire.
+const OBLIGATIONS = ["hash", "wire", "present", "clear", "cap", "ownerDeath", "hp"];
+
+// The owner-death vocabulary, exactly the three the plan names.
+const OWNER_DEATH = {
+  PERSIST: "persist",   // the instance outlives whatever made it
+  DETACH: "detach",     // it survives, but loses its tie to the owner
+  DESPAWN: "despawn",   // it goes when the owner goes
+};
+
+// ---- THE CAP-REJECTION CONTRACT --------------------------------------------
+// "Cap policy" was a registry field with a name and no definition. This is the
+// definition, harvested out of the enemy spec into this round (§2.6.3):
+//
+//   `rejectNewest` IS THE DEFAULT.
+//   THE REJECTION CONSUMES THE ATTEMPTED COOLDOWN — a spawner refused at the
+//     cap must not be able to retry every tick. Without this clause a capped
+//     spawner spins its whole state machine on the spot, and the cap turns from
+//     a limit into a busy loop.
+//   IT EMITS A `capDenied` CUE. A refusal a player cannot perceive is
+//     indistinguishable from a bug, and once D10 lets players DESTROY ordnance
+//     that stops being a nicety: a silent eviction and a player kill look
+//     exactly alike on screen.
+//   IT NEVER SILENTLY EVICTS A LIVE ENTITY. **A cap that evicts is a bug, not a
+//     policy** — the plan's own words. Something already in the world does not
+//     stop existing because something else wanted to be born.
+//
+// THE FREED-SLOT RULE, which the plan asks this contract to answer and which
+// D10 makes urgent: **a destroyed entity frees its slot at the COMPACTION
+// FILTER, and a new spawn is admitted the moment the LIVE count is below the
+// cap. Nothing is ever evicted to make room.** So a round destroyed mid-tick
+// still holds its slot for the rest of that tick — it is marked dead and the
+// filter has not run — and the slot opens on the next admission test after it.
+// That is a consequence of reading the live count rather than a rule needing
+// its own code, and it is written down because "when does a kill free a slot"
+// is precisely the question a player asks with a full board.
+//
+// THE CONTRACT IS A FUNCTION, and that is the strongest form the "never evicts"
+// clause can take: `capAdmit` is handed a count and returns an ADMISSION. It is
+// never handed the collection, so it has no way to name a victim — the API
+// cannot express an eviction at all. A caller that wants one has to write it
+// itself, in the open, where a reviewer sees it.
+const CAP = {
+  // the policies
+  REJECT_NEWEST: "rejectNewest",
+  UNCAPPED: "uncapped",
+  // the scopes. OWNER means the count is per spawner — one seat, one body —
+  // so a crowded field can never starve an individual; SHARED means one budget
+  // for the whole collection.
+  OWNER: "owner",
+  SHARED: "shared",
+};
+// `conformance` is the honest column: what the SHIPPED code at this cap
+// actually does about the three clauses. It is recorded, never enforced by
+// changing behavior — a cap that bills differently is a FEEL decision and R6
+// rules none.
+function capped(scope, max, source, conformance) {
+  return { policy: CAP.REJECT_NEWEST, scope: scope, max: max, source: source, conformance: conformance };
+}
+const UNCAPPED = {
+  policy: CAP.UNCAPPED, scope: null, max: null, source: null,
+  conformance: "n/a — no cap, so there is nothing to conform to",
+};
+// The admission test. `live` is the count already in the world under this cap's
+// SCOPE — the caller owns the counting, because only the caller knows whether
+// the scope is one spawner's brood or the whole array.
+function capAdmit(row, live) {
+  const cap = row && row.cap;
+  if (!cap) {
+    throw new Error("Engine.capAdmit: the kind declares no cap policy — cap is one of " +
+      "the seven registry obligations and an undeclared one is a caller bug");
+  }
+  if (cap.policy === CAP.UNCAPPED) return { admit: true, cue: null };
+  if (cap.policy !== CAP.REJECT_NEWEST) {
+    throw new Error("Engine.capAdmit: unknown cap policy '" + cap.policy +
+      "' — a cap that evicts is a bug, not a policy");
+  }
+  if (live < cap.max) return { admit: true, cue: null };
+  return { admit: false, cue: "capDenied" };
+}
+
+// The registry. Rows are grouped by family, and a family whose seven answers are
+// identical is built by a named helper — so the ONE row that differs is visible
+// rather than buried in sixteen copies of the same literal. The helper spells
+// all seven itself, so a helper that dropped one reds the completeness leg for
+// every row it built at once.
+function prodBody(hp) {
+  return {
+    hash: { where: "js/encounter.js", fields: "ENEMY_HASH", guarded: [] },
+    wire: "server/snapshot.mjs encodeEnemy",
+    present: "PRES.enemies",
+    clear: { store: "E.enemies", onRestart: "cleared" },
+    cap: UNCAPPED,
+    ownerDeath: OWNER_DEATH.PERSIST,
+    hp: hp,
+  };
+}
+// A kernel body. `hp` comes from the kernel's own STATS row, so the column names
+// that authority rather than copying the number out of it.
+function kernelBody(present) {
+  return {
+    hash: { where: "test/tools/demo-serial.js", fields: "INCLUDED S.enemies (whole record, keys sorted)", guarded: [] },
+    wire: null,
+    present: present,
+    clear: { store: "S.enemies", onRestart: "cleared" },
+    cap: UNCAPPED,
+    ownerDeath: OWNER_DEATH.PERSIST,
+    hp: "js/demo-kernel.js STATS",
+  };
+}
+// A kernel enemy ROUND. Every one of the 21 shares six answers; only `hp`
+// differs, and that column is D10's table plus D27.
+function kernelRound(hp) {
+  return {
+    hash: { where: "test/tools/demo-serial.js", fields: "INCLUDED S.bullets (whole record, keys sorted)", guarded: [] },
+    wire: null,
+    present: "demo-render drawBullet",
+    clear: { store: "S.bullets", onRestart: "cleared" },
+    // 280 SHARED, and it is the kernel's one cap. It was the contract's only
+    // outright VIOLATION — spawnEnemyBullet marked the LOWEST-INDEX live enemy
+    // round dead and pushed anyway, and because the array is push-ordered with
+    // order-preserving removals, lowest index means OLDEST. It was silent, so
+    // on screen it was indistinguishable from the player having shot the round
+    // down, which is the confusion D10 turns from cosmetic into a real one.
+    // R6's kernel commit replaced it, and this column now records what SHIPS
+    // rather than what shipped.
+    cap: capped(CAP.SHARED, 280, "js/demo-kernel.js spawnEnemyBullet",
+      "CONFORMS on all three clauses. The test is Engine.capAdmit on this row, " +
+      "so the oldest survives and nothing is evicted; the refusal reaches the " +
+      "host through setSink's cue channel; and the attempted cadence is billed, " +
+      "because every caller in the kernel sets its cooldown outside the spawn " +
+      "branch. It is a TRUE live-population ceiling: the count is tested before " +
+      "the push and the push is refused, so enemy rounds never exceed 280. " +
+      "Driven by the synthetic 280-round scenario in test/node-golden.mjs — the " +
+      "fixture peaks at 44 and never reaches this path on its own."),
+    // PERSIST is the GENERAL rule and the honest one: a round outlives the body
+    // that fired it. THE DIVERGENCE, recorded rather than smoothed over: a round
+    // whose owner was a BOSS is swept dead by killEnemy's boss branch, so the
+    // kernel actually holds TWO rules keyed on the owner's class. Three values
+    // cannot say that, and inventing a fourth here would be designing PORT-S's
+    // vocabulary from R6. Debt, named.
+    ownerDeath: OWNER_DEATH.PERSIST,
+    hp: hp,
+  };
+}
+const KINDS = {
+  production: {
+    // The player's round. It lives in G.bullets, in game.js rather than the
+    // encounter — a module boundary, a hash-part boundary and a wire-filter
+    // boundary all at once, and the single biggest reason the physical merge is
+    // PORT-S's rather than this round's.
+    bolt: {
+      hash: { where: "js/game.js", fields: "BULLET_HASH", guarded: ["BULLET_HASH_GUARDED", "BULLET_ORDNANCE_GUARDED"] },
+      wire: "server/snapshot.mjs encodeBullet",
+      present: "PRES.bullets",
+      clear: { store: "G.bullets", onRestart: "cleared" },
+      // BMAX 15, OWNER-SCOPED so one seat can never starve another.
+      cap: capped(CAP.OWNER, 15, "js/game.js BMAX / fire()",
+        "rejectNewest: conforms — fire() returns and nothing is evicted. " +
+        "DEBT, two clauses: the attempted cooldown is NOT billed (P.cool is set " +
+        "after the cap test, so a refused shot leaves the trigger hot and fires " +
+        "the instant a slot frees), and there is no capDenied cue. Both are FEEL " +
+        "decisions on the player's own trigger and R6 rules none — recorded, not " +
+        "changed. Note abilityFire diverges the other way and says so in place: " +
+        "its cooldown is paid at the ARM, so its refusal DOES bill."),
+      ownerDeath: OWNER_DEATH.PERSIST, // a dead seat's rounds fly on
+      hp: 0, // production fields no destructible ordnance; nothing shoots a bolt
+    },
+    // The harrier's seeker. Its own array, its own hash block, its own encoder.
+    missile: {
+      hash: { where: "js/encounter.js", fields: "MISSILE_HASH", guarded: [] },
+      wire: "server/snapshot.mjs encodeMissile",
+      present: "PRES.missiles",
+      clear: { store: "E.missiles", onRestart: "cleared" },
+      cap: capped(CAP.SHARED, 6, "js/encounter.js ECFG.missile.max / spawnMissile",
+        "rejectNewest: conforms, and the BILLING clause conforms too — the " +
+        "lockon branch sets e.cd = P.cooldown outside the launch, with the " +
+        "reason written beside it (\"a capped harrier cannot spin the lock over " +
+        "and over\"). DEBT: no capDenied cue."),
+      ownerDeath: OWNER_DEATH.PERSIST, // it ends on a hit, a wall or its fuse —
+                                       // never on the body that launched it
+      // A seeker IS shot down today, and it is the precedent D25 records: a
+      // player round that kills one pays "no orb, no XP, no entry in E.kills".
+      // Its hull is ECFG.missile.hp, so the column names that authority.
+      hp: "js/encounter.js ECFG.missile.hp",
+    },
+    // The XP pickup. It declares no damage pool at all (see POOL), so its `hp`
+    // is 0 in the strongest sense the column has: nothing in the game reduces it.
+    orb: {
+      hash: { where: "js/encounter.js", fields: "ORB_HASH", guarded: [] },
+      wire: "server/snapshot.mjs encodeOrb",
+      present: "PRES.orbs",
+      clear: { store: "E.orbs", onRestart: "cleared" },
+      cap: UNCAPPED,
+      ownerDeath: OWNER_DEATH.PERSIST,
+      hp: 0,
+    },
+    // THE ROSTER, in ROSTER order (js/encounter.js). ORDER IS A WIRE CONTRACT
+    // against server/snapshot.mjs's ENEMY_TYPES and server/snapshot.test.mjs
+    // pins the equality by reading the source, so this list is APPEND ONLY and
+    // R6 must not reorder it. Every hull is table-driven from statsFor(), which
+    // is why the column names the function instead of copying sixteen numbers.
+    dart: prodBody("js/encounter.js statsFor().hull"),
+    harrier: prodBody("js/encounter.js statsFor().hull"),
+    radarHarrier: prodBody("js/encounter.js statsFor().hull"),
+    charger: prodBody("js/encounter.js statsFor().hull"),
+    radarCharger: prodBody("js/encounter.js statsFor().hull"),
+    husk: prodBody("js/encounter.js statsFor().hull"),
+    anvil: prodBody("js/encounter.js statsFor().hull"),
+    shard: prodBody("js/encounter.js statsFor().hull"),
+    radarDart: prodBody("js/encounter.js statsFor().hull"),
+    packHusk: prodBody("js/encounter.js statsFor().hull"),
+    wardAnvil: prodBody("js/encounter.js statsFor().hull"),
+    eliteDart: prodBody("js/encounter.js statsFor().hull"),
+    eliteHarrier: prodBody("js/encounter.js statsFor().hull"),
+    eliteCharger: prodBody("js/encounter.js statsFor().hull"),
+    eliteHusk: prodBody("js/encounter.js statsFor().hull"),
+    eliteAnvil: prodBody("js/encounter.js statsFor().hull"),
+  },
+  kernel: {
+    // ---- the 21 enemy ROUNDS, in the kind ladder's own code order ----------
+    // `hp` is D10's owner-ruled table (.ai-reference/ordnance-taxonomy.md §4)
+    // AS AMENDED BY D27. Radius predicts the default and the encounter
+    // overrides it: kineticLance is r 10 and stays at 0, because at 720 px/s it
+    // is the fastest thing in the game and a boss signature that "must be
+    // dodged, not answered". That row is the whole argument against a flat rule.
+    heavy: kernelRound(4),
+    broadside: kernelRound(0),
+    plasma: kernelRound(4),
+    flame: kernelRound(0),
+    // `mine` IS NOT HERE. D10 promotes it out of the round plane entirely and
+    // it is declared below as an ENTITY, on the drone precedent.
+    grenade: kernelRound(4),
+    rocket: kernelRound(2),
+    retaliation: kernelRound(0),
+    arc: kernelRound(0),
+    spitOrb: kernelRound(6),
+    serpentFire: kernelRound(2),
+    kineticLance: kernelRound(0),
+    omegaSphere: kernelRound(6),
+    omegaSide: kernelRound(0),
+    darkFire: kernelRound(2),
+    vortex: kernelRound(2),
+    splitter: kernelRound(6),
+    lightning: kernelRound(0),
+    asteroid: kernelRound(4),
+    // D27, and these two rows are the whole of it: `cluster` and `mineShard`
+    // LEAVE the hp-0 tier so that a comet destroys splitting ordnance "entirely
+    // (and their spawns)" without a special rule anywhere in the sim. D10
+    // deferred the chaff tier on a statement about AIMING — "aiming at them is
+    // not a real choice" — and AN AURA DOES NOT AIM, so giving them an hp
+    // creates no bad aiming choice. D27 states the shape as "1-2" and leaves
+    // the number to the balance pass; 1 is declared because it is the low end
+    // of the stated band and D27's intent is that the burn clears these
+    // outright. It is one player shot either way (the shot is damage 2).
+    //   THE WIRE HALF OF D10'S BILL STAYS UNSPENT, which D27 requires: these
+    // two declare `hp` WITHOUT a per-kind death event and vanish on the
+    // existing ballistic despawn, so R7's anti-doubling protection holds.
+    cluster: kernelRound(1),
+    mineShard: kernelRound(1),
+    // The player's round in the demo. It never passes through the kind ladder
+    // and it is uncapped — today's truth, and commit F does not change it.
+    bolt: {
+      hash: { where: "test/tools/demo-serial.js", fields: "INCLUDED S.bullets (whole record, keys sorted)", guarded: [] },
+      wire: null,
+      present: "demo-render drawBullet",
+      clear: { store: "S.bullets", onRestart: "cleared" },
+      cap: UNCAPPED,
+      ownerDeath: OWNER_DEATH.PERSIST,
+      hp: 0,
+    },
+    // ---- the placed object ------------------------------------------------
+    // `mine` — D10's entity promotion, ruled by the owner: "a slow stationary
+    // hazard wearing a bullet's clothes, and it is the thing players most want
+    // to shoot". Declared HERE as an entity in this commit; the promotion in
+    // the kernel is commit F's. The `armed 0.72` fuse and the `proximity 74`
+    // trigger are the mine's IDENTITY and move with it — they are not bullet
+    // machinery. Its shrapnel (`mineShard`) stays a round, chaff by
+    // construction.
+    //   hp 2 is the DRONE precedent, which is the precedent the taxonomy names
+    // for the promotion itself: one player shot pops a placed object. It is a
+    // declaration and not balance — PORT-S tunes it with the rest.
+    mine: {
+      hash: { where: "test/tools/demo-serial.js", fields: "INCLUDED S.enemies (whole record, keys sorted)", guarded: [] },
+      wire: null,
+      present: "demo-render drawEnemy",
+      clear: { store: "S.enemies", onRestart: "cleared" },
+      // THIS IS A LAY-ATTEMPT THRESHOLD, NOT A LIVE-POPULATION CEILING, and
+      // the distinction is the review's and it is correct. Two things put the
+      // live count above 4:
+      //   * A LAY IS A PAIR. One admission at three live mines lays two, so the
+      //     count reaches five from a single admitted attempt.
+      //   * DEATH DROPS BYPASS THE CENSUS ENTIRELY. killEnemy's minelayer
+      //     branch drops three from its centre without consulting any cap,
+      //     because a body's death is not a spawn cadence.
+      // Measured on the bounded run: one owner reaches SEVEN live mines at tick
+      // 4724. The number is a cadence limiter — how often a layer may add to
+      // the field — and describing it as a ceiling would be describing a
+      // behaviour the kernel does not have.
+      //
+      // IT IS DESCRIBED, NOT CHANGED. Making it a true ceiling means admitting
+      // per mine rather than per attempt and deciding whether a death drop must
+      // ask permission, and both are feel decisions this round does not own.
+      cap: capped(CAP.OWNER, 4, "js/demo-kernel.js updateMinelayer census",
+        "CONFORMS on all three clauses — the census declines, the cadence is set " +
+        "outside the branch, and the refusal cues through the sink. But the " +
+        "value is a LAY-ATTEMPT threshold and NOT a live ceiling: a lay is a " +
+        "PAIR (an admission at 3 reaches 5) and killEnemy's death drop bypasses " +
+        "the census entirely. Observed peak for one owner: 7 live, at tick 4724."),
+      ownerDeath: OWNER_DEATH.PERSIST, // a laid mine outlives its layer, which
+                                       // is the point of laying it
+      hp: 2,
+    },
+    // ---- the ~20 bodies, in STATS declaration order ------------------------
+    swarmling: kernelBody("demo-render drawEnemy"),
+    warden: kernelBody("demo-render drawEnemy"),
+    interceptor: kernelBody("demo-render drawEnemy"),
+    hammerhead: kernelBody("demo-render drawEnemy"),
+    hive: kernelBody("demo-render drawEnemy"),
+    // The drone: the shipped shootable-projectile pattern, and the precedent
+    // `mine` is promoted on. It already ships §6's denial-only reward — a drone
+    // pays score and drops NO orb. Its cap is the hive's own six-child census,
+    // the second conforming precedent commit B cites.
+    drone: Object.assign(kernelBody("demo-render drawEnemy"), {
+      // Unlike the mine's, this one IS a true ceiling: the hive spawns
+      // min(3, 6 - children), so an admission can never carry the population
+      // past the number. Nothing bypasses it — a hive's death spawns nothing.
+      cap: capped(CAP.OWNER, 6, "js/demo-kernel.js updateHive census",
+        "CONFORMS on the rejection and the billing, and it is a TRUE live " +
+        "ceiling — the hive spawns min(3, 6 - children), so an admission cannot " +
+        "carry the count past 6. DEBT: no capDenied cue; the hive declines " +
+        "silently, which is the one clause of the three it still does not keep."),
+    }),
+    tracer: kernelBody("demo-render drawEnemy"),
+    minelayer: kernelBody("demo-render drawEnemy"),
+    myrmidon: kernelBody("demo-render drawEnemy"),
+    snapper: kernelBody("demo-render drawEnemy"),
+    bulwark: kernelBody("demo-render drawEnemy"),
+    cherub: kernelBody("demo-render drawEnemy"),
+    constructor: kernelBody("demo-render drawEnemy"),
+    turret: kernelBody("demo-render drawEnemy"),
+    vanguard: kernelBody("demo-render drawEnemy"),
+    pulsar: kernelBody("demo-render drawEnemy"),
+    omegaDefender: kernelBody("demo-render drawEnemy"),
+    spitfire: kernelBody("demo-render drawEnemy"),
+    stationOmega: kernelBody("demo-render drawEnemy"),
+    starEater: kernelBody("demo-render drawEnemy"),
+    // ---- the pickup --------------------------------------------------------
+    orb: {
+      hash: { where: "test/tools/demo-serial.js", fields: "INCLUDED S.orbs (whole record, keys sorted)", guarded: [] },
+      wire: null,
+      present: "demo-render drawOrb",
+      clear: { store: "S.orbs", onRestart: "cleared" },
+      cap: UNCAPPED,
+      ownerDeath: OWNER_DEATH.PERSIST,
+      hp: 0,
+    },
+  },
+};
+
+// ---- THE 14-PHASE REFERENCE TICK ORDER -------------------------------------
+// Harvested from the enemy spec into this round as the REFERENCE ordering. It
+// is a declaration and a measuring stick, NOT an adoption: neither simulation
+// runs in this order today, and moving either one into it is a hash change with
+// a fixture bill. The two mappings below are what a PORT-S author reads instead
+// of re-deriving them.
+//
+// **DO NOT ADOPT ASCENDING-STABLE-ID ITERATION ANYWHERE.** The spec's phase
+// preamble says arrays iterate by ascending stable id; today's rule is LIVE
+// ARRAY ORDER in both simulations, and the production enemy fold puts the array
+// INDEX into the hash. Insertion order stops equalling id order after the first
+// splice, so adopting the spec's rule re-keys every trace. The reference is
+// declared; the adoption is PORT-S's, with the bill.
+const PHASE_ORDER = [
+  "1  apply due removals, cancellations and spawns from prior ticks",
+  "2  expire statuses, run due periodic status commands, recompute derived unions",
+  "3  materialize due wave-director commands",
+  "4  validate and acquire targets",
+  "5  advance enemy FSMs; one transition per instance per tick",
+  "6  generate attack/navigation/defense/child commands without mutating collections",
+  "7  sum forces and integrate once",
+  "8  activate existing projectile, beam, hazard, mine and deployable behaviors",
+  "9  broad phase, then narrow collisions",
+  "10 resolve combat events and procs through the funnel",
+  "11 resolve deaths, splits, detaches, rewards and allowed resurrection claims",
+  "12 stage newly commanded spatial attack entities for activation next tick",
+  "13 evaluate wave clear",
+  "14 emit tick-stamped presentation events, census and guarded state hash",
+];
+
+// WHERE THE AURA PASS GOES, and this is D26's LAW rather than a preference:
+// **the aura damage pass runs BEFORE the ordnance-vs-player pass on the same
+// tick.** A child spawned inside a burning comet then dies the tick after it
+// spawns instead of landing, and the whole splitting family resolves without a
+// branch anywhere in the sim. Both passes live inside phase 9/10, so the phase
+// numbers alone cannot express it — hence this declaration. It is the same
+// discipline P1 demands of `ordnance-step` ("the ordering matters, because
+// px -> x is the swept hit segment"), stated once for the other pass.
+// THE PASS ITSELF IS PORT-S'S: production has nothing for an aura to kill.
+const AURA_PASS_SLOT = "phase 9/10, BEFORE the ordnance-vs-player pass (D26's law)";
+
+// Today's PRODUCTION order, mapped. `step()` in js/game.js calls the encounter's
+// `encStep()` partway through, so the two files interleave.
+const PHASE_MAP_PRODUCTION = [
+  ["js/game.js energyStep", "~2"],
+  ["js/game.js per-seat integrate, ascending seat", "7"],
+  ["js/game.js autofire / fire()", "12 — but it SPAWNS immediately; nothing is staged"],
+  ["js/game.js stepImpacts, stepShipFx", "14"],
+  ["js/game.js bullet integrate, expire, splice", "1 and 8 fused — removal and motion in one pass"],
+  ["js/encounter.js state promote, clear elevator", "13 — RUNS FIRST HERE; the spec puts it 13th"],
+  ["js/encounter.js waveTick, fast-clear slide, schedule hold", "3"],
+  ["js/encounter.js group warn and spawn loop", "3 into 1 — spawns land inside the director phase"],
+  ["js/encounter.js stepMissiles", "8 — before enemies, deliberately"],
+  ["js/encounter.js stepEnemy loop", "4+5+6+7 FUSED in one function"],
+  ["js/encounter.js resolveContacts", "9 and 10"],
+  ["js/encounter.js resolvePvpRams", "9 and 10"],
+  ["js/encounter.js applyRebateHits", "10"],
+  ["js/encounter.js resolveBulletHits", "9 and 10"],
+  ["js/encounter.js resolveWallBlasts", "10"],
+  ["js/encounter.js reapDead", "11 — splits push into the list being walked"],
+  ["js/encounter.js stepOrbs", "8 and 11"],
+  ["js/encounter.js seat invuln and flash tick", "2"],
+  ["js/encounter.js wipe sample, respawn loop", "11"],
+  ["js/encounter.js recordPoseRow", "14"],
+  ["js/game.js flushWallFx", "14"],
+];
+
+// Today's KERNEL order, mapped. Nine calls, and collision resolution is INSIDE
+// phase 7's analogue rather than a phase of its own.
+const PHASE_MAP_KERNEL = [
+  ["updateDirector", "3 — wave clock, queueGroup, the gate census, advanceWave"],
+  ["updateEntries", "3 into 1 — age, then spawnEnemy, then splice"],
+  ["updatePlayer", "4 (nearestTarget) + 7 + 12 (firePlayer spawns immediately) + 11 (respawn)"],
+  ["updateEnemies", "5+6+7 fused per body, then contact damage (9 and 10), then ONE compaction filter (1)"],
+  ["updateBullets", "8, then resolveBulletHits (9 and 10), then ONE compaction filter (1)"],
+  ["updateOrbs", "8 and 11"],
+  ["updateEffects", "14"],
+];
+
+// THE DIVERGENCES, named as PORT-S debt rather than left for a reader to spot:
+//   * phase 13 runs FIRST in production, not last.
+//   * phases 4-7 are FUSED inside stepEnemy (production) and inside the
+//     updateEnemies dispatch (kernel).
+//   * phase 1 is SPLIT across four sites in production, each inside its own
+//     motion pass, rather than at a tick-opening sweep.
+//   * phase 12 has NO analogue on either side. Every spawn is immediate.
+//   * COLLISION IS NOT A PHASE OF ITS OWN in the kernel — a 14-phase reference
+//     that separates movement from collision will not map one-to-one here.
+const PHASE_DIVERGENCES = [
+  "production runs phase 13 first, not last",
+  "phases 4-7 are fused inside one per-body function on both surfaces",
+  "phase 1 is split across four motion passes in production",
+  "phase 12 has no analogue on either surface — every spawn is immediate",
+  "kernel collision resolution lives inside phase 7's analogue",
+];
+
 const Engine = {
   CLASS,
   applyEffect,
   mayHit,
+  // The registry, published on the MATRIX's footing: a declaration plane is only
+  // a plane if something can read it. The completeness leg walks it, commit F's
+  // cross-check reads its `hp` column, and R7 compiles its codec from `wire`.
+  KINDS,
+  OBLIGATIONS,
+  OWNER_DEATH,
+  // The cap-rejection contract and its vocabulary. `capAdmit` is the ONE
+  // authority: commit F's kernel calls it, the leg calls it, and neither can
+  // reach a collection through it — which is how "never evicts" is enforced by
+  // the shape of the API rather than by everyone remembering.
+  CAP,
+  capAdmit,
+  // The substream mixer. Published whole — the seed derivation beside the
+  // generator — because the golden vector pins BOTH, and a vector that could
+  // only see the output could not tell a changed key from a changed generator.
+  PURPOSE,
+  mulberry32,
+  substream,
+  substreamSeed,
+  // The reference ordering and the two mappings, published for the same reason.
+  PHASE_ORDER,
+  PHASE_MAP_PRODUCTION,
+  PHASE_MAP_KERNEL,
+  PHASE_DIVERGENCES,
+  AURA_PASS_SLOT,
   selfSplash: () => SELF_SPLASH,
   // The table itself, published MUTABLE and on purpose. D1's ruling says the
   // retune is "a data edit to the factor, never a code change", and a claim
