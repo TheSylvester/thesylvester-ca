@@ -505,9 +505,20 @@
   // `termSeq` rides ONLY the termChange marker (a buy or a rank reset): the
   // spread keeps every other event's shape byte-identical to what the
   // committed event-stream fixtures pinned before the field existed.
-  function emit(kind, at, gain, seat, termSeq) {
+  // `srcKind` is the DAMAGE kind behind a hurt/death cue — "ram", "beam",
+  // "shot", "blast" — and it is SERVER-SIDE ONLY by construction, not by
+  // promise: server/snapshot.mjs's event encoder is an explicit allow-list
+  // ({k, x, y, seat, g, seq}) and never learns this field, so it cannot reach
+  // a client. server/snapshot.test.mjs pins that record, which is what would
+  // notice if someone added the line. The golden event trace projects
+  // {tick, kind, gain} the same way, so this moves no fixture either.
+  //   It exists for the contact-violation sentinel (D28): a burning pilot must
+  // never take BODY-CONTACT damage, and without the kind the server sees a
+  // legitimate beam hit and a defective ram hit as the same event.
+  function emit(kind, at, gain, seat, termSeq, srcKind) {
     EVENTS.push({ kind, at: at ? { x: at.x, y: at.y } : null, gain, seat,
-                  ...(termSeq !== undefined ? { termSeq } : {}) });
+                  ...(termSeq !== undefined ? { termSeq } : {}),
+                  ...(srcKind !== undefined ? { srcKind } : {}) });
   }
   // Ordered: index 0 fired first. events() is a readonly view of the events
   // queued this tick; drainEvents() hands them over and clears the queue.
@@ -1153,16 +1164,22 @@
   // The nearest LIVING seat to a point, or -1 when every seat is down.
   // Ascending scan with a strict < keeps the settled tie-break: two ships
   // exactly equidistant resolve to the lower seat id, deterministically.
+  //
+  // THE SELECTION ITSELF IS Engine.acquire (P8) — D18's shipped consumer, and
+  // the proof that the primitive is load-bearing rather than dead code. The
+  // candidates are handed over in ASCENDING seat order, which is what carries
+  // the tie-break across: acquire keeps a strict `<`, so the lower seat id
+  // still wins an exact tie. The class is SHIP and the mask is the default, so
+  // D25's boundary applies here as it will to every later consumer — this
+  // function is where "which B do I choose" stops having a second copy.
   function nearestSeat(x, y) {
-    let best = -1;
-    let bd = Infinity;
+    const cand = [];
     for (let s = 0; s < players.length; s++) {
-      if (!seatAlive(s)) continue;
       const p = players[s].ship;
-      const d = Math.hypot(p.x - x, p.y - y);
-      if (d < bd) { bd = d; best = s; }
+      cand.push({ cls: Engine.CLASS.SHIP, live: seatAlive(s), seat: s, x: p.x, y: p.y });
     }
-    return best;
+    const hit = Engine.acquire(x, y, cand);
+    return hit === null ? -1 : hit.seat;
   }
   // Which player an entity acts against, from the asker's position: the
   // nearest living ship, or NULL with every seat down — callers take the
@@ -1389,28 +1406,111 @@
   }
 
   // ---- combat ------------------------------------------------------------
-  // hitPlayer takes NO damage source any more. It used to: a seat NUMBER
-  // meant another player dealt the blow, and the death branch read it to
-  // decide whether the victim paid the toll — a PvP kill took the score and
-  // the purchases, a PvE death took neither. The user reversed that rule, so
-  // the toll is unconditional and the parameter had exactly zero readers
-  // left; it is deleted rather than kept as a lie the doc block would have
-  // to explain. `src` still travels where it is still READ — blastAt's splash
-  // attribution and an enemy's `lastAtk` (the rebate queue carries it for
-  // both) — and nothing on the wire has ever said why a seat died, which is
-  // what lets the client draw one neutral down card for every death.
-  function hitPlayer(seat, dmg) {
+  // hitPlayer takes a damage SOURCE again, and it is a DIFFERENT parameter
+  // from the one that was deleted — same name, new reader, and the difference
+  // is the thing to keep straight.
+  //
+  // ITS FIRST LIFE: a seat NUMBER meaning another player dealt the blow, read
+  // by the death branch to decide whether the victim paid the toll — a PvP kill
+  // took the score and the purchases, a PvE death took neither. The user
+  // reversed that rule, the toll went unconditional, the parameter had exactly
+  // zero readers left, and it was deleted rather than kept as a lie.
+  //
+  // ITS SECOND LIFE: a RECORD, `{ kind, cls, seat }`, describing what hit the
+  // seat. D28 creates the reader — the comet's refusal is source-scoped (which
+  // damage) and not state-scoped (is the burn up), so the gate has to know
+  // whether it was a ram. THE TOLL IS STILL UNCONDITIONAL. Nothing about this
+  // parameter reaches the death branch, and nobody may route it there again on
+  // the strength of the name.
+  //
+  //   kind  the effect kind — "ram", "beam", "shot", "blast". The comet
+  //         refusal reads it through Engine.isContact; the matrix keys on it.
+  //   cls   the source's CLASS, which the matrix keys on beside the kind.
+  //   seat  the rival's seat where there is one. Carried, and deliberately not
+  //         handed to the door — see the payload note below.
+  //
+  // Omitting it entirely is legal and means UNCLASSIFIED: no comet refusal (an
+  // unproven source is not a proven contact) and no matrix consultation. Two
+  // callers do that on purpose and the scan leg names both.
+  //
+  // Nothing on the wire has ever said why a seat died, which is still what lets
+  // the client draw one neutral down card for every death.
+  function hitPlayer(seat, dmg, src) {
     const S = E.seats[seat];
     if (!S || S.hull <= 0) return false; // a dead seat cannot be hit again — respawn revives it
-    // COMET MODE negates ALL incoming damage: no hull loss, no i-frame
-    // consumption, no hitFlash — the refusal reads exactly like a graced hit
-    // to every caller (the lance keeps sweeping, a missile still detonates).
-    // cometActive is game.js's read of the seat's hashed comet flag.
-    // The negation is WORK, so it bills COMETHIT — one half of the same knob
-    // contactEvent's ram pays, and inert at the shipped 0.
-    if (cometActive(seat)) { energySpend(seat, COMETHIT); return false; }
+    // COMET MODE refuses BODY-CONTACT damage, and only that (D26 + D28). No
+    // hull loss, no i-frame consumption, no hitFlash — the refusal reads
+    // exactly like a graced hit to the ramming caller. cometActive is game.js's
+    // read of the seat's hashed comet flag. The refusal is WORK, so it bills
+    // COMETHIT — one half of the same knob contactEvent's ram pays, and inert
+    // at the shipped 0.
+    //
+    // IT USED TO REFUSE EVERYTHING, and the narrowing is the ruled change.
+    // D26 makes the comet a DAMAGE SOURCE rather than a shield: protection
+    // becomes EMERGENT, because a threat the burn destroys never lands and a
+    // threat it cannot destroy does. D28 then keeps ONE exemption and no other
+    // — the ram — because the ram is the comet's ATTACK and its exchange
+    // already ships: the body pays COMETDMG * fury, the pilot pays COMETHIT.
+    // Refusing the pilot's hull side keeps that exchange whole instead of
+    // carving a hole in a new one. So the whole ability now states itself in
+    // one line: A COMET IS HURT BY EXACTLY WHAT IT CANNOT DESTROY.
+    //
+    // WHAT NOW LANDS ON A BURNING PILOT: the lance pulse (a beam has no body,
+    // so nothing can ever intercept it — this is the case the owner named),
+    // seeker detonations, a rival's rounds, and D1's splash. The aura that is
+    // supposed to eat the destructible half of that list arrives at PORT-S; R6
+    // brings the hp filter it reads. Between here and there a burning pilot is
+    // genuinely more fragile, and §2.11 prices the 62-tick grace re-examination
+    // into the comet feel round rather than into this one.
+    //
+    // WHY THE PARAMETER CAME BACK. The refusal is SOURCE-scoped (which damage)
+    // and not STATE-scoped (is the burn up), so it needs to know what hit the
+    // seat. `Engine.isContact` is the declaration; the GATE stays here, because
+    // a grandfather never moves into the door. And note what did NOT come back:
+    // the death-branch toll below is still UNCONDITIONAL. The parameter's first
+    // life selected the toll, the owner reversed that rule, and this reader is
+    // a different one — do not resurrect the conditional toll from it.
+    if (cometActive(seat) && Engine.isContact(src && src.kind)) {
+      energySpend(seat, COMETHIT);
+      return false;
+    }
     if (S.invuln > 0 || E.state === "dead") return false;
-    S.hull -= dmg;
+    // The player-hull leg of the funnel. The three gates ABOVE stay here and
+    // stay exactly as shipped, because R5 moves the subtraction and never a
+    // gate. Only the first of them is a GRANDFATHER in the door's prevention-
+    // rule sense — the comet negation, which skips the event yet bills
+    // COMETHIT. The dead-seat and invuln refusals are ordinary gates and were
+    // never grandfathered: nothing about them predates the rule.
+    //
+    // THE MATRIX CONSULTATION IS LIVE ON THIS LEG NOW. Every production caller
+    // hands `src` a kind and a class (the source-scan leg in test/node-golden
+    // pins that), so the rows this file's damage paths need are real rules
+    // rather than a record: ram BODY->SHIP and SHIP->SHIP, beam BODY->SHIP,
+    // shot SHIP->SHIP and ORDNANCE->SHIP, blast SHIP->SHIP.
+    //
+    // A caller with NO src is UNCLASSIFIED and skips the consultation, which is
+    // the `hit` kind's whole remaining job. Two callers are deliberately there
+    // and both are named in the scan leg: the server's dev-only seat-down
+    // lever, whose kill is unconditional by design, and the __test
+    // damagePlayer seam.
+    //
+    // THE SOURCE SEAT IS WITHHELD FROM THE DOOR, on purpose. `src.seat` is real
+    // and this function keeps it, but the payload below passes the CLASS only,
+    // so `statSource` and `credit` stay undefined and the funnel's credit guard
+    // declines. A seat record has no `lastAtk` and must not grow one behind
+    // SEAT_HASH's back — that allow-list is walked per seat, so a stray key
+    // would be unhashed state sitting on hashed record. The day a ship-class
+    // effect wants credit, the answer is a declaration beside the matrix.
+    const landed = Engine.applyEffect({ kind: src ? src.kind : "hit", target: S,
+                                       tgtCls: Engine.CLASS.SHIP,
+                                       source: src ? { cls: src.cls } : undefined,
+                                       baseAmount: dmg });
+    // A REFUSED event is a SKIP, and the gates below are why the return has to
+    // be read: they sit AFTER the subtraction, so ignoring a refusal would burn
+    // an i-frame, paint a hitFlash and bill hitsTaken for damage that never
+    // happened. Every shipped row is on, so this cannot fire today — it is what
+    // makes turning a row OFF a real refusal rather than a zero-damage hit.
+    if (landed === null) return false;
     E.hitsTaken++;
     S.invuln = ECFG.player.invuln;
     S.hitFlash = 20;
@@ -1466,7 +1566,8 @@
     // death. Positioned on the ship that took the hit: the audio listener IS
     // that ship (att = 1, byte-identical cue outcome), and the wire needs the
     // point — stamped with the seat that paid.
-    emit(S.hull <= 0 ? "death" : "hurt", players[seat].ship, undefined, seat);
+    emit(S.hull <= 0 ? "death" : "hurt", players[seat].ship, undefined, seat,
+         undefined, src && src.kind); // the sentinel's discriminator — see emit
     return true;
   }
 
@@ -1529,7 +1630,10 @@
   // Returns whether the PLAYER took the hit, so the dash's one-hit-per-lunge
   // flag keeps its exact old meaning.
   function contactEvent(e, dmgToPlayer, seat) {
-    const playerHit = hitPlayer(seat, dmgToPlayer);
+    // BODY CONTACT: the enemy hull touching the ship. This is the ONE class
+    // D28 lets a burning pilot refuse, and the refusal happens inside
+    // hitPlayer where the grandfather lives.
+    const playerHit = hitPlayer(seat, dmgToPlayer, { kind: "ram", cls: Engine.CLASS.BODY });
     if (e.contactCd <= 0 && !e.contactTaken) {
       // a comet-mode touch is the comet's own weapon: COMETDMG instead of the
       // one-bullet BDMG — and OVERLOAD makes a DRAINING comet bite harder, the
@@ -1540,10 +1644,12 @@
       // by TIME and not by work until someone drags that slider.
       if (cometActive(seat)) {
         const fury = 1 + COMETFURY * termsFor(seat).fury * (1 - energyFrac(seat)); // the RAMMING seat's own rank
-        e.hp -= COMETDMG * fury;
+        Engine.applyEffect({ kind: "ram", target: e, tgtCls: Engine.CLASS.BODY,
+                             source: { cls: Engine.CLASS.SHIP, seat }, baseAmount: COMETDMG * fury });
         energySpend(seat, COMETHIT);
       } else {
-        e.hp -= BDMG;
+        Engine.applyEffect({ kind: "ram", target: e, tgtCls: Engine.CLASS.BODY,
+                             source: { cls: Engine.CLASS.SHIP, seat }, baseAmount: BDMG });
       }
       e.flash = 8; // the same hit feedback a bullet gives
       // the two rates were welded together until now: the comet's bite rate is
@@ -1554,7 +1660,10 @@
       e.contactTaken = true; // one contact per body per tick, at every slider value —
                              // UNTOUCHED by the split, and it is what keeps a COMETCD of
                              // 0 from billing a dash connect twice on one tick
-      e.lastAtk = seat; // a ram is damage — the aggro switch reads it at the next decision point
+      // `e.lastAtk = seat` used to sit here. A ram is damage and the aggro
+      // switch still reads it at the next decision point — the CREDIT just
+      // moved into the funnel above, which now stamps it at the subtraction.
+      // Nothing between the two points reads it, so the move is invisible.
       E.contactsDealt++;
       // visual only — the burst sits on the body's surface facing the ship and
       // rides game.js's own hash stream, never the sim's seeded rand().
@@ -1724,7 +1833,9 @@
             const sx = pv.x + ((pl.ship.x - pv.x) * k) / n;
             const sy = pv.y + ((pl.ship.y - pv.y) * k) / n;
             if (segCircleHit(e.x, e.y, bx, by, sx, sy, rr)) {
-              if (hitPlayer(s, L.dmg)) e.pulseHit = true; // one hit per pulse
+              // a BEAM, and a beam has no body — nothing can intercept it, so
+              // D26 makes this one of the families that hurt a burning pilot
+              if (hitPlayer(s, L.dmg, { kind: "beam", cls: Engine.CLASS.BODY })) e.pulseHit = true; // one hit per pulse
               break;
             }
           }
@@ -1913,7 +2024,7 @@
       if (struck >= 0) {
         // the detonation is unconditional: an i-framed player still eats the
         // missile, because the grace is the PLAYER's and never the ordnance's
-        hitPlayer(struck, M.dmg);
+        hitPlayer(struck, M.dmg, { kind: "shot", cls: Engine.CLASS.ORDNANCE });
         m.x = nx;
         m.y = ny;
         endMissile(i, "enemy", struck); // the ship it hit is the seat the boom belongs to
@@ -1952,11 +2063,28 @@
   // One instantaneous application at the impact point. `direct` is the body the
   // bullet itself just paid — excluded, so a hit is never double-dipped — and
   // every OTHER living body whose circle reaches the radius takes exactly one
-  // bullet's damage, once. Enemies only: the player, the orbs and the missiles
-  // are never touched by a blast, at any rank — a splash that swept ordnance
+  // bullet's damage, once.
+  //
+  // WHO A BLAST REACHES IS NOW THE MATRIX'S ANSWER, not this comment's. The
+  // orbs and the missiles are still never touched at any rank — `blast ->
+  // ORDNANCE` and `blast -> ORB` are declared OFF in js/engine.js, and the
+  // reason is the one this comment always gave: a splash that swept ordnance
   // out of the air would quietly delete the harrier's whole threat.
-  function blastAt(x, y, direct, dmg, attacker) {
-    const R = blastRadius(attacker); // the SHOOTER's rank sizes the splash
+  //
+  // WHAT CHANGED IS THE PILOT. D1, owner-ruled: `blast -> SHIP` is ON at factor
+  // 1.0, so a rival inside the radius takes exactly one bullet-equivalent, the
+  // same as a body. It is the one deliberate behavior change in R5.
+  // `captured` is the radius the terminating ROUND was fired with (standing
+  // rule 5). Every bullet-terminated caller passes it; a caller with no round
+  // behind it omits it and the live rank sizes the splash, which is the same
+  // arithmetic this function has always done. The enumeration is in the commit.
+  // `directSeat` is the SEAT the terminating round already paid, excluded for
+  // exactly the reason `direct` excludes a body: a hit is never double-dipped.
+  // It is an EXPLICIT exclusion and not an inference from the victim's fresh
+  // i-frame — the grace is behavior that a retune may change, while "the thing
+  // the bullet already paid does not also pay the splash" is a contract.
+  function blastAt(x, y, direct, dmg, attacker, captured, directSeat) {
+    const R = captured === undefined ? blastRadius(attacker) : captured;
     if (R <= 0) return;
     for (const e of E.enemies) {
       if (e === direct || e.hp <= 0) continue; // the direct hit already paid; a
@@ -1965,9 +2093,48 @@
       const dy = e.y - y;
       const reach = R + e.r; // the body CIRCLE has to intersect the blast, not its center
       if (dx * dx + dy * dy <= reach * reach) {
-        e.hp -= dmg; // exactly one bullet-equivalent, exactly once per body per blast
+        // exactly one bullet-equivalent, exactly once per body per blast. The
+        // credit guard the funnel spells is THIS site's guard, verbatim:
+        // `attacker` is optional here (the wall and missile paths call in
+        // without one), which is why the door tests it at all.
+        Engine.applyEffect({ kind: "blast", target: e, tgtCls: Engine.CLASS.BODY,
+                             source: attacker === undefined ? undefined : { cls: Engine.CLASS.SHIP, seat: attacker },
+                             baseAmount: dmg });
         e.flash = 8;
-        if (attacker !== undefined && attacker >= 0) e.lastAtk = attacker; // splash is damage — aggro reads it
+      }
+    }
+    // ---- D1: the PvP splash ------------------------------------------------
+    // The row is consulted HERE as a GATE — "is this pairing on at all" — and
+    // the FACTOR is applied by the door, once. Reading the answer as a number
+    // and multiplying by it here would apply it twice; that is exactly the
+    // defect the 0.5 leg caught, and it was invisible while every row was 1.0.
+    //
+    // The damage goes through hitPlayer, deliberately, so a splashed pilot
+    // meets the SAME gates as any other incoming damage — invuln, the comet
+    // negation, the dead state — instead of a second player-damage path that
+    // would have to re-learn all three. That is also why the funnel is not
+    // called here directly: hitPlayer IS the ship leg of the funnel.
+    //
+    // hitsDealt is NOT incremented. The enemy half of this same function has
+    // never counted its splash either, and a blast that pays a statistic per
+    // body in reach would make one shot read as five hits.
+    const pvp = Engine.mayHit("blast", Engine.CLASS.SHIP, Engine.CLASS.SHIP);
+    if (pvp > 0) {
+      for (let s = 0; s < players.length; s++) {
+        // the shooter's own seat, excluded by the SELF_SPLASH declaration
+        // rather than by a condition — a later flip is a data edit there
+        if (s === attacker && !Engine.selfSplash()) continue;
+        if (s === directSeat) continue; // the round already paid this seat
+        if (!seatAlive(s)) continue; // a corpse is respawnSeat's, not ours
+        const p = players[s].ship;
+        const dx = p.x - x;
+        const dy = p.y - y;
+        const reach = R + SHIP_R; // the HULL circle has to intersect, exactly as a body's does
+        // the RAW amount: the door applies the factor, and pre-multiplying here
+        // would apply it twice (invisible at 1.0, wrong at every other value)
+        if (dx * dx + dy * dy <= reach * reach) {
+          hitPlayer(s, dmg, { kind: "blast", cls: Engine.CLASS.SHIP, seat: attacker });
+        }
       }
     }
     spawnImpactFx(x, y, 0, -1, "blast", R); // visual only — sized to the radius the sim just used
@@ -2037,7 +2204,11 @@
         // the enemy side's exact OVERLOAD formula, computed HERE: hitPlayer
         // stays a dumb primitive that applies the number it is handed
         const fury = 1 + COMETFURY * termsFor(a).fury * (1 - energyFrac(a)); // the RAMMING seat's own rank
-        if (hitPlayer(v, COMETDMG * fury)) {
+        // BODY CONTACT, the second of the two: hull on hull, this time between
+        // two ships. D28's exemption covers it exactly as it covers the enemy
+        // ram, so a burning VICTIM still refuses — which is what keeps the
+        // mutual-negation legs and pvp-clash standing.
+        if (hitPlayer(v, COMETDMG * fury, { kind: "ram", cls: Engine.CLASS.SHIP, seat: a })) {
           energySpend(a, COMETHIT); // the ram half of the knob, mirroring contactEvent
           if (COMETCD > 0) cd[key] = COMETCD;
         } else if (cometActive(v)) {
@@ -2092,14 +2263,22 @@
         // that REGISTERED, so a negated strike inflates no statistic. No
         // `hit` event is emitted here: hitPlayer already sounds the one cue
         // per registered hit (hurt, or death), and a second cue would break
-        // the audio suite's one-cue rule. The splash stays enemies-only by
-        // blastAt's own contract — BLAST does not reach players in v1.
+        // the audio suite's one-cue rule.
+        //   AND IT SPLASHES, which it did not before R5. The old comment here
+        // read "the splash stays enemies-only by blastAt's own contract — BLAST
+        // does not reach players in v1", and D1 retired that contract: a blast
+        // reaches a rival ship at factor 1.0. A round terminating on a hull is
+        // a terminating round like any other, so it pays its splash where it
+        // stopped — the file's standing rule, and the same one the wall exit,
+        // the body hit and the missile interception all obey. The struck SEAT
+        // is excluded explicitly, exactly as the struck BODY is.
         const bm = Math.hypot(b.vx, b.vy) || 1;
         const ix = b.px + (b.x - b.px) * bestT;
         const iy = b.py + (b.y - b.py) * bestT;
         b.dead = true;
-        if (hitPlayer(vs, b.dmg)) E.hitsDealt++;
+        if (hitPlayer(vs, b.dmg, { kind: "shot", cls: Engine.CLASS.SHIP, seat: shooter })) E.hitsDealt++;
         spawnImpactFx(ix, iy, b.vx / bm, b.vy / bm, "enemy");
+        blastAt(ix, iy, null, b.dmg, shooter, b.blastR, vs);
         continue;
       }
       if (mi >= 0) {
@@ -2114,7 +2293,7 @@
         // null, because the thing the bullet paid for was not an enemy body;
         // blastAt itself never reaches ordnance, so no missile is ever swept
         // out of the air by a splash.
-        blastAt(bx, by, null, b.dmg, shooter);
+        blastAt(bx, by, null, b.dmg, shooter, b.blastR);
         continue;
       }
       if (hit) {
@@ -2144,19 +2323,22 @@
           emit("clang", hit, undefined, shooter); // pitched and short, obviously not
                               // the hit click — the shield is
                               // learnable by ear in one volley
-          blastAt(ix, iy, hit, b.dmg, shooter); // hit, not null: everything else in reach
+          blastAt(ix, iy, hit, b.dmg, shooter, b.blastR); // hit, not null: everything else in reach
                                        // pays, the body that stopped the round does not
           continue;
         }
-        hit.hp -= b.dmg; // the first body along the path takes the hit
+        // the first body along the path takes the hit. `shooter` is >= 0 here
+        // by the `if (shooter < 0) continue;` at the top of this loop, so the
+        // funnel's guarded credit is this site's unconditional one, exactly.
+        Engine.applyEffect({ kind: "shot", target: hit, tgtCls: Engine.CLASS.BODY,
+                             source: { cls: Engine.CLASS.SHIP, seat: shooter }, baseAmount: b.dmg });
         hit.flash = 8;
-        hit.lastAtk = shooter; // damage aggro — the switch applies at the next decision point
         b.dead = true; // consumed exactly once — the game sweep removes it
         E.hitsDealt++;
         spawnImpactFx(ix, iy, b.vx / bm, b.vy / bm, "enemy");
         emit("hit", hit, undefined, shooter); // the landing, not the kill —
                           // reapDead owns the one canonical kill sound
-        blastAt(ix, iy, hit, b.dmg, shooter); // the splash lands where the bullet stopped
+        blastAt(ix, iy, hit, b.dmg, shooter, b.blastR); // the splash lands where the bullet stopped
       }
     }
   }
@@ -2196,8 +2378,14 @@
   // lose exact ties against enemies and missiles — phase 14's order.
   // Finally px,py COLLAPSE onto x,y, so this tick's ordinary integration and
   // live sweep see exactly one ordinary segment (the Δ=1 double-count proof).
-  // No per-bullet field is added — BULLET_HASH is a declared allow-list and
-  // must not grow.
+  // The rebate itself adds no per-bullet field. THE ALLOW-LIST DID GROW AT R5,
+  // once and deliberately: `blastR`, the splash radius captured at fire time,
+  // under a guarded zero-default fold (js/game.js's BULLET_HASH_GUARDED). What
+  // this passage still means is unchanged — the rebate buys its lag
+  // compensation with no field of its own — and what the rebate DOES owe the
+  // new field is that its queue record carry it (`br`), so a rewound hit
+  // splashes at the radius the round was fired with rather than at whatever
+  // rank the shooter holds by the resolve phase.
   const rebateQueue = []; // the within-tick transient list — see above
   function rebate(b, delta, shooter) {
     const d = Math.max(0, Math.min(REWIND_ROWS - 1, delta | 0));
@@ -2297,7 +2485,7 @@
       // what hitPlayer will decide there (phase 14's rule)
       b.dead = true;
       rebateQueue.push({ bid: b.id | 0, kind: c.kind, id: c.id, seat: c.seat,
-        dmg: b.dmg, src: shooter, ix, iy, dx: b.vx / bm, dy: b.vy / bm });
+        dmg: b.dmg, src: shooter, br: b.blastR, ix, iy, dx: b.vx / bm, dy: b.vy / bm });
       return;
     }
   }
@@ -2323,19 +2511,22 @@
         if (e.stats.arc > 0 && Math.abs(angDiff(Math.atan2(h.iy - e.y, h.ix - e.x), e.face)) <= e.stats.arc) {
           spawnImpactFx(h.ix, h.iy, h.dx, h.dy, "wall");
           emit("clang", e, undefined, h.src);
-          blastAt(h.ix, h.iy, e, h.dmg, h.src);
+          blastAt(h.ix, h.iy, e, h.dmg, h.src, h.br);
           continue;
         }
         // the landed branch, mirroring the live sweep's. blastAt at the
         // REBATED impact point damages LIVE bodies — era-mixed splash is
         // deliberate: damage-at-NOW, wherever the terminating point was.
-        e.hp -= h.dmg;
+        // `h.src` is the rebate's shooter, which arrives from fire(seat) and
+        // is therefore a live seat index — the funnel's guarded credit is this
+        // site's unconditional one, exactly.
+        Engine.applyEffect({ kind: "shot", target: e, tgtCls: Engine.CLASS.BODY,
+                             source: { cls: Engine.CLASS.SHIP, seat: h.src }, baseAmount: h.dmg });
         e.flash = 8;
-        e.lastAtk = h.src;
         E.hitsDealt++;
         spawnImpactFx(h.ix, h.iy, h.dx, h.dy, "enemy");
         emit("hit", e, undefined, h.src);
-        blastAt(h.ix, h.iy, e, h.dmg, h.src);
+        blastAt(h.ix, h.iy, e, h.dmg, h.src, h.br);
         continue;
       }
       if (h.kind === 1) {
@@ -2343,18 +2534,23 @@
         if (mi < 0) continue; // already down or detonated — dropped
         E.missilesShot++;
         endMissile(mi, "enemy", h.src); // the rewound hit's source seat carries the boom
-        blastAt(h.ix, h.iy, null, h.dmg, h.src);
+        blastAt(h.ix, h.iy, null, h.dmg, h.src, h.br);
         continue;
       }
       // a SHIP: hitPlayer's own gates decide at the resolve phase — a
       // mutual lethal trade lands BOTH tolls, because both shots were
       // already spawned and consumed during the drain while both seats
-      // still lived; hitsDealt counts only a registered hit. `h.src` is not
-      // passed: hitPlayer stopped reading a damage source when the toll went
-      // unconditional. The queue still CARRIES src — the enemy and missile
-      // branches above hand it to blastAt and to `lastAtk`.
-      if (hitPlayer(h.seat, h.dmg)) E.hitsDealt++;
+      // still lived; hitsDealt counts only a registered hit.
+      //   `h.src` IS passed now, twice over: to hitPlayer as the shot's source
+      // (D28 needs to know what hit the seat) and to the splash as the
+      // attacker. And the splash happens at all, which it did not before R5 —
+      // D1 made a blast reach a rival, so the rebated ship termination pays
+      // its splash exactly as the live one does, at the radius the round was
+      // FIRED with (`h.br`, which the queue was already carrying and this
+      // branch was already discarding). The struck SEAT is excluded explicitly.
+      if (hitPlayer(h.seat, h.dmg, { kind: "shot", cls: Engine.CLASS.SHIP, seat: h.src })) E.hitsDealt++;
       spawnImpactFx(h.ix, h.iy, h.dx, h.dy, "enemy");
+      blastAt(h.ix, h.iy, null, h.dmg, h.src, h.br, h.seat);
     }
     rebateQueue.length = 0;
   }
@@ -2382,7 +2578,7 @@
       if (termsFor(bulletSeat(b)).blast <= 0) continue;
       if (!outOfWorld(b)) continue; // a mid-air ttl fade hit nothing
       const w = wallExitPoint(b);
-      blastAt(w.x, w.y, null, b.dmg, bulletSeat(b));
+      blastAt(w.x, w.y, null, b.dmg, bulletSeat(b), b.blastR);
     }
   }
 
@@ -5586,6 +5782,11 @@
     // the phase-11 predictor calls the SAME formula through termsFromOwned:
     // terms over a BARE rank vector (the ACKED wire ow), one source, no copy.
     termsFor, termsFromOwned, ownedFor,
+    // blastRadius(seat) — published for fire(), which STAMPS it on the round at
+    // spawn (standing rule 5). It was a __test read before R5 and is a live one
+    // now, and there is still exactly one derivation: the capture reads the
+    // same function blastAt falls back to when no round is behind the splash.
+    blastRadius,
     // The simulation event stream — see the queue at the top of the file.
     // Drained once per step() by the presentation side; events() is the
     // readonly view of what this tick queued.
@@ -5945,13 +6146,15 @@
       hitPlayer, // the BARE combat primitive, undrained: the server's dev
                  // seat-kill lever calls it so the death marker still rides
                  // the wire's own event drain instead of dying in drainStep
-      // damagePlayer keeps its (n, seat) argument order. Its old THIRD
-      // argument — a killer seat, the only way to reach the PvP toll through
-      // this seam — went with hitPlayer's `src`: every death collects the
-      // whole toll now, so there is nothing for a source to select. Legs that
-      // still pass a third value are harmless (JS drops it), but they no
-      // longer mean anything and the PvP section was restated accordingly.
-      damagePlayer: (n, seat = 0) => { const hit = hitPlayer(seat, n === undefined ? 1 : n); drainStep(); return hit; },
+      // damagePlayer keeps its (n, seat) argument order and gains a THIRD
+      // argument again — but a different one from the killer seat it once had.
+      // That one selected the PvP toll and died with the toll going
+      // unconditional; this one is hitPlayer's `src` RECORD, and it exists so a
+      // leg can say what KIND of damage it is staging (D28 made that decide the
+      // comet refusal). Omitted, the hit is UNCLASSIFIED: no comet refusal, no
+      // matrix consultation — which is the right default for a seam whose ~65
+      // callers are staging generic hull damage and mean nothing more by it.
+      damagePlayer: (n, seat = 0, src) => { const hit = hitPlayer(seat, n === undefined ? 1 : n, src); drainStep(); return hit; },
       addXp,
       buy,
       // the suites' wave elevator: the old flow rode continueFromShop, and
@@ -6063,6 +6266,15 @@
                          // that moved the bullet there
       resolvePvpRams, // the PvP ram sweep, staged directly — a check drives one tick of
                       // it without threading a whole comet burn through the input ring
+      nearestSeat, // D18's selection, published so the acquire legs can ask the
+                   // SHIPPED consumer rather than a copy of it: routing it
+                   // through Engine.acquire is only worth something if the
+                   // tie-break, the dead-seat skip and the empty-room -1 are
+                   // proved on the function production actually calls
+      blastAt, // the splash itself, staged directly, on the same precedent as the two
+               // passes above: D1's PvP row is a question about ONE application at ONE
+               // point, and threading a bullet through a sweep to ask it would put the
+               // sweep's own arbitration inside the answer
       pvpCd: () => ({ ...E.pvpCd }), // a COPY of the pair windows: the pacing is unhashed
                                      // while empty and never on the wire, so a check reads
                                      // it here rather than inventing its own bookkeeping

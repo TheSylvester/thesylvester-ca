@@ -1,6 +1,24 @@
 (function () {
   "use strict";
 
+  // THE DAMAGE DOOR, resolved at LOAD and demanded loudly (R5 commit F).
+  // Every hull and hp subtraction in this kernel walks through
+  // Engine.applyEffect, the same door production's encounter walks through, and
+  // the engine is guaranteed present: js/engine.js is second in
+  // server/sim-host.mjs's SIM_FILES and first in every page tag and vm host
+  // that boots this file.
+  //
+  // A MISSING ENGINE THROWS HERE RATHER THAN FALLING BACK. A fallback would be
+  // a silent dual path — one damage rule when the engine loaded and another
+  // when it did not — which is precisely the drift Flight.cometOn was built to
+  // kill. Failing at load makes a forgotten script tag a boot error with a name
+  // on it, not a divergence somebody chases through a hash diff later.
+  if (typeof window === "undefined" || !window.Engine) {
+    throw new Error("js/demo-kernel.js requires js/engine.js to be loaded first — " +
+      "every hp/hull subtraction here routes through Engine.applyEffect, and there is " +
+      "deliberately no fallback path");
+  }
+
   const TAU = Math.PI * 2;
   const STEP = 1 / 60;
   const BASE_SEED = 0x4e4f5641;
@@ -196,6 +214,29 @@
     starEater: { r: 72, hp: 540, speed: 72, accel: 125, color: "red", score: 16000, xp: 20, priority: -40000, contact: 26, heavy: true, boss: true, label: "STAR EATER" }
   };
   const W = 1280, H = 720;
+
+  // The PLAY BOX: the viewport encounters are DESIGNED for. Owner ruling W1 makes the
+  // render extent WIDER than this (16:9, shop and score as UI over the live world at the
+  // sides — the sides are a gift, not something the game depends on). NOTHING in the sim
+  // may anchor to the render extent: widen the view and every RADIUS and REACH below
+  // would silently grow, buffing the fire gate and the boss beams with no test failing.
+  // The value equals today's field, so this commit moves nothing.
+  const PLAY_W = 1280;
+  const PLAY_H = 720;
+
+  // The ARENA: a grid of play boxes (owner ruling W3 — 6x11, "fine for now"; ruling W2 —
+  // BUILD-TIME constant, never runtime-negotiable). Cheap to change = these two integers.
+  const ARENA_COLS = 6;
+  const ARENA_ROWS = 11;
+  const ARENA_W = PLAY_W * ARENA_COLS;
+  const ARENA_H = PLAY_H * ARENA_ROWS;
+
+  // The topology flag. OFF is the wrapping build, which stays byte-identical to the
+  // frozen demo-v2 reference for the whole of PORT-W (the POR's A/B reference). Hop 2
+  // wires it behind the load-time selector below.
+  const WORLD_BOUNDED = (typeof globalThis !== "undefined" && typeof globalThis.DEMO_WORLD_BOUNDED === "boolean") ? globalThis.DEMO_WORLD_BOUNDED : false;
+  const PLAYER_WALL_LOSS = 0.5;
+
   let random = mulberry32(BASE_SEED);
   let nextId = 1;
 
@@ -252,15 +293,27 @@
   function easeInOut(t) { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); }
   function wrap(n, size) { return ((n % size) + size) % size; }
   function delta(from, to, size) {
+    if (WORLD_BOUNDED) return to - from;
     let d = to - from;
     if (d > size * 0.5) d -= size;
     if (d < -size * 0.5) d += size;
     return d;
   }
   function distSq(a, b) {
+    if (WORLD_BOUNDED) {
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      return dx * dx + dy * dy;
+    }
     const dx = delta(a.x, b.x, W);
     const dy = delta(a.y, b.y, H);
     return dx * dx + dy * dy;
+  }
+  function encFrame() {
+    return {
+      x: clamp(S.player.x - PLAY_W / 2, 0, ARENA_W - PLAY_W),
+      y: clamp(S.player.y - PLAY_H / 2, 0, ARENA_H - PLAY_H)
+    };
   }
   function norm(x, y) {
     const m = Math.hypot(x, y) || 1;
@@ -337,8 +390,16 @@
   }
 
   function newPlayer() {
+    if (WORLD_BOUNDED) {
+      return {
+        x: ARENA_W * 0.5, y: ARENA_H * 0.55, px: ARENA_W * 0.5, py: ARENA_H * 0.55,
+        vx: 18, vy: -24, angle: -Math.PI * 0.5, pangle: -Math.PI * 0.5,
+        thrustAngle: -Math.PI * 0.5, fire: 0, trail: 0, hull: 100,
+        maxHull: 100, invuln: 1.5, target: 0, alive: true, flash: 0
+      };
+    }
     return {
-      x: W * 0.5, y: H * 0.55, px: W * 0.5, py: H * 0.55,
+      x: PLAY_W * 0.5, y: PLAY_H * 0.55, px: PLAY_W * 0.5, py: PLAY_H * 0.55,
       vx: 18, vy: -24, angle: -Math.PI * 0.5, pangle: -Math.PI * 0.5,
       thrustAngle: -Math.PI * 0.5, fire: 0, trail: 0, hull: 100,
       maxHull: 100, invuln: 1.5, target: 0, alive: true, flash: 0
@@ -381,7 +442,7 @@
   function makeStars() {
     const starRand = mulberry32((S.seed ^ 0x91e10da5) >>> 0);
     S.stars.length = 0;
-    const count = clamp(Math.round((W * H) / 5200), 100, 280);
+    const count = clamp(Math.round((PLAY_W * PLAY_H) / 5200), 100, 280);
     for (let i = 0; i < count; i++) {
       S.stars.push({
         x: starRand(), y: starRand(), size: 0.35 + starRand() * 1.25,
@@ -434,7 +495,7 @@
     S.bullets = S.bullets.filter(function (b) { return b.team === "player"; });
     S.orbs.length = 0;
     S.finaleFlash = Math.max(S.finaleFlash, 0.72);
-    emitShockwave(S.player.x, S.player.y, "cyan", 24, Math.min(W, H) * 0.42, 1.15);
+    emitShockwave(S.player.x, S.player.y, "cyan", 24, Math.min(PLAY_W, PLAY_H) * 0.42, 1.15);
     burst(S.player.x, S.player.y, "cyan", 28, 150);
     S.shake = Math.max(S.shake, 5);
     startWave(1, false);
@@ -450,38 +511,100 @@
       S.player.hull = Math.min(S.player.maxHull, S.player.hull + 24);
       S.player.invuln = Math.max(S.player.invuln, 1.2);
     }
-    emitShockwave(W * 0.5, H * 0.5, "cyan", 18, Math.min(W, H) * 0.34, 0.8);
+    if (WORLD_BOUNDED) {
+      const frame = encFrame();
+      emitShockwave(frame.x + PLAY_W * 0.5, frame.y + PLAY_H * 0.5, "cyan", 18, Math.min(PLAY_W, PLAY_H) * 0.34, 0.8);
+    } else {
+      emitShockwave(PLAY_W * 0.5, PLAY_H * 0.5, "cyan", 18, Math.min(PLAY_W, PLAY_H) * 0.34, 0.8);
+    }
   }
 
   function formationPoints(type, count, formation) {
+    if (WORLD_BOUNDED) {
+      const frame = encFrame();
+      const p = S.player;
+      const points = [];
+      let anchorX;
+      let anchorY;
+      let side = (rand() * 4) | 0;
+      const margin = Math.min(PLAY_W, PLAY_H) * 0.12;
+      if (formation === "center") {
+        for (let i = 0; i < count; i++) points.push({ x: frame.x + PLAY_W * 0.5 + (i - (count - 1) * 0.5) * 74, y: frame.y + PLAY_H * 0.46, side: 2 });
+        return points;
+      }
+      if (formation === "boss-left") {
+        for (let i = 0; i < count; i++) points.push({ x: frame.x + PLAY_W * 0.17, y: frame.y + PLAY_H * 0.5, side: 0 });
+        return points;
+      }
+      if (formation === "ring" || formation === "arc") {
+        const start = range(0, TAU);
+        const span = formation === "arc" ? Math.PI * 1.2 : TAU;
+        const rad = clamp(Math.min(PLAY_W, PLAY_H) * 0.34, 170, 300);
+        for (let i = 0; i < count; i++) {
+          const a = start + (count === 1 ? 0 : span * i / count);
+          points.push({ x: clamp(p.x + Math.cos(a) * rad, 0, ARENA_W), y: clamp(p.y + Math.sin(a) * rad, 0, ARENA_H), side: side });
+        }
+        return points;
+      }
+      if (side === 0) { anchorX = frame.x + margin; anchorY = frame.y + range(PLAY_H * 0.2, PLAY_H * 0.8); }
+      else if (side === 1) { anchorX = frame.x + PLAY_W - margin; anchorY = frame.y + range(PLAY_H * 0.2, PLAY_H * 0.8); }
+      else if (side === 2) { anchorX = frame.x + range(PLAY_W * 0.2, PLAY_W * 0.8); anchorY = frame.y + margin; }
+      else { anchorX = frame.x + range(PLAY_W * 0.2, PLAY_W * 0.8); anchorY = frame.y + PLAY_H - margin; }
+
+      const tangentX = side < 2 ? 0 : 1;
+      const tangentY = side < 2 ? 1 : 0;
+      const inwardX = side === 0 ? 1 : side === 1 ? -1 : 0;
+      const inwardY = side === 2 ? 1 : side === 3 ? -1 : 0;
+      for (let i = 0; i < count; i++) {
+        const centered = i - (count - 1) * 0.5;
+        let across = centered * 34;
+        let deep = 0;
+        if (formation === "v") deep = Math.abs(centered) * -22;
+        if (formation === "pincer") {
+          across = (i % 2 ? 1 : -1) * (68 + Math.floor(i / 2) * 28);
+          deep = Math.floor(i / 2) * 16;
+        }
+        if (formation === "escort") {
+          across = centered * 54;
+          deep = Math.abs(centered) * 22;
+        }
+        if (formation === "flank") across = centered * 28;
+        points.push({
+          x: clamp(anchorX + tangentX * across + inwardX * deep, 0, ARENA_W),
+          y: clamp(anchorY + tangentY * across + inwardY * deep, 0, ARENA_H),
+          side: side
+        });
+      }
+      return points;
+    }
     const p = S.player;
     const points = [];
     let anchorX;
     let anchorY;
     let side = (rand() * 4) | 0;
-    const margin = Math.min(W, H) * 0.12;
+    const margin = Math.min(PLAY_W, PLAY_H) * 0.12;
     if (formation === "center") {
-      for (let i = 0; i < count; i++) points.push({ x: W * 0.5 + (i - (count - 1) * 0.5) * 74, y: H * 0.46, side: 2 });
+      for (let i = 0; i < count; i++) points.push({ x: PLAY_W * 0.5 + (i - (count - 1) * 0.5) * 74, y: PLAY_H * 0.46, side: 2 });
       return points;
     }
     if (formation === "boss-left") {
-      for (let i = 0; i < count; i++) points.push({ x: W * 0.17, y: H * 0.5, side: 0 });
+      for (let i = 0; i < count; i++) points.push({ x: PLAY_W * 0.17, y: PLAY_H * 0.5, side: 0 });
       return points;
     }
     if (formation === "ring" || formation === "arc") {
       const start = range(0, TAU);
       const span = formation === "arc" ? Math.PI * 1.2 : TAU;
-      const rad = clamp(Math.min(W, H) * 0.34, 170, 300);
+      const rad = clamp(Math.min(PLAY_W, PLAY_H) * 0.34, 170, 300);
       for (let i = 0; i < count; i++) {
         const a = start + (count === 1 ? 0 : span * i / count);
         points.push({ x: wrap(p.x + Math.cos(a) * rad, W), y: wrap(p.y + Math.sin(a) * rad, H), side: side });
       }
       return points;
     }
-    if (side === 0) { anchorX = margin; anchorY = range(H * 0.2, H * 0.8); }
-    else if (side === 1) { anchorX = W - margin; anchorY = range(H * 0.2, H * 0.8); }
-    else if (side === 2) { anchorX = range(W * 0.2, W * 0.8); anchorY = margin; }
-    else { anchorX = range(W * 0.2, W * 0.8); anchorY = H - margin; }
+    if (side === 0) { anchorX = margin; anchorY = range(PLAY_H * 0.2, PLAY_H * 0.8); }
+    else if (side === 1) { anchorX = PLAY_W - margin; anchorY = range(PLAY_H * 0.2, PLAY_H * 0.8); }
+    else if (side === 2) { anchorX = range(PLAY_W * 0.2, PLAY_W * 0.8); anchorY = margin; }
+    else { anchorX = range(PLAY_W * 0.2, PLAY_W * 0.8); anchorY = PLAY_H - margin; }
 
     const tangentX = side < 2 ? 0 : 1;
     const tangentY = side < 2 ? 1 : 0;
@@ -578,6 +701,11 @@
       e.emerge = e.emergeMax = 2.1;
       e.angle = e.pangle = 0;
     }
+    if (WORLD_BOUNDED && (type === "warden" || type === "stationOmega" || type === "starEater")) {
+      const frame = encFrame();
+      e.efx = frame.x;
+      e.efy = frame.y;
+    }
     S.enemies.push(e);
     burst(e.x, e.y, st.color, type === "hive" ? 15 : 7, type === "hive" ? 65 : 38);
     emitShockwave(e.x, e.y, st.color, 5, type === "hive" ? 44 : 25, 0.42);
@@ -585,6 +713,18 @@
   }
 
   function spawnDrone(hive, angle) {
+    if (WORLD_BOUNDED) {
+      const at = {
+        x: clamp(hive.x + Math.cos(angle) * 25, 0, ARENA_W),
+        y: clamp(hive.y + Math.sin(angle) * 25, 0, ARENA_H), kind: "portal", type: "drone"
+      };
+      const d = spawnEnemy(at, "drone");
+      d.parent = hive.id;
+      d.emerge = d.emergeMax = 0.35;
+      d.vx = Math.cos(angle) * 125;
+      d.vy = Math.sin(angle) * 125;
+      return;
+    }
     const at = {
       x: wrap(hive.x + Math.cos(angle) * 25, W),
       y: wrap(hive.y + Math.sin(angle) * 25, H), kind: "portal", type: "drone"
@@ -597,6 +737,18 @@
   }
 
   function spawnChild(parent, type, angle, distance) {
+    if (WORLD_BOUNDED) {
+      const at = {
+        x: clamp(parent.x + Math.cos(angle) * distance, 0, ARENA_W),
+        y: clamp(parent.y + Math.sin(angle) * distance, 0, ARENA_H), kind: "portal", type: type
+      };
+      const child = spawnEnemy(at, type);
+      child.parent = parent.id;
+      child.ownerId = parent.id;
+      child.emerge = child.emergeMax = 0.42;
+      child.phase = angle;
+      return child;
+    }
     const at = {
       x: wrap(parent.x + Math.cos(angle) * distance, W),
       y: wrap(parent.y + Math.sin(angle) * distance, H), kind: "portal", type: type
@@ -686,6 +838,25 @@
   }
 
   function playerAimTarget(e) {
+    if (WORLD_BOUNDED) {
+      if (e.type === "stationOmega") {
+        const node = clamp(e.brokenNodes || 0, 0, 4);
+        const a = e.angle + node * TAU / 5;
+        return {
+          x: clamp(e.x + Math.cos(a) * e.r * 0.48, 0, ARENA_W),
+          y: clamp(e.y + Math.sin(a) * e.r * 0.48, 0, ARENA_H),
+          vx: e.vx, vy: e.vy
+        };
+      }
+      if (e.type === "snapper" && e.vulnerable) {
+        return {
+          x: clamp(e.x + Math.cos(e.angle) * 8, 0, ARENA_W),
+          y: clamp(e.y + Math.sin(e.angle) * 8, 0, ARENA_H),
+          vx: e.vx, vy: e.vy
+        };
+      }
+      return e;
+    }
     if (e.type === "stationOmega") {
       const node = clamp(e.brokenNodes || 0, 0, 4);
       const a = e.angle + node * TAU / 5;
@@ -849,14 +1020,14 @@
         });
       }
       if (e.type === "starEater" && (e.state === "lungeTell" || e.state === "lunge" || e.state === "beam")) {
-        addLaneAvoidance(e, e.dashAngle || e.angle, dx, dy, e.state === "lunge" ? 3 : 2, Math.max(W, H), 125, function (x, y, w) {
+        addLaneAvoidance(e, e.dashAngle || e.angle, dx, dy, e.state === "lunge" ? 3 : 2, Math.max(PLAY_W, PLAY_H), 125, function (x, y, w) {
           avoidX += x * w; avoidY += y * w; danger += w;
         });
       }
       if (e.type === "stationOmega" && e.state === "lasers") {
         for (let ri = 0; ri < 6; ri++) {
           const rayAngle = ri === 0 ? e.angle : e.angle + (ri - 1) * TAU / 5;
-          addLaneAvoidance(e, rayAngle, dx, dy, 1.45, Math.max(W, H), 54, function (x, y, w) {
+          addLaneAvoidance(e, rayAngle, dx, dy, 1.45, Math.max(PLAY_W, PLAY_H), 54, function (x, y, w) {
             avoidX += x * w; avoidY += y * w; danger += w;
           });
         }
@@ -911,8 +1082,18 @@
     const maxSpeed = !input && danger > 0.6 ? 295 : 245;
     const v = norm(p.vx, p.vy);
     if (v.m > maxSpeed) { p.vx = v.x * maxSpeed; p.vy = v.y * maxSpeed; }
-    p.x = wrap(p.x + p.vx * dt, W);
-    p.y = wrap(p.y + p.vy * dt, H);
+    if (WORLD_BOUNDED) {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      const r = 8;
+      if (p.x < r) { p.x = r * 2 - p.x; p.vx *= -(1 - PLAYER_WALL_LOSS); }
+      else if (p.x > ARENA_W - r) { p.x = (ARENA_W - r) * 2 - p.x; p.vx *= -(1 - PLAYER_WALL_LOSS); }
+      if (p.y < r) { p.y = r * 2 - p.y; p.vy *= -(1 - PLAYER_WALL_LOSS); }
+      else if (p.y > ARENA_H - r) { p.y = (ARENA_H - r) * 2 - p.y; p.vy *= -(1 - PLAYER_WALL_LOSS); }
+    } else {
+      p.x = wrap(p.x + p.vx * dt, W);
+      p.y = wrap(p.y + p.vy * dt, H);
+    }
 
     p.trail -= dt;
     if (p.trail <= 0) {
@@ -929,7 +1110,7 @@
     // p.angle and never reads the target, so it needs nothing else.
     if (input
       ? (input.fire && p.fire <= 0)
-      : (target && playerMayFireAt(target) && p.fire <= 0 && Math.abs(angleDelta(p.angle, aimAngle)) < 0.32 && targetDistance < Math.max(W, H) * 0.7)) {
+      : (target && playerMayFireAt(target) && p.fire <= 0 && Math.abs(angleDelta(p.angle, aimAngle)) < 0.32 && targetDistance < Math.max(PLAY_W, PLAY_H) * 0.7)) {
       firePlayer();
       p.fire = Math.max(0.075, 0.13 - (S.level - 1) * 0.003);
     }
@@ -947,6 +1128,26 @@
   }
 
   function firePlayer() {
+    if (WORLD_BOUNDED) {
+      const p = S.player;
+      const alternating = S.tick & 1 ? 1 : -1;
+      const sideX = -Math.sin(p.angle) * alternating * 4.2;
+      const sideY = Math.cos(p.angle) * alternating * 4.2;
+      const speed = 650;
+      const x = clamp(p.x + Math.cos(p.angle) * 14 + sideX, 0, ARENA_W);
+      const y = clamp(p.y + Math.sin(p.angle) * 14 + sideY, 0, ARENA_H);
+      S.bullets.push({
+        id: nextId++, team: "player", kind: "bolt", x: x, y: y, px: x, py: y,
+        vx: Math.cos(p.angle) * speed + p.vx * 0.22,
+        vy: Math.sin(p.angle) * speed + p.vy * 0.22,
+        r: 2.2, life: 1.05, damage: 2, color: alternating > 0 ? "cyan" : "ink", dead: false
+      });
+      for (let i = 0; i < 2; i++) {
+        particle(x, y, -Math.cos(p.angle) * range(15, 60), -Math.sin(p.angle) * range(15, 60),
+          alternating > 0 ? "cyan" : "ink", range(0.08, 0.17), range(0.7, 1.4), "spark");
+      }
+      return;
+    }
     const p = S.player;
     const alternating = S.tick & 1 ? 1 : -1;
     const sideX = -Math.sin(p.angle) * alternating * 4.2;
@@ -968,8 +1169,13 @@
 
   function respawnPlayer() {
     const p = S.player;
-    p.x = p.px = W * 0.5;
-    p.y = p.py = H * 0.55;
+    if (WORLD_BOUNDED) {
+      p.x = p.px = ARENA_W * 0.5;
+      p.y = p.py = ARENA_H * 0.55;
+    } else {
+      p.x = p.px = PLAY_W * 0.5;
+      p.y = p.py = PLAY_H * 0.55;
+    }
     p.vx = 0;
     p.vy = -25;
     p.hull = p.maxHull;
@@ -985,7 +1191,14 @@
   function damagePlayer(amount, x, y) {
     const p = S.player;
     if (!p.alive || p.invuln > 0) return false;
-    p.hull -= amount;
+    // The kernel's ship leg of the funnel. The signature and both gates above
+    // are untouched, exactly as production's hitPlayer keeps its own.
+    // NO SOURCE, and for the same reason hitPlayer has none: every caller here
+    // — a bullet, a lance, a beam, a mine, a hammerhead's detonation — arrives
+    // with nothing but an amount and a point. The event is UNCLASSIFIED, the
+    // matrix is not consulted, and no identity field is written, so the player
+    // record grows no key the demo-v2 serializer would notice.
+    Engine.applyEffect({ kind: "hit", target: p, tgtCls: Engine.CLASS.SHIP, baseAmount: amount });
     p.invuln = 0.42;
     p.flash = 0.18;
     S.shake = Math.max(S.shake, Math.min(7, amount * 0.27));
@@ -1102,16 +1315,31 @@
       const nextY = e.y + e.vy * dt;
       if (e.type === "warden" && e.state === "escape") {
         // Wardens attack once, then leave instead of wrapping back in.
-        e.x = nextX;
-        e.y = nextY;
-        if (e.x < 0 || e.x > W || e.y < 0 || e.y > H) {
-          e.dead = true;
-          burst(clamp(e.x, 0, W), clamp(e.y, 0, H), "red", 3, 28);
-          continue;
+        if (WORLD_BOUNDED) {
+          e.x = nextX;
+          e.y = nextY;
+          if (e.x < e.efx - 60 || e.x > e.efx + PLAY_W + 60 || e.y < e.efy - 60 || e.y > e.efy + PLAY_H + 60) {
+            e.dead = true;
+            burst(clamp(e.x, 0, ARENA_W), clamp(e.y, 0, ARENA_H), "red", 3, 28);
+            continue;
+          }
+        } else {
+          e.x = nextX;
+          e.y = nextY;
+          if (e.x < 0 || e.x > W || e.y < 0 || e.y > H) {
+            e.dead = true;
+            burst(clamp(e.x, 0, W), clamp(e.y, 0, H), "red", 3, 28);
+            continue;
+          }
         }
       } else {
-        e.x = wrap(nextX, W);
-        e.y = wrap(nextY, H);
+        if (WORLD_BOUNDED) {
+          e.x = clamp(nextX, 0, ARENA_W);
+          e.y = clamp(nextY, 0, ARENA_H);
+        } else {
+          e.x = wrap(nextX, W);
+          e.y = wrap(nextY, H);
+        }
       }
 
       if (e.type === "warden" && e.state === "escape") continue;
@@ -1186,12 +1414,22 @@
         e.state = "escape";
         e.timer = 4.5;
         e.orbit = rand() < 0.5 ? -1 : 1;
-        const exits = [
-          { d: e.x, a: Math.PI },
-          { d: W - e.x, a: 0 },
-          { d: e.y, a: -Math.PI * 0.5 },
-          { d: H - e.y, a: Math.PI * 0.5 }
-        ];
+        let exits;
+        if (WORLD_BOUNDED) {
+          exits = [
+            { d: e.x - e.efx, a: Math.PI },
+            { d: e.efx + PLAY_W - e.x, a: 0 },
+            { d: e.y - e.efy, a: -Math.PI * 0.5 },
+            { d: e.efy + PLAY_H - e.y, a: Math.PI * 0.5 }
+          ];
+        } else {
+          exits = [
+            { d: e.x, a: Math.PI },
+            { d: W - e.x, a: 0 },
+            { d: e.y, a: -Math.PI * 0.5 },
+            { d: H - e.y, a: Math.PI * 0.5 }
+          ];
+        }
         exits.sort(function (a, b) { return a.d - b.d; });
         e.escapeAngle = exits[0].a + e.orbit * 0.16;
       }
@@ -1502,8 +1740,15 @@
     const parent = findEnemy(e.parent);
     if (parent) {
       e.phase += dt * (0.42 + (e.id & 1) * 0.1);
-      const tx = wrap(parent.x + Math.cos(e.phase) * 72, W);
-      const ty = wrap(parent.y + Math.sin(e.phase) * 72, H);
+      let tx;
+      let ty;
+      if (WORLD_BOUNDED) {
+        tx = parent.x + Math.cos(e.phase) * 72;
+        ty = parent.y + Math.sin(e.phase) * 72;
+      } else {
+        tx = wrap(parent.x + Math.cos(e.phase) * 72, W);
+        ty = wrap(parent.y + Math.sin(e.phase) * 72, H);
+      }
       const mx = delta(e.x, tx, W);
       const my = delta(e.y, ty, H);
       steer(e, mx, my, 260, 130, dt);
@@ -1543,8 +1788,15 @@
     const parent = findEnemy(e.parent);
     if (parent) {
       e.phase += dt * 1.25;
-      const tx = wrap(parent.x + Math.cos(e.phase) * 92, W);
-      const ty = wrap(parent.y + Math.sin(e.phase) * 92, H);
+      let tx;
+      let ty;
+      if (WORLD_BOUNDED) {
+        tx = parent.x + Math.cos(e.phase) * 92;
+        ty = parent.y + Math.sin(e.phase) * 92;
+      } else {
+        tx = wrap(parent.x + Math.cos(e.phase) * 92, W);
+        ty = wrap(parent.y + Math.sin(e.phase) * 92, H);
+      }
       steer(e, delta(e.x, tx, W), delta(e.y, ty, H), st.accel, st.speed, dt);
     } else {
       const move = radialOrbit(e, dx, dy, 185, 1.05);
@@ -1561,8 +1813,15 @@
     const parent = findEnemy(e.parent);
     if (parent) {
       e.phase += dt * 0.72 * e.orbit;
-      const tx = wrap(parent.x + Math.cos(e.phase) * 118, W);
-      const ty = wrap(parent.y + Math.sin(e.phase) * 118, H);
+      let tx;
+      let ty;
+      if (WORLD_BOUNDED) {
+        tx = parent.x + Math.cos(e.phase) * 118;
+        ty = parent.y + Math.sin(e.phase) * 118;
+      } else {
+        tx = wrap(parent.x + Math.cos(e.phase) * 118, W);
+        ty = wrap(parent.y + Math.sin(e.phase) * 118, H);
+      }
       steer(e, delta(e.x, tx, W), delta(e.y, ty, H), st.accel, st.speed, dt);
     } else {
       const move = radialOrbit(e, dx, dy, 210, 0.8);
@@ -1628,8 +1887,15 @@
   }
 
   function updateStationOmega(e, dx, dy, d, st, dt) {
-    const cx = W * 0.5;
-    const cy = H * 0.46;
+    let cx;
+    let cy;
+    if (WORLD_BOUNDED) {
+      cx = e.efx + PLAY_W * 0.5;
+      cy = e.efy + PLAY_H * 0.46;
+    } else {
+      cx = PLAY_W * 0.5;
+      cy = PLAY_H * 0.46;
+    }
     steer(e, delta(e.x, cx, W), delta(e.y, cy, H), st.accel, st.speed, dt);
     e.timer -= dt;
     if (e.state === "settle") {
@@ -1668,12 +1934,12 @@
     if (!S.player.alive) return;
     const px = delta(e.x, S.player.x, W);
     const py = delta(e.y, S.player.y, H);
-    if (rayHitsPoint(px, py, e.angle, Math.max(W, H), 9)) damagePlayer(9, S.player.x, S.player.y);
+    if (rayHitsPoint(px, py, e.angle, Math.max(PLAY_W, PLAY_H), 9)) damagePlayer(9, S.player.x, S.player.y);
     for (let i = 0; i < 5; i++) {
       const a = e.angle + i * TAU / 5;
       const nx = Math.cos(a) * e.r * 0.48;
       const ny = Math.sin(a) * e.r * 0.48;
-      if (rayHitsPoint(px - nx, py - ny, a, Math.max(W, H), 7)) damagePlayer(6, S.player.x, S.player.y);
+      if (rayHitsPoint(px - nx, py - ny, a, Math.max(PLAY_W, PLAY_H), 7)) damagePlayer(6, S.player.x, S.player.y);
     }
   }
 
@@ -1688,8 +1954,15 @@
   function updateStarEater(e, dx, dy, d, st, dt) {
     e.timer -= dt;
     e.phase += dt * 1.15;
-    const anchorX = W * (e.state === "crossings" ? 0.5 : 0.2);
-    const anchorY = H * 0.5 + Math.sin(S.time * 0.42) * H * 0.11;
+    let anchorX;
+    let anchorY;
+    if (WORLD_BOUNDED) {
+      anchorX = e.efx + PLAY_W * (e.state === "crossings" ? 0.5 : 0.2);
+      anchorY = e.efy + PLAY_H * 0.5 + Math.sin(S.time * 0.42) * PLAY_H * 0.11;
+    } else {
+      anchorX = PLAY_W * (e.state === "crossings" ? 0.5 : 0.2);
+      anchorY = PLAY_H * 0.5 + Math.sin(S.time * 0.42) * PLAY_H * 0.11;
+    }
     if (e.state !== "lunge" && e.state !== "crossings") {
       steer(e, delta(e.x, anchorX, W), delta(e.y, anchorY, H), st.accel, st.speed, dt);
     }
@@ -1717,7 +1990,7 @@
       e.angle = rotateToward(e.angle, e.dashAngle, dt * 1.2);
       if (e.timer <= 0) { e.state = "beam"; e.timer = 2.65; }
     } else if (e.state === "beam") {
-      if (rayHitsPoint(dx, dy, e.dashAngle, Math.max(W, H) * 1.2, e.enraged ? 22 : 17)) damagePlayer(18, S.player.x, S.player.y);
+      if (rayHitsPoint(dx, dy, e.dashAngle, Math.max(PLAY_W, PLAY_H) * 1.2, e.enraged ? 22 : 17)) damagePlayer(18, S.player.x, S.player.y);
       if (e.timer <= 0) setStarAttack(e, 2);
     } else if (e.state === "lungeTell") {
       const lead = leadTarget(e, S.player, 520);
@@ -1804,11 +2077,16 @@
 
   function spawnAsteroidRing(e) {
     const count = e.enraged ? 13 : 10;
-    const radius = Math.min(W, H) * 0.34;
+    const radius = Math.min(PLAY_W, PLAY_H) * 0.34;
     for (let i = 0; i < count; i++) {
       const a = i * TAU / count + e.phase * 0.1;
-      const fake = { id: e.id, x: wrap(S.player.x + Math.cos(a) * radius, W), y: wrap(S.player.y + Math.sin(a) * radius, H), vx: 0, vy: 0, r: 0, orbit: e.orbit };
-      spawnEnemyBullet(fake, a + Math.PI, "asteroid");
+      if (WORLD_BOUNDED) {
+        const fake = { id: e.id, x: clamp(S.player.x + Math.cos(a) * radius, 0, ARENA_W), y: clamp(S.player.y + Math.sin(a) * radius, 0, ARENA_H), vx: 0, vy: 0, r: 0, orbit: e.orbit };
+        spawnEnemyBullet(fake, a + Math.PI, "asteroid");
+      } else {
+        const fake = { id: e.id, x: wrap(S.player.x + Math.cos(a) * radius, W), y: wrap(S.player.y + Math.sin(a) * radius, H), vx: 0, vy: 0, r: 0, orbit: e.orbit };
+        spawnEnemyBullet(fake, a + Math.PI, "asteroid");
+      }
     }
   }
 
@@ -1892,6 +2170,23 @@
         if (S.bullets[i].team === "enemy" && !S.bullets[i].dead) { S.bullets[i].dead = true; break; }
       }
     }
+    if (WORLD_BOUNDED) {
+      const x = clamp(e.x + Math.cos(angle) * (e.r + 5), 0, ARENA_W);
+      const y = clamp(e.y + Math.sin(angle) * (e.r + 5), 0, ARENA_H);
+      const bullet = {
+        id: nextId++, team: "enemy", kind: kind, x: x, y: y, px: x, py: y,
+        vx: Math.cos(angle) * speed + e.vx * 0.18, vy: Math.sin(angle) * speed + e.vy * 0.18,
+        speed: speed, r: r, life: life, damage: damage, color: color,
+        homing: homing, curve: curve, maxSpeed: maxSpeed,
+        acceleration: acceleration, homingDelay: homingDelay, specialTimer: specialTimer,
+        proximity: proximity, armed: armed, wiggle: wiggle, baseAngle: angle,
+        ownerId: e.ownerId || e.id || 0, dead: false, exploded: false, trail: 0
+      };
+      S.bullets.push(bullet);
+      const heavyFx = kind === "heavy" || kind === "spitOrb" || kind === "kineticLance" || kind === "omegaSphere" || kind === "splitter";
+      burst(x, y, color, heavyFx ? 6 : 1, heavyFx ? 55 : 20);
+      return bullet;
+    }
     const x = wrap(e.x + Math.cos(angle) * (e.r + 5), W);
     const y = wrap(e.y + Math.sin(angle) * (e.r + 5), H);
     const bullet = {
@@ -1961,8 +2256,14 @@
           b.vy = Math.sin(angle) * speed;
         }
       }
-      b.x = wrap(b.x + b.vx * dt, W);
-      b.y = wrap(b.y + b.vy * dt, H);
+      if (WORLD_BOUNDED) {
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+        if (b.x < -64 || b.x > ARENA_W + 64 || b.y < -64 || b.y > ARENA_H + 64) b.dead = true;
+      } else {
+        b.x = wrap(b.x + b.vx * dt, W);
+        b.y = wrap(b.y + b.vy * dt, H);
+      }
       b.trail = (b.trail || 0) - dt;
       if (b.team === "enemy" && b.trail <= 0) {
         b.trail = b.kind === "heavy" || b.kind === "serpentFire" || b.kind === "darkFire" || b.kind === "kineticLance" ? 0.018 : 0.04;
@@ -2093,7 +2394,22 @@
       const threshold = e.type === "starEater" ? 35 : e.type === "stationOmega" ? 29 : 21;
       if (S.waveTime > threshold) amount *= clamp(1 + (S.waveTime - threshold) * 0.1, 1, 3.5);
     }
-    e.hp -= amount;
+    // The kernel's body leg. Every gate and every amount stage above stays
+    // here — the snapper's invulnerable phase, the shield absorb, the bulwark
+    // and minelayer frontal reduction, Station Omega's node crit and the boss
+    // ramp — because they are this kernel's own pipeline, not the door's. What
+    // reaches the door is the amount they settled on.
+    //
+    // The SOURCE carries a class and no seat: the kernel has one unseated
+    // pilot, so the matrix row is consulted (shot SHIP -> BODY, chain
+    // BODY -> BODY) while every identity field stays undefined and the enemy
+    // record grows no key. The kernel's drone is an ordinary member of
+    // S.enemies today, so it arrives here as a BODY; declaring it a CONSTRUCT
+    // is R6's registry work, not a distinction this file has.
+    Engine.applyEffect({ kind: cause === "chain" ? "chain" : "shot",
+                         target: e, tgtCls: Engine.CLASS.BODY,
+                         source: { cls: cause === "chain" ? Engine.CLASS.BODY : Engine.CLASS.SHIP },
+                         baseAmount: amount });
     e.hit = 0.09;
     particle(x, y, range(-70, 70), range(-70, 70), STATS[e.type].color, 0.24, 1.4, "spark");
     particle(x, y, range(-70, 70), range(-70, 70), "ink", 0.18, 0.8, "spark");
@@ -2103,7 +2419,7 @@
       e.phaseTime = 0;
       S.banner = 3.2;
       S.bannerText = "STAR EATER  //  PHASE II";
-      emitShockwave(e.x, e.y, "red", 40, Math.min(W, H) * 0.5, 1.25);
+      emitShockwave(e.x, e.y, "red", 40, Math.min(PLAY_W, PLAY_H) * 0.5, 1.25);
       burst(e.x, e.y, "red", 34, 225);
       S.shake = Math.max(S.shake, 8);
       // The condensed showcase resumes at the first attack whose canonical
@@ -2162,7 +2478,7 @@
       S.banner = 3.2;
       S.bannerText = (st.label || e.type.toUpperCase()) + "  //  DESTROYED";
       S.gateTimer = 0;
-      emitShockwave(e.x, e.y, st.color, 28, Math.min(W, H) * 0.58, 1.4);
+      emitShockwave(e.x, e.y, st.color, 28, Math.min(PLAY_W, PLAY_H) * 0.58, 1.4);
       burst(e.x, e.y, "ink", e.type === "starEater" ? 52 : 30, e.type === "starEater" ? 330 : 240);
       if (e.type === "starEater") {
         S.finaleFlash = 1;
@@ -2199,8 +2515,13 @@
       }
       o.vx *= Math.pow(0.982, dt * 60);
       o.vy *= Math.pow(0.982, dt * 60);
-      o.x = wrap(o.x + o.vx * dt, W);
-      o.y = wrap(o.y + o.vy * dt, H);
+      if (WORLD_BOUNDED) {
+        o.x = clamp(o.x + o.vx * dt, 0, ARENA_W);
+        o.y = clamp(o.y + o.vy * dt, 0, ARENA_H);
+      } else {
+        o.x = wrap(o.x + o.vx * dt, W);
+        o.y = wrap(o.y + o.vy * dt, H);
+      }
       if (p.alive && d < 15) {
         o.dead = true;
         gainXp(o.value || 1);
@@ -2226,6 +2547,14 @@
 
   function particle(x, y, vx, vy, color, life, radius, kind) {
     if (S.particles.length >= 680) S.particles.splice(0, 1);
+    if (WORLD_BOUNDED) {
+      S.particles.push({
+        x: clamp(x, 0, ARENA_W), y: clamp(y, 0, ARENA_H), px: clamp(x, 0, ARENA_W), py: clamp(y, 0, ARENA_H),
+        vx: vx, vy: vy, color: color, life: life, max: life, r: radius,
+        kind: kind || "spark", spin: range(0, TAU), drag: kind === "trail" ? 0.94 : 0.975
+      });
+      return;
+    }
     S.particles.push({
       x: wrap(x, W), y: wrap(y, H), px: wrap(x, W), py: wrap(y, H),
       vx: vx, vy: vy, color: color, life: life, max: life, r: radius,
@@ -2267,8 +2596,13 @@
       p.life -= dt;
       p.vx *= Math.pow(p.drag, dt * 60);
       p.vy *= Math.pow(p.drag, dt * 60);
-      p.x = wrap(p.x + p.vx * dt, W);
-      p.y = wrap(p.y + p.vy * dt, H);
+      if (WORLD_BOUNDED) {
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+      } else {
+        p.x = wrap(p.x + p.vx * dt, W);
+        p.y = wrap(p.y + p.vy * dt, H);
+      }
       p.spin += dt * 4;
     }
     S.particles = S.particles.filter(function (p) { return p.life > 0; });
@@ -2278,8 +2612,13 @@
       f.life -= dt;
       f.vx *= Math.pow(0.975, dt * 60);
       f.vy *= Math.pow(0.975, dt * 60);
-      f.x = wrap(f.x + f.vx * dt, W);
-      f.y = wrap(f.y + f.vy * dt, H);
+      if (WORLD_BOUNDED) {
+        f.x += f.vx * dt;
+        f.y += f.vy * dt;
+      } else {
+        f.x = wrap(f.x + f.vx * dt, W);
+        f.y = wrap(f.y + f.vy * dt, H);
+      }
       f.angle += f.spin * dt;
     }
     S.fragments = S.fragments.filter(function (f) { return f.life > 0; });
@@ -2302,6 +2641,24 @@
     updateEffects(dt);
   }
   function starEaterSegments(e, basePos, baseAngle, renderPhase) {
+    if (WORLD_BOUNDED) {
+      const segments = [];
+      const base = baseAngle == null ? e.angle : baseAngle;
+      const originX = basePos ? basePos.x : e.x;
+      const originY = basePos ? basePos.y : e.y;
+      const phase = renderPhase == null ? e.phase : renderPhase;
+      for (let i = 1; i <= 3; i++) {
+        const side = Math.sin(phase - i * 0.82) * (e.state === "crossings" ? 18 : 34);
+        const back = 78 * i;
+        segments.push({
+          x: clamp(originX - Math.cos(base) * back - Math.sin(base) * side, 0, ARENA_W),
+          y: clamp(originY - Math.sin(base) * back + Math.cos(base) * side, 0, ARENA_H),
+          angle: base + Math.sin(phase - i * 0.7) * 0.22,
+          index: i
+        });
+      }
+      return segments;
+    }
     const segments = [];
     const base = baseAngle == null ? e.angle : baseAngle;
     const originX = basePos ? basePos.x : e.x;
@@ -2326,7 +2683,7 @@
     setSink: setSink,
     setInput: setInput,
     S: S,
-    W: W, H: H, STEP: STEP, TAU: TAU, BASE_SEED: BASE_SEED,
+    W: W, H: H, PLAY_W: PLAY_W, PLAY_H: PLAY_H, ARENA_W: ARENA_W, ARENA_H: ARENA_H, ARENA_COLS: ARENA_COLS, ARENA_ROWS: ARENA_ROWS, WORLD_BOUNDED: WORLD_BOUNDED, STEP: STEP, TAU: TAU, BASE_SEED: BASE_SEED,
     C: C, RGB: RGB,
     WAVES: WAVES, STATS: STATS,
     rgba: rgba, rgbFor: rgbFor, cssFor: cssFor,

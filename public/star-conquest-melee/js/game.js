@@ -870,10 +870,16 @@ const COMET_LOG = {
                   // is exactly the flag the server's countHurtWhileComet
                   // counts; over the wire it is the applied snapshot's flag,
                   // and only a cue from that same snapshot's tick may claim
-                  // it (a mismatched drain books hurtSkew below). This one is
-                  // a SIM DEFECT if it ever moves: the negation returns before
-                  // the cue is emitted, so a hurt cue cannot coexist with a
-                  // live comet
+                  // it (a mismatched drain books hurtSkew below).
+                  // RE-AIMED AT R5 (D26 + D28). It used to read "a SIM DEFECT
+                  // if it ever moves", because the comet refused every incoming
+                  // path. It now refuses BODY CONTACT and nothing else, so a
+                  // burning pilot legitimately eats beams, seekers, rival
+                  // rounds and rival splash — and this is a LIVE count of them,
+                  // the client's mirror of the server's countHurtWhileComet.
+                  // What is still true, and still the thing to watch: a hurt
+                  // from a CONTACT can never appear here, because hitPlayer
+                  // refuses it and returns before the cue is emitted
   hurtSkew: 0,    // hurt/death cues that drained with a live flag but a tick
                   // the applied snapshot does not vouch for — net mode's jump
                   // and starvation branches drain a WINDOW of ticks against
@@ -934,7 +940,8 @@ function noteCometRetract(s) {
 // The cue drains' half — js/game.js's drainCues() in solo and js/net.js's
 // fireEvents() in net mode, because a net client's local sim never steps and
 // only the second of those runs there. `hurtWind` is the measurement this lane
-// wanted; `hurtLive` is the tripwire the server counter mirrors.
+// wanted; `hurtLive` mirrors the server counter — a live number since R5, not a
+// zero-forever one (D28 narrowed the refusal to body contact).
 function noteCometCue(kind, seat, tickMatched = true) {
   if ((kind !== "hurt" && kind !== "death") || seat !== grantedSeat()) return;
   // hurtLive reads the SETTLED comet flag, never the machine's phase — a
@@ -2262,12 +2269,23 @@ function fire(seat = 0) {
                    x: P.ship.x, y: P.ship.y, px: P.ship.x, py: P.ship.y, vx, vy,
                    ox: P.ship.x + d.x * SHIP_R, oy: P.ship.y + d.y * SHIP_R,
                    r: 2.2, dmg: BDMG, owner: seat, dead: false, spent: false,
+                   // THE SPLASH RADIUS, CAPTURED AT FIRE TIME (standing rule 5).
+                   // blastAt used to read termsFor(seat).blast at IMPACT, so a
+                   // rank bought while a round was in the air widened it
+                   // retroactively — a purchase reaching backwards into shots
+                   // already fired. The round carries what it was fired with,
+                   // and nothing mutates the field afterwards, which is the
+                   // whole of that rule. 0 at rank 0, and the guarded fold in
+                   // hashBullets makes that cost zero bytes.
+                   blastR: window.Encounter ? Encounter.blastRadius(seat) : 0,
                    ttl: Math.max(1, Math.round(BLIFE * 1000 / TICK)) }); // no upgrade touches lifetime — BLIFE is the only knob
   // the phase-15 lag REBATE, at spawn and only at spawn: a vt-bearing frame's
   // latched Δ (drainSlice) advances the new bullet Δ ticks along its own path,
   // sweeping each advanced segment against era poses in the encounter's ring,
-  // and leaves an ORDINARY bullet behind — px collapsed onto x, ttl spent, no
-  // new field, so BULLET_HASH's allow-list does not grow. Defense in depth:
+  // and leaves an ORDINARY bullet behind — px collapsed onto x, ttl spent, and
+  // no new field of the REBATE's own. (The allow-list did grow at R5, once and
+  // deliberately: `blastR` above, guarded — see BULLET_HASH_GUARDED. The rebate
+  // adds nothing; it carries that one through its queue record.) Defense in depth:
   // the latch was clamped at the drain and the server clamped vt before that;
   // the clamp here restates the sim's own bound for direct __test callers.
   if (window.Encounter) {
@@ -2289,8 +2307,10 @@ function fire(seat = 0) {
 //
 // Rule 2 of the plan holds: no new damage call site. Every round it spawns is
 // an ordinary bullet in G.bullets, swept by the encounter's existing pass, so
-// BULLET_HASH does not grow and the wire carries it as {id, x, y, o} like any
-// other. Rule 4 holds too: the remote look is declared here — direction and
+// this function adds nothing to BULLET_HASH and the wire carries the round as
+// {id, x, y, o} like any other. (The allow-list itself grew once at R5 —
+// `blastR`, guarded; this spawn captures it exactly as fire() does, because an
+// ability's round terminates through the same splash.) Rule 4 holds too: the remote look is declared here — direction and
 // speed replicate for free through the round's own position, which is the one
 // thing the wire is generous about.
 //   WHAT THE WIRE DOES NOT CARRY IS THE LOOK ITSELF, and the gap is REMOTE
@@ -2342,6 +2362,10 @@ function abilityFire(seat, id) {
                      oy: P.ship.y + dir.y * SHIP_R, // render-only, and out of
                                     // BULLET_HASH like every other round's
                      r: sp.r, dmg: sp.dmg, owner: seat, dead: false, spent: false,
+                     // the same fire-time capture fire() makes, and for the same
+                     // reason: an ability's round is an ordinary bullet in
+                     // G.bullets and terminates through the same splash
+                     blastR: window.Encounter ? Encounter.blastRadius(seat) : 0,
                      ttl: sp.ttl,
                      // ...and the record's LOOK, render-only and out of
                      // BULLET_HASH exactly as ox/oy above are. Undefined for a
@@ -5498,6 +5522,20 @@ function fnv() {
 // reviewable decision. b.r, b.dmg and b.owner are IN: the encounter's sweep
 // reads all three (the inflated hit circle, the damage paid, the side test).
 const BULLET_HASH = ["x", "y", "px", "py", "vx", "vy", "r", "dmg", "owner", "ttl", "dead", "spent"];
+// ...and the GUARDED half of the same allow-list. THE ALLOW-LIST GREW AT R5,
+// deliberately and for the first time since it was declared: `blastR` is the
+// splash radius the round was FIRED with (standing rule 5 — a value captured
+// at spawn lives in a field the spawner does not later mutate), and it belongs
+// in the hash by the allow-list's own contract, because it decides what the
+// simulation will do when the round terminates.
+//
+// It is listed HERE rather than appended above because an unconditional fold
+// would cost its bytes on every tick of every trace, including the traces where
+// nobody ever bought BLAST CHARGE — the exact tax the charter rule refuses. The
+// fold in hashBullets is entered ONCE for the whole array and, once entered,
+// EVERY bullet folds, which is the README's collision defense: the array length
+// is already prefixed above, so no two states can hash alike through it.
+const BULLET_HASH_GUARDED = ["blastR"];
 function hashShip() {
   // a LENGTH-PREFIXED walk over players[] in ascending seat order — the
   // multi-seat extension the old single-seat comment assigned to exactly
@@ -5538,6 +5576,17 @@ function hashBullets() {
   // live array order — the encounter's first-along-the-path arbitration walks
   // this order, so the order itself is simulation state. Never sort.
   for (const b of G.bullets) for (const f of BULLET_HASH) h.val(b[f]);
+  // the GUARDED fold — zero bytes while every round in the air was fired at
+  // rank 0, which is every tick of every trace committed before R5. Entered
+  // once for the whole array, and once entered every bullet folds every guarded
+  // field, so "seat 1's round is ranked" and "seat 0's round is ranked" can
+  // never collide. See BULLET_HASH_GUARDED for why it is not folded above.
+  let anyGuarded = false;
+  for (const b of G.bullets) {
+    for (const f of BULLET_HASH_GUARDED) if (b[f]) { anyGuarded = true; break; }
+    if (anyGuarded) break;
+  }
+  if (anyGuarded) for (const b of G.bullets) for (const f of BULLET_HASH_GUARDED) h.num(b[f] || 0);
   return h;
 }
 // no camera hash: cam and gate are render-side view state now — the sim
