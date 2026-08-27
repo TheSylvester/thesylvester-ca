@@ -54,192 +54,16 @@
                              // every wave deals the same SCHEDULE and pattern on
                              // every run; anchor geometry tracks the live camera
                              // rectangle, which follows real input
-    enemy: {                 // dart baseline — statsFor reads it FLAT: every body
-                             // declares a fixed hull, and hull reads as "how many
-                             // LMB shots" because BDMG is 1. Difficulty past wave
-                             // 9 comes from the tier MIX, never from a stat curve.
-      r: 7, hp: 1,
-      maxSpeed: 2.4,         // px/tick — 144 px/s, just over the ship's 120 top speed
-      steer: 0.06,           // fraction of (target − velocity) applied per tick
-      prefer: 84,            // the ring it holds around the player, px
-      band: 14,              // hold tolerance — inside prefer−band it backs off
-      backSpeed: 1.2,        // retreat speed when the player crowds it
-      sepR: 30,              // separation radius between pack members, px
-      jitter: 26,            // group spread around the shared spawn anchor, px
-    },
-    lance: {
-      // THE TWO HALVES OF "FIRING RANGE", and they are not the same number.
-      // `engage` is where the dart STOPS AND PLANTS; `len` is how far the beam
-      // it then fires actually reaches. Between the two sits a 45-tick
-      // telegraph in which the dart is a statue — so a player who runs gains
-      // ground on a body that has already committed, and the reach has to
-      // cover the plant distance PLUS whatever the runner banks in those 45
-      // ticks. At the old 110/118 a stock 2.0 px/tick ship fleeing straight
-      // was 189.6 px out when the beam lit and the beam reached 127.5: wave 1
-      // could not land a single lance on anyone simply holding top speed.
-      // Both numbers now sit well outside that, so a dart is a standoff
-      // threat rather than a body you walk away from. The dodge is unchanged
-      // and is what it always was — leave the LINE, do not outrun it.
-      engage: 130,           // start the telegraph inside this player distance
-      len: 180,              // beam length, px
-      halfWidth: 2.5,        // beam half-width, px
-      telegraph: 45,         // 0.75 s of readable warning
-      pulse: 10,             // beam live time, ticks
-      cooldown: 120,         // 2 s between lances — flat at every wave
-      dmg: 1,
-    },
-    charger: {               // ram archetype baseline — statsFor reads it flat
-      r: 9, hp: 4,
-      maxSpeed: 1.6,         // seek speed — the dash, not the chase, is the threat
-      steer: 0.05,
-      prefer: 150,           // holds a wider ring than the darts; the lunge covers it
-      band: 20,
-      backSpeed: 1.2,        // retreat speed when the player crowds it
-      sepR: 40,              // separation radius — the bigger body claims more room
-      engage: 240,           // a rested charger plants inside this player distance
-      windup: 50,            // plant ticks — the dash line locks at windup START
-      dashSpeed: 7,          // px/tick along the locked line, constant across waves
-      dashTicks: 26,         //   so is the duration — dodge difficulty stays fair
-      rest: 90,              // tired ticks after a lunge — flat at every wave
-      cooldown: 30,          // seek ticks before the next lunge is considered
-      dmg: 1,
-    },
-    // The standoff carrier — the roster's RANGE axis. Its retreat speed is
-    // HIGHER than its approach speed, which is the whole read: crowding a
-    // harrier makes it run instead of trade, so the answer to it is to close
-    // the 185 px ring, not to duel across it. It never rams by intent.
-    harrier: {
-      r: 8, hp: 2,
-      maxSpeed: 1.80,        // approach — still slower than the 2.0 ship
-      steer: 0.05,
-      prefer: 185,           // the ring it holds
-      band: 30,
-      backSpeed: 1.85,       // ...and it backs off FASTER than it closes. 1.85 is
-                             // the smallest step on the panel's 0.05 grid that
-                             // holds retreat above the raised 1.80 approach, and
-                             // it keeps the widest chase margin under the 2.0 ship.
-      sepR: 46,
-      engage: 200,           // dart 130, harrier 200, charger 240 — the harrier is
-                             // NO LONGER the gate king. The standoff identity now
-                             // rides the THREAT ENVELOPE, not the plant gate:
-                             // harrier 200 + missile reach 260 = 460 px, against
-                             // the charger's 240 + dash 182 (7 × 26) = 422. The
-                             // range archetype keeps the crown by 38 px. The floor
-                             // is therefore whatever holds engage + reach above
-                             // 422 and engage above the dart's 130 — with reach at
-                             // 260 that is engage 163; 200 is the playtested value
-                             // and leaves 37 px over the envelope floor.
-      lockon: 45,            // 0.75 s of plant — the research's floor is ~25 ticks,
-                             // the time the player needs to develop the lateral
-                             // break that beats a missile; below it the first
-                             // missile of every wave is an unavoidable hit
-      cooldown: 150,         // ticks between launches — flat at every wave
-      orbDrop: 2,
-    },
-    // The seeker missile. speed × life = 260 px of reach. It NO LONGER crosses
-    // the 512 px field: the reach is now cut to the launcher, and must clear the
-    // harrier's engage of 200 by AT LEAST 40 px — 260 clears it by 60 — so a
-    // missile fired at the gate still arrives with margin and one fired at
-    // nothing dies well short of the far wall. `turn` is what keeps the speed
-    // fair. The quantity that decides a dodge is NOT the turn radius — a faster
-    // pursuer beats a circling target at any radius — it is the total HEADING
-    // AUTHORITY the fuse can spend: (life − arm − decay/2) × turn, which the
-    // shorter fuse drops from ≈72° to ≈44°. The table below is the original
-    // tuning, taken at life 90 over the then-live band; the current values are
-    // re-proven, not assumed, because the wave1 suite re-runs the break fight
-    // over the LIVE band every run (now the ring-to-engage band, 155–200 px;
-    // it was 210–270 before this retune, and 240–400 when first tuned):
-    //   turn 0.030 (108°) — the break is HIT at every range. Not minor homing.
-    //   turn 0.022 ( 79°) — the break wins, with no margin.
-    //   turn 0.020 ( 72°) — the break wins from a standstill too, and survives
-    //                       half a second of hesitation; a HALF-committed 45°
-    //                       break is still hit, and so is running away, which
-    //                       is exactly the shape a homing threat should have.
-    // Running away is the one line of that table the shorter fuse repeals: see
-    // the note on `speed`. So the counter is a committed lateral break, decided
-    // early — or a straight full-speed run — or, for the
-    // confident, a jink held until the last 60 px, which beats it at any of
-    // these values. The margin is wide enough that AFTERBURNER, which RAISES
-    // the player's own turn radius as v²/a, cannot invert the fight.
-    // NONE of these scale with the wave: like the charger's dashSpeed, dodge
-    // difficulty stays fair forever and only the launcher's hp and cadence grow.
-    missile: {
-      r: 3.5, hp: 1,         // r + SHIP_R = 10.5 px of hit radius; one bullet kills it
-      speed: 4.00,           // px/tick — 240 px/s, 2× the ship's top speed. Running IS
-                             // now an answer: measured against this loop, a straight
-                             // full-speed run escapes by 105–150 px at afterburner
-                             // rank 0 and by 249–264 px at rank 1. The owner accepted
-                             // that. What the values still guarantee, and what the
-                             // wave1 suite pins: a PARKED player is hit across the
-                             // whole band, and a committed lateral break — the
-                             // intended counter — misses by 131–138 px.
-      life: 65,              // ~1.08 s
-      turn: 0.020,           // rad/tick — 69°/s; R = 300 px, ~20× the ship's own 16.7
-      arm: 12,               // ballistic at launch: the straight opening segment is
-                             // what makes the bearing readable before it bends
-      decay: 30,             // steering fades linearly to 0 over the final ticks —
-                             // the fuse tell and the anti-orbit fix in one
-      dmg: 1,
-      trail: 14,             // the trail IS the UI for the turn radius; a bare dot
-                             // travelling 4 px/tick reads as a teleport
-      max: 6,                // a guard, not a mechanic: a harrier's cadence is its
-                             // cooldown (150, flat at every wave) plus lockon 45, so
-                             // 195 ticks separate launches against a 65-tick life —
-                             // no harrier ever has two of its own in flight, and 3
-                             // of them cannot reach 6
-    },
-    // The radar variants — the aim-attack archetypes' predictive siblings.
-    // Base attacks punish a still player; a predicted attack punishes CONSTANT
-    // VELOCITY, so the counter inverts: change velocity during the telegraph.
-    // The prediction is latched exactly once, at telegraph/windup/lockon start
-    // — the same honesty rule every base attack keeps.
-    radar: {
-      leadScale: 1,     // 0..1.5 — fraction of the computed lead actually taken
-      deadband: 0.3,    // px/tick — below it a ship reads as still and radar aim
-                        // collapses to the base bearing, so the variant is
-                        // legible only through motion
-      missileTurn: 0.010, // rad/tick for the RADAR missile only — the predicted
-                        // launch bearing spends less of the heading budget the
-                        // base 0.020 was tuned around, so this starts at half
-                        // and slides to 0 (pure ballistic predictor)
-    },
-    // The shield — the roster's FACING axis. prefer 0 makes the shared
-    // ring-hold code close forever, and maxSpeed below the ship's 2.0 means it
-    // can always be escaped: its threat is that it is standing where you
-    // wanted to be. engage 0 is no attack mode at all — contact is its whole
-    // offense. turnRate is what makes the shield a skill check instead of a
-    // wall: a player at 2.0 px/tick has angular rate 2.0/dist about the body,
-    // so the player out-turns 0.015 rad/tick inside 133 px and cannot flank it
-    // beyond that. Get close to get around it — and close is where its contact
-    // damage lives.
-    anvil: {
-      r: 11, hp: 3, maxSpeed: 1.2, steer: 0.04, prefer: 0, band: 0, backSpeed: 0,
-      sepR: 52, engage: 0, orbDrop: 3,
-      turnRate: 0.015,       // rad/tick — 0.86°/tick, the only body that does not snap
-      arc: (70 * Math.PI) / 180, // HALF-angle: a ±70° frontal shield, 140° of cover
-      flee: 200,             // flanked and inside this, it thrusts along its OWN facing
-                             // instead of closing — it cannot escape a 2.0 px/tick
-                             // ship, so the kill is never denied; the flank just
-                             // becomes a moving problem that drags across the field
-    },
-    // The bomb — the roster's DEATH TIME axis. No attack but contact; the
-    // whole threat is the burst the player themself triggers, which is what
-    // makes the kill a decision instead of a reflex.
-    husk: {
-      r: 13, hp: 5, maxSpeed: 0.9, steer: 0.03, prefer: 0, band: 0, backSpeed: 0,
-      sepR: 58, engage: 0, orbDrop: 1,
-      split: 3,              // shards dealt on a seeded fan at the death point
-      kick: 2.2,             // px/tick of outward velocity on each shard
-      push: 0.6,             // fraction of r each shard starts out from the centre
-    },
-    // The husk's payload, never a wave-schedule type: shards carry no split
-    // field, so there is no recursion to bound. Faster than the player's 2.0 on
-    // purpose — they must be shot, not outrun: 2.5 still clears the 2.0 ship
-    // by 0.5, and 1 hp keeps the burst a reflex answer, not a second fight.
-    shard: {
-      r: 5, hp: 1, maxSpeed: 2.5, steer: 0.09, prefer: 0, band: 0, backSpeed: 0,
-      sepR: 22, engage: 0, orbDrop: 1,
-    },
+    // ---- THE NINE ARCHETYPE BLOCKS ARE RETIRED (S3b lane 3, commit D4) ----
+    // `enemy`, `lance`, `charger`, `harrier`, `missile`, `radar`, `anvil`,
+    // `husk` and `shard` — 186 lines of tuning for the seven-type roster D9
+    // REPLACED. The successor plane's twenty-one types carry their own STATS
+    // table in js/demo-kernel.js and none of these numbers reaches it.
+    //
+    // WHAT STAYS BELOW IS THE PLAYER'S HALF: the seat's hull and its clocks,
+    // the aggro windows, the seat spacing, the ram's cost, the orb magnet and
+    // the inter-wave break. Every one of them is production's own and survives
+    // the roster it was tuned beside.
     player: { hull: 3, invuln: 62, // ≈ one second of post-hit grace
               respawn: 600,        // ticks a downed seat waits before it re-enters — 10 s
               claim: 1800,         // ...and then how long it may sit waiting for the CLICK
@@ -261,14 +85,18 @@
     aggro: { commit: 90, ownerLock: 120 },
     // per-seat spawn spacing, px along +x from the map centre — seat 0 sits
     // exactly on the centre, so the single-player spawn never moves
-    seatGap: 48,
+    seatGap: 120,        // x2.5, WAS 48 (commit C's arena rescale)
     // physical ship-body contact costs the player one hull; the enemy side of
     // the same event pays BDMG (one bullet) and is paced by the CONTACTCD
     // tuner, so ramming stays a real tactic without melting a body in a
     // handful of overlapping ticks
     contact: { dmgToPlayer: 1 },
-    orb: { r: 3, drift: 1.1, damp: 0.94, attract: 72, pull: 0.55, vmax: 7, pickup: 12,
-           clearPull: 3, clearVmax: 24 }, // the cleared-banner sweep: pull/speed strong
+    // COMMIT C's x2.5 ARENA RESCALE, per field: `r` 3, `drift` 1.1, `attract` 72,
+    // `pull` 0.55, `vmax` 7, `pickup` 12, `clearPull` 3 and `clearVmax` 24 are
+    // all px, px/tick or px/tick^2 and are multiplied. `damp` is a per-tick
+    // RETENTION FRACTION and is exempt — a fraction has no length in it.
+    orb: { r: 7.5, drift: 2.75, damp: 0.94, attract: 180, pull: 1.375, vmax: 17.5, pickup: 30,
+           clearPull: 7.5, clearVmax: 60 }, // the cleared-banner sweep: pull/speed strong
                                           // enough to bank any orb in the world within
                                           // the clearHold window, so a wave's income is
                                           // fully in the wallet before its shop opens
@@ -278,11 +106,80 @@
                              // the WAVE CLEAR card retires on its own 210-tick
                              // clock (bannerHold), so the celebration and the
                              // break are two different numbers — retune this one
-                             // and the card does not stretch with it. Sweep
-                             // floor: the orb magnet needs ~206 ticks to bank
-                             // the world diagonal, so 480 leaves 274 ticks of
-                             // margin where 210 left 4.
+                             // and the card does not stretch with it.
+                             // ---- THE SWEEP FLOOR, RE-DERIVED AT S4 COMMIT E
+                             // The line here read "the orb magnet needs ~206
+                             // ticks to bank the world diagonal, so 480 leaves
+                             // 274 ticks of margin" — computed for the 3072x3762
+                             // world commit C rescaled, and for a sweep that
+                             // walks `E.orbs`, which post-flip holds only the
+                             // PvP payout. Both halves were stale. The enemy
+                             // plane's bounty is the KERNEL's and S4 gives it
+                             // its own sweep at production's own numbers:
+                             // hypot(7680, 7920) = 11031 px at 3600 px/s is
+                             // 3.06 s = 184 ticks, so 480 leaves 296 of margin.
+                             // ---- AND IT IS THE SAME NUMBER TWICE, ON PURPOSE
+                             // The kernel owns the arc and holds `CLEAR_HOLD`
+                             // in SECONDS; this is the same break in ticks, and
+                             // `test/tools/demo-director.mjs` holds the two
+                             // equal. Two dials for one break is how they drift.
+    stallTicks: 1800,        // ---- D21(a)'s STALL SURFACE (S4 commit E) -----
+                             // 30 s. Ticks with NO CHANGE in the live body
+                             // count before the HUD stops saying how many
+                             // hostiles are left and starts naming the SOURCE
+                             // that is holding the room. A DIAL: the number is
+                             // a first pass and the feel gate judges it.
+                             // WHAT HAPPENS NEXT IS THE OWNER'S AND IS NOT
+                             // BUILT. D21(a) rules that a room which cannot
+                             // clear must SURFACE and must never silently
+                             // advance; it does not say whether the room then
+                             // offers an advance, escalates, times out, or does
+                             // nothing at all. Those are different games. The
+                             // surface is the whole of what this round builds.
   };
+
+  // ---- D37's ENCOUNTERS-PER-REWARD-WAVE DIAL (PORT-S S7) -----------------
+  // *"How many CLEARS make one reward wave"* — the grouping D37 names a DIAL
+  // rather than a ruling, and which fell through S4 unowned. DEFAULT 1: every
+  // clear completes a reward wave, so `rewardWave` and `E.wave` are the same
+  // number and the market rerolls at every setpiece boundary. demo-v4 shipped 3
+  // because its encounters ran about 5 s; production's inter-wave break is 10 s
+  // (ECFG.clearHold 480, the owner's ruling S-bpzbzy), which may make the
+  // pressure moot — the owner: *"a pacing issue to be decided later"*.
+  //
+  // IT IS A DEV-TUNE ROUTE AND NOTHING ELSE, on BUILDSCALE's precedent: no
+  // pause-panel row, so the pause-ui census does not move. The route is the
+  // server's TUNABLES row -> `T.setPvpTune('ENCPERREWARD', n)` -> the setter
+  // published on window.Encounter below. DAMP's shape, NOT BUILDSCALE's: this
+  // dial has no kernel half at all, so a host-side write would have nothing to
+  // land on. Integer, 1..8 — a non-integer grouping is not a pacing question.
+  //
+  // A KNOWN ODDITY, DOCUMENTED RATHER THAN FIXED: the successor plane's arc is
+  // 16 setpieces long and 16 is not a multiple of 3, so at a dial of 3 the last
+  // group of an arc is short — waves 15 and 16 clear without completing group 6,
+  // and the turn starts a fresh count. That is the honest consequence of keying
+  // on the setpiece number, and keying on a clear COUNTER instead would put a
+  // second authority on the same boundary (a counter and a wave number that can
+  // disagree after a dev jump). The setpiece is hashed and crosses the wire; a
+  // counter would be neither.
+  let ENCPERREWARD = 1;
+  // The reward-wave INDEX of the setpiece standing now: at the default dial it
+  // IS the setpiece number, and at 3 the clears of waves 3, 6, 9 deal reward
+  // waves 1, 2, 3. Only meaningful on a boundary, which is what `dueForReward`
+  // decides — the two are published separately rather than folded into one
+  // "or -1" answer, because a sentinel is how a caller comes to treat "no reward
+  // this clear" as a reward wave named -1.
+  const rewardWaveOf = (w) => w / ENCPERREWARD;
+  const dueForReward = (w) => w % ENCPERREWARD === 0;
+  // The ONE authority on the variable, published on window.Encounter. It clamps
+  // because it is the authority; setPvpTune clamps to the same range because a
+  // seam that accepted values the wire route rejects would not be the same
+  // lever, which is the rule the four dials beside it already keep.
+  function setEncPerReward(n) {
+    if (!Number.isFinite(+n)) return false;
+    ENCPERREWARD = Math.max(1, Math.min(8, Math.round(+n)));
+    return true;
+  }
 
   // The post-wave shop catalog — data-driven rows, so WSAD ENGINE CONTROLS and
   // BLAST CHARGE both appended without touching buy() or the overlay's own drawing
@@ -319,7 +216,13 @@
     { name: "RAPID LOADER", desc: "fire rate +15% of base per rank", base: 4, curve: "double", cap: 5,
       icon: "rapid-loader.png" }, // cap 5: past it the
                                             // quantized cooldown outruns the BMAX live-bullet budget
-    { name: "AFTERBURNER", desc: "max speed +1.0 px/tick", base: 4, curve: "double",
+    // ---- RESCALED AT THE FIX ROUND (S3BR-03) — the row commit C's table
+    // missed. `VMAX` moved 2 -> 5 at the flip and this ADDITIVE modifier stayed
+    // at +1.0, so every rank kept only 40 % of its old normalized worth: rank 1
+    // was 2+1 = 3 and became 5+1 = 6 where scale-preserving is 5+2.5 = 7.5, and
+    // rank 2 was 4 and became 7 where it should be 10. The DESC is the shop
+    // card's own text and moves with the number it describes.
+    { name: "AFTERBURNER", desc: "max speed +2.5 px/tick", base: 4, curve: "double",
       icon: "afterburner.png" },  // uncapped — the doubling price is the brake
     // The two hull rows act on the BUYING seat's record — can(seat) and
     // apply(rank, seat) both take the seat buy() hands through, defaulting
@@ -368,6 +271,14 @@
       icon: "overload.png" },
   ];
 
+  // THE CONSUMABLE'S ROW, resolved once from the table rather than written as a
+  // literal (D37, PORT-S S7). `curve: "flat"` is the DECLARATION that a row is
+  // exempt from the market — HULL PATCH is the only row that carries it — and a
+  // literal index here would be a second authority on that fact. The catalog has
+  // already shifted once: the retired WSAD ENGINE CONTROLS row moved every later
+  // index, and the note above says so.
+  const FLAT_ROW = SHOP.findIndex((row) => row.curve === "flat");
+
   // The card art, one record per row, on the same asynchronous contract
   // game.js's two explainer bitmaps run: the record opens not-ready, the load
   // handler asks for exactly one repaint and touches nothing else, and a row
@@ -408,7 +319,11 @@
   // and the derived numbers never fold in twice. A missing seat derives the
   // rank-0 stock terms (null-safe, cometActive's contract).
   //   cool   — multiplier on BCOOL: 1/(1 + 0.15 × RAPID LOADER rank)
-  //   speed  — ADDITIVE px/tick on VMAX: 1.0 × AFTERBURNER rank, uncapped
+  //   speed  — ADDITIVE px/tick on VMAX: 2.5 × AFTERBURNER rank, uncapped.
+  //            THE 2.5 IS THE ARENA RATIO, the one named number of commit C's
+  //            rescale (1280/512), and it is written as a literal here for the
+  //            same reason every other row in that table is: a modifier on a
+  //            px-dimensioned base is itself px-dimensioned.
   //   blast  — the BLAST CHARGE rank, 0-3: 0 is off; the radius each rank
   //            reaches is BLASTR + BLASTGAIN × (rank − 1) off game.js's sliders
   //   enCell/enRech/fury — the ENERGY pool's stored RANKS: game.js turns them
@@ -424,7 +339,7 @@
     const rk = (name) => (owned ? owned[ROW_IX[name]] || 0 : 0);
     return {
       cool: 1 / (1 + 0.15 * rk("RAPID LOADER")),
-      speed: rk("AFTERBURNER"),
+      speed: 2.5 * rk("AFTERBURNER"),
       keyThrust: stock.keyThrust,
       blast: rk("BLAST CHARGE"),
       enCell: rk("ENERGY CELL"),
@@ -516,6 +431,12 @@
   // never take BODY-CONTACT damage, and without the kind the server sees a
   // legitimate beam hit and a defective ram hit as the same event.
   function emit(kind, at, gain, seat, termSeq, srcKind) {
+    // (THE STALL SIGNATURE'S DAMAGE TERM IS NOT COUNTED HERE — fix 11. It was,
+    // and the scoped check found what a cue stream admits: a `hit` on a wall, a
+    // PvP `blast` and a shot into a nonblocking mine are all emitted here and
+    // none of them is progress toward a clear. The term is the KERNEL's now —
+    // player-credited damage applied to a BLOCKING body, counted at
+    // `damageEnemy`'s own funnel where the role and the credit both are.)
     EVENTS.push({ kind, at: at ? { x: at.x, y: at.y } : null, gain, seat,
                   ...(termSeq !== undefined ? { termSeq } : {}),
                   ...(srcKind !== undefined ? { srcKind } : {}) });
@@ -530,322 +451,52 @@
   // the seeded stream and re-deal every wave in the game. restart() resets it
   // so a seeded run reproduces its ids exactly, which is what lets a golden
   // trace assert on them at all. One id space across enemies, missiles, orbs,
-  // shards AND game.js's bullets — a replication layer keys by id alone and
-  // cannot disambiguate by owning array. An id is never reused: shards take
-  // fresh ids and the dead husk's id retires with it.
+  // shards AND game.js's bullets. An id is never reused: shards take fresh ids
+  // and the dead husk's id retires with it.
+  //
+  // WHY IT IS ONE SPACE — corrected 2026-08-26 (PORT-S S3b lane 1, Codex
+  // vendor-cross). This comment used to say "a replication layer keys by id
+  // alone and cannot disambiguate by owning array". THE REPLICATION LAYER DOES
+  // NOT: the wire keeps four separate arrays (server/snapshot.mjs:312-333) and
+  // js/net.js's decoder builds a separate Map per family — e1by :2436, m1by
+  // :2489, o1by :2519, b1by :2528 — so an enemy 7 and a bullet 7 are two keys in
+  // two maps and never meet. (Every anchor in this paragraph and the next was
+  // re-measured at PORT-S S7; the four it carried were pre-existing drift.)
+  //
+  // THE CONSUMER THAT REALLY CANNOT DISAMBIGUATE IS THE PRESENTATION PLANE, and
+  // it needs MONOTONICITY rather than uniqueness. js/game.js:4795 records that
+  // `PRES.maxId` was ONE number across four id-keyed caches; presIdReset()
+  // (:4865) reads any body whose id is at or below that family's own maximum and
+  // absent from its own family map as an ID-SPACE RESET; and capturePresent()
+  // (:4879) clears a family's cache and resets its own `PRES.max` entry when
+  // that family trips it (:4921-4924). That is what this counter's
+  // "never reused, always ascending" property is actually protecting, and it is
+  // the property a SECOND producer minting into the same space would break — see
+  // js/encounter-host.js, where the PORT-S flip's bill for it is written down.
   let nextEntityId = 1;
   const nextId = () => nextEntityId++;
 
-  // ---- the wave schedule — pure functions of the wave number -------------
-  // countsFor/statsFor/waveGroups read only ECFG constants: the same wave
-  // number always deals the same schedule. STATS no longer scale at all —
-  // statsFor is a constant table, and difficulty past wave 9 is the
-  // TIER_LADDER's mix (tier-1 bodies replaced by tier-2/3 at the same
-  // count), never a stat curve. startWave still
-  // resolves statsFor ONCE into E.stats and spawnEnemy stamps that object
-  // onto each body, so nothing reads a mutated global mid-wave.
-  // countsFor is PRODUCTION-DEAD above wave 9: only waveGroups' wave<10
-  // branch reads it (its caps make 10+ equal wave 9 anyway), and the ladder
-  // owns delivery from wave 10. The suites that read it deep name that.
-  // One new idea per wave with a wave of air between it and the last: W1
-  // darts alone (untouched), W2 the harrier — the first ranged threat, by
-  // itself, against a schedule the player has already learned — W3 the
-  // charger, W4 the husk, W5 the anvil. Every archetype debuts as a SINGLE
-  // body, so its behavior is legible before it is multiplied.
-  function countsFor(wave) {
-    return {
-      darts: Math.min(5 + 2 * (wave - 1), 21),
-      chargers: wave >= 3 ? Math.min(1 + Math.floor((wave - 3) / 2), 4) : 0,
-      harriers: wave >= 2 ? Math.min(1 + Math.floor((wave - 2) / 3), 3) : 0,
-      husks: wave >= 4 ? Math.min(1 + Math.floor((wave - 4) / 4), 2) : 0,
-      anvils: wave >= 5 ? Math.min(1 + Math.floor((wave - 5) / 4), 2) : 0,
-      // the radar variants seed SPARSELY, each two waves after its parent has
-      // taught the base read: the lead is only legible against the aim it varies
-      radarDarts: wave >= 2 ? Math.min(1 + Math.floor((wave - 2) / 3), 3) : 0,
-      radarHarriers: wave >= 4 ? Math.min(1 + Math.floor((wave - 4) / 4), 2) : 0,
-      radarChargers: wave >= 5 ? Math.min(1 + Math.floor((wave - 5) / 4), 2) : 0,
-    };
-  }
-
-  // ---- the tier ladder — waves 10+ ---------------------------------------
-  // [t1, t2, t3] per family; the row with the largest wave <= w applies.
-  // Waves 1-9 NEVER read this table — countsFor's arithmetic above stands and
-  // their deal is byte-identical to what it always was. Row 9 is the record
-  // of wave 9's terminal delivery (the stamped radarDarts counted at their
-  // own tier), kept so every row can be checked against ONE family total:
-  // every row of a family sums to the same body count, which is the
-  // bandwidth law — the wire's cost is COUNT, and mix is free. The wave
-  // steps and the mixes are an ESTIMATE; the owner retunes them in play.
-  const TIER_LADDER = {
-    dart:    { 9: [18, 3, 0], 10: [16, 4, 1], 13: [11, 7, 3], 16: [6, 10, 5], 19: [2, 12, 7], 22: [0, 12, 9] },
-    harrier: { 9: [3, 2, 0],  10: [2, 3, 0],  13: [2, 2, 1],  16: [1, 2, 2],  19: [0, 3, 2],  22: [0, 2, 3] },
-    charger: { 9: [4, 2, 0],  10: [3, 3, 0],  13: [2, 3, 1],  16: [1, 3, 2],  19: [0, 3, 3],  22: [0, 2, 4] },
-    husk:    { 9: [2, 0, 0],  10: [1, 1, 0],  13: [0, 2, 0],  16: [0, 1, 1],  19: [0, 1, 1],  22: [0, 0, 2] },
-    anvil:   { 9: [2, 0, 0],  10: [1, 1, 0],  13: [0, 2, 0],  16: [0, 1, 1],  19: [0, 1, 1],  22: [0, 0, 2] },
-  };
-  // each family's three tier type names, ladder column order
-  const TIER_TYPES = {
-    dart: ["dart", "radarDart", "eliteDart"],
-    harrier: ["harrier", "radarHarrier", "eliteHarrier"],
-    charger: ["charger", "radarCharger", "eliteCharger"],
-    husk: ["husk", "packHusk", "eliteHusk"],
-    anvil: ["anvil", "wardAnvil", "eliteAnvil"],
-  };
-  function tierRow(family, wave) {
-    const rows = TIER_LADDER[family];
-    let best = null;
-    for (const k in rows) {
-      const w = Number(k);
-      if (w <= wave && (best === null || w > best)) best = w;
-    }
-    return rows[best];
-  }
-
-  // The one rotation the whole file REPORTS types by: snapState's byType and
-  // the state hash both walk it, so its order is a committed contract and the
-  // radar single stays beside its parent here. shard is absent on purpose — it
-  // is the husk's payload, never scheduled.
-  const ROTATION = ["dart", "harrier", "radarHarrier", "charger", "radarCharger", "husk", "anvil"];
-  // The DEAL order is a separate question, and the answer is not the report
-  // order. A wave interleaves its ordinary archetypes through the body of the
-  // schedule and CLOSES on the radar variants: the player reads what each
-  // archetype does first, then meets the sibling that leads its shot as the
-  // wave's last beat. The two radar heavies alternate so a pair never lands
-  // back to back, and the radarDart rides the LAST dart packs (see waveGroups).
-  const DEALFIRST = ["dart", "harrier", "charger", "husk", "anvil"];
-  const DEALLAST = ["radarHarrier", "radarCharger"];
-  // ...and the full roster, which is the rotation plus the bodies that are
-  // never their own scheduled group: the husk's shard payload, the
-  // radarDart, which replaces a member inside a dart pack, and the SEVEN tier
-  // rows appended at v10. This is the
-  // membership test spawnEnemy uses, so an unknown name can never reach
-  // E.stats through the prototype chain. ORDER IS A WIRE CONTRACT: this list
-  // must stay equal to server/snapshot.mjs's ENEMY_TYPES — append only, and
-  // server/snapshot.test.mjs pins the equality by reading this file's source.
-  const ROSTER = ROTATION.concat("shard", "radarDart",
-    "packHusk", "wardAnvil", "eliteDart", "eliteHarrier", "eliteCharger",
-    "eliteHusk", "eliteAnvil");
-
-  // The anvil tiers' currency: the shield HALF-angle grows one step a tier —
-  // ±70° / ±90° / ±110° at the shipped baseline (an ESTIMATE the owner judges
-  // in play). A step, not three literals, so the dev slider keeps moving every
-  // tier at once.
-  const ARCSTEP = (20 * Math.PI) / 180;
-
-  function statsFor(wave) {
-    // THE CONSTANT TABLE. The wave parameter is kept for the callers' sake
-    // (js/net.js re-derives from (wave, typeName), the dev refresh() and the
-    // suites all pass one) but nothing reads it any more: every body declares
-    // a FIXED hull, a fixed speed and a fixed cadence, and hull reads as "how
-    // many LMB shots" because BDMG is 1. The old curves — +1 hull every third
-    // wave, the 1.08^ shared speed multiplier, the 0.95^ cadence shorteners
-    // with their 72/54/90 floors — are DELETED, not floored: the owner's
-    // ruling is that no enemy scales automatically. Difficulty past wave 9 is
-    // the tier MIX (see TIER_LADDER), never a stat curve.
-    // The parent entries resolve first as consts, so the tier rows below
-    // can derive from them instead of re-stating values they must never drift from.
-    const dart = {
-        r: ECFG.enemy.r,
-        hp: ECFG.enemy.hp,
-        maxSpeed: ECFG.enemy.maxSpeed,
-        steer: ECFG.enemy.steer, prefer: ECFG.enemy.prefer, band: ECFG.enemy.band,
-        backSpeed: ECFG.enemy.backSpeed, sepR: ECFG.enemy.sepR,
-        cooldown: ECFG.lance.cooldown,
-        engage: ECFG.lance.engage, // every type carries an engage, 0 meaning "no attack
-                                   // mode" — that is what lets stepEnemy ask P.engage
-                                   // instead of type-testing for a range
-        orbDrop: 1, // a dart still drops exactly one orb at every wave
-        tier: 1, // colour reads tier, and the fixture's diagnosis line records it
-    };
-    const charger = {
-        r: ECFG.charger.r,
-        hp: ECFG.charger.hp,
-        maxSpeed: ECFG.charger.maxSpeed,
-        steer: ECFG.charger.steer, prefer: ECFG.charger.prefer, band: ECFG.charger.band,
-        backSpeed: ECFG.charger.backSpeed, sepR: ECFG.charger.sepR,
-        rest: ECFG.charger.rest,
-        engage: ECFG.charger.engage,
-        orbDrop: 2, // the heavier body pays out double
-        tier: 1,
-    };
-    // Every speed is now what the fairness claims always wanted: the harrier
-    // flees FASTER than it closes at every wave (crowd it and it runs), the
-    // anvil and the husk stay under the 2.0 px/tick ship forever, and the
-    // dart's 2.4 stays what wave 1 taught. The charger's dashSpeed never
-    // scaled; now nothing does.
-    const harrier = {
-        r: ECFG.harrier.r,
-        hp: ECFG.harrier.hp,
-        maxSpeed: ECFG.harrier.maxSpeed,
-        steer: ECFG.harrier.steer, prefer: ECFG.harrier.prefer, band: ECFG.harrier.band,
-        backSpeed: ECFG.harrier.backSpeed, sepR: ECFG.harrier.sepR,
-        engage: ECFG.harrier.engage,
-        cooldown: ECFG.harrier.cooldown,
-        orbDrop: ECFG.harrier.orbDrop,
-        tier: 1,
-    };
-    // the three archetypes with no radar sibling resolve as consts too, so
-    // their tier rows below can spread from them the same way the radar
-    // variants spread from theirs
-    const anvil = {
-        r: ECFG.anvil.r,
-        hp: ECFG.anvil.hp,
-        maxSpeed: ECFG.anvil.maxSpeed, // 1.2 stays well under the ship's
-                                       // 2.0 forever, which is the promise the whole
-                                       // archetype rests on: you can always leave
-        steer: ECFG.anvil.steer, prefer: ECFG.anvil.prefer, band: ECFG.anvil.band,
-        backSpeed: ECFG.anvil.backSpeed, sepR: ECFG.anvil.sepR,
-        engage: ECFG.anvil.engage, // 0 — contact is its whole offense
-        turnRate: ECFG.anvil.turnRate, // the presence of this field is what makes a
-        arc: ECFG.anvil.arc,           // body turn instead of snap, and carry a shield
-        flee: ECFG.anvil.flee,
-        orbDrop: ECFG.anvil.orbDrop,
-        tier: 1,
-    };
-    const husk = {
-        r: ECFG.husk.r,
-        hp: ECFG.husk.hp,
-        maxSpeed: ECFG.husk.maxSpeed, // invariant — the husk's threat is the burst,
-                                      // and choosing WHERE to pop it is only a choice
-                                      // while the drifter is slower than the ship
-        steer: ECFG.husk.steer, prefer: ECFG.husk.prefer, band: ECFG.husk.band,
-        backSpeed: ECFG.husk.backSpeed, sepR: ECFG.husk.sepR,
-        engage: ECFG.husk.engage,
-        split: ECFG.husk.split, // the presence of this field is what makes a body burst
-        orbDrop: ECFG.husk.orbDrop,
-        tier: 1,
-    };
-    // shards come from statsFor too. ONE tier, no variants — the payload is
-    // not a scheduled body, and husk tiers pay in shard COUNT, never in a
-    // tougher or faster shard.
-    const shard = {
-        r: ECFG.shard.r,
-        hp: ECFG.shard.hp,
-        maxSpeed: ECFG.shard.maxSpeed,
-        steer: ECFG.shard.steer, prefer: ECFG.shard.prefer, band: ECFG.shard.band,
-        backSpeed: ECFG.shard.backSpeed, sepR: ECFG.shard.sepR,
-        engage: ECFG.shard.engage,
-        orbDrop: ECFG.shard.orbDrop,
-        tier: 1,
-    };
-    return {
-      dart, charger, harrier,
-      // The radar variants — the TIER-2 rows of the three aimed families:
-      // the SAME body — every stat the parent resolved, by reference to the
-      // const above, never re-derived — except the tier currencies: hp +1,
-      // orbDrop +1 (the smarter aim pays a little more), `tier`, and the two
-      // markers behavior code reads. `base` is how
-      // shared code resolves the archetype; `radar` is the aim switch.
-      radarDart: { ...dart, hp: dart.hp + 1, orbDrop: dart.orbDrop + 1, radar: true, base: "dart", tier: 2 },
-      radarCharger: { ...charger, hp: charger.hp + 1, orbDrop: charger.orbDrop + 1, radar: true, base: "charger", tier: 2 },
-      radarHarrier: { ...harrier, hp: harrier.hp + 1, orbDrop: harrier.orbDrop + 1, radar: true, base: "harrier", tier: 2 },
-      anvil, husk, shard,
-      // The v10 tier rows. Hull is DERIVED — tier 2 = tier 1 + 1, tier 3 =
-      // tier 1 + 2 — never re-typed, and orbDrop follows the same line.
-      // Every tier row spreads from its TIER-1 const above and re-states its
-      // own markers: the elite rows of the three aimed families carry the
-      // radar pair (they keep the predictive aim), the husk and anvil tiers
-      // carry `base` alone, so stepEnemy's kin resolve
-      // and the draw dispatch need no new behaviour branch.
-      // The husk tiers pay in SHARD COUNT (split +1/+2 — never a tougher or
-      // faster shard) and the anvil tiers in SHIELD ARC (the half-angle grows
-      // ±20° a tier — an ESTIMATE the owner judges in play). Both derive from
-      // the ECFG baselines so the dev sliders keep moving every tier at once.
-      packHusk: { ...husk, hp: husk.hp + 1, split: husk.split + 1,
-        orbDrop: husk.orbDrop + 1, base: "husk", tier: 2 },
-      wardAnvil: { ...anvil, hp: anvil.hp + 1, arc: anvil.arc + ARCSTEP,
-        orbDrop: anvil.orbDrop + 1, base: "anvil", tier: 2 },
-      eliteDart: { ...dart, hp: dart.hp + 2, orbDrop: dart.orbDrop + 2, radar: true, base: "dart", tier: 3 },
-      eliteHarrier: { ...harrier, hp: harrier.hp + 2, orbDrop: harrier.orbDrop + 2, radar: true, base: "harrier", tier: 3 },
-      eliteCharger: { ...charger, hp: charger.hp + 2, orbDrop: charger.orbDrop + 2, radar: true, base: "charger", tier: 3 },
-      eliteHusk: { ...husk, hp: husk.hp + 2, split: husk.split + 2,
-        orbDrop: husk.orbDrop + 2, base: "husk", tier: 3 },
-      eliteAnvil: { ...anvil, hp: anvil.hp + 2, arc: anvil.arc + 2 * ARCSTEP,
-        orbDrop: anvil.orbDrop + 2, base: "anvil", tier: 3 },
-    };
-  }
-
-  // The spawn queue for a wave, in wave ticks (60 Hz). Wave 1 is the
-  // hand-tuned slice schedule, byte-identical to the original vertical
-  // slice; later waves split their dart count into packs of three, land every
-  // heavy alone, and INTERLEAVE the queues so a wave is a composition rather
-  // than "all the darts, then all the heavies" — difficulty here comes from
-  // what stands beside what, not from any single body. The interleave is a
-  // pure function of the counts, so a wave still deals identically every run.
-  function waveGroups(wave) {
-    if (wave === 1) {
-      return [
-        { count: 3, type: "dart", warnAt: 36, spawnAt: 126 },   // warn at 0.6 s, land at 2.1 s
-        { count: 2, type: "dart", warnAt: 810, spawnAt: 900 },  // second pack warns at 13.5 s, lands at 15 s
-      ];
-    }
-    const queues = { dart: [], harrier: [], radarHarrier: [], charger: [], radarCharger: [], husk: [], anvil: [] };
-    if (wave >= 10) {
-      // THE REPLACEMENT DEAL. From wave 10 the ladder upgrades bodies IN
-      // PLACE: the same body count per family as wave 9's terminal deal, with
-      // tier-1 bodies replaced by tier-2 and tier-3 bodies — never more
-      // bodies, because COUNT is the bandwidth cost (R3's law: 420 + 78 ×
-      // enemies kbit/s) and MIX is free. Dart packs become HOMOGENEOUS TYPED
-      // PACKS (packs of darts, then packs of radarDarts, then packs of
-      // eliteDarts — the sharper aim still arrives late); the member-0
-      // radar-stamp mechanism below stays the waves 2-9 deal and RETIRES
-      // here. Heavies keep dealing as count-1 singles; the tier-2/3 aimed
-      // heavies join the DEALLAST tail their radar parents always closed the
-      // wave on. Deterministic, and no rand() consumed.
-      for (const fam of ["dart", "harrier", "charger", "husk", "anvil"]) {
-        const row = tierRow(fam, wave);
-        for (let t = 0; t < 3; t++) {
-          const type = TIER_TYPES[fam][t];
-          if (fam === "dart") {
-            for (let left = row[t]; left > 0; left -= 3) {
-              queues.dart.push({ count: Math.min(3, left), type });
-            }
-          } else {
-            const q = t > 0 && (fam === "harrier" || fam === "charger")
-              ? "radar" + fam.charAt(0).toUpperCase() + fam.slice(1) : fam;
-            for (let i = 0; i < row[t]; i++) queues[q].push({ count: 1, type });
-          }
-        }
-      }
-    } else {
-      const n = countsFor(wave);
-      for (let left = n.darts; left > 0; left -= 3) queues.dart.push({ count: Math.min(3, left), type: "dart" });
-      for (let i = 0; i < n.harriers; i++) queues.harrier.push({ count: 1, type: "harrier" });
-      for (let i = 0; i < n.chargers; i++) queues.charger.push({ count: 1, type: "charger" });
-      for (let i = 0; i < n.husks; i++) queues.husk.push({ count: 1, type: "husk" });
-      for (let i = 0; i < n.anvils; i++) queues.anvil.push({ count: 1, type: "anvil" });
-      // the radar heavies land as singles like their parents; the radarDart is
-      // never its own group — the LAST packs each carry ONE, as member 0, so the
-      // body wearing the cyan ring leads a pack the player meets late in the
-      // wave. Deterministic, and no rand() consumed. This stamp path is the
-      // waves 2-9 deal EXACTLY as it always was — the ladder branch above
-      // never stamps, so those waves' committed group hashes never moved.
-      for (let i = 0; i < n.radarHarriers; i++) queues.radarHarrier.push({ count: 1, type: "radarHarrier" });
-      for (let i = 0; i < n.radarChargers; i++) queues.radarCharger.push({ count: 1, type: "radarCharger" });
-      for (let i = 0; i < Math.min(n.radarDarts, queues.dart.length); i++) {
-        queues.dart[queues.dart.length - 1 - i].radar = 1;
-      }
-    }
-    // round-robin over the ordinary types, one group per non-empty queue per
-    // pass. The total bounds the loop, so a queue running dry can never spin it.
-    const total = DEALFIRST.reduce((s, t) => s + queues[t].length, 0);
-    const groups = [];
-    for (let pass = 0; groups.length < total; pass++) {
-      for (const t of DEALFIRST) if (queues[t][pass]) groups.push(queues[t][pass]);
-    }
-    // ...then the radar tail closes the wave, alternating between the two
-    // heavies. Same round-robin, same determinism — a different queue set.
-    const tail = DEALLAST.reduce((s, t) => s + queues[t].length, 0);
-    for (let pass = 0; groups.length < total + tail; pass++) {
-      for (const t of DEALLAST) if (queues[t][pass]) groups.push(queues[t][pass]);
-    }
-    // the pitch bounds a wave's LENGTH as its group count grows: few groups
-    // keep today's exact 5 s spacing, while an 18-group late wave tightens to
-    // 2.5 s instead of running a minute and a half. The 90-tick warning and
-    // the 126-tick first-spawn offset are untouched.
-    const pitch = Math.max(150, Math.min(300, Math.round(1800 / groups.length)));
-    return groups.map((g, k) => ({ count: g.count, type: g.type, radar: g.radar, warnAt: 126 + pitch * k - 90, spawnAt: 126 + pitch * k }));
-  }
+  // ---- THE DEAL AND ITS TABLES ARE RETIRED (S3b lane 3, commit D4) -------
+  // `countsFor`, `TIER_LADDER`, `TIER_TYPES`, `tierRow`, `ROTATION`,
+  // `DEALFIRST`, `DEALLAST`, `ROSTER`, `ARCSTEP`, `statsFor` and `waveGroups`
+  // — the per-wave counts, the tier ladder for waves 10 and up, the roster
+  // literal, the 140-line stat table and the wave dealer itself.
+  //
+  // THE ROSTER LITERAL WAS TEXT-PINNED IN FIVE OTHER FILES and every one of
+  // those pins is re-cut in this commit rather than left to rot:
+  // test/node-golden.mjs's ROSTER-order leg and its registry row count,
+  // server/snapshot.test.mjs's ROTATION/ROSTER text extraction, and
+  // test/node-golden.mjs's `mulberry32` copy (which was extracted from this
+  // file and stays, because `mulberry32` stays).
+  //
+  // D9 REPLACED THE ROSTER and D8 replaced the DEAL. The successor plane's
+  // director runs ONE curated arc from `WAVES` in js/demo-kernel.js against a
+  // twenty-one-row `STATS` table, and its threat budget — D8's shared deal,
+  // scaling sub-linearly with PRESENT seats — LANDED AT PORT-S S4 commit D:
+  // `threat = 1 + 0.2 x (present - 1)`, which is D14's ~1.6x at four seats
+  // exactly. PRESENT is claimed-and-not-parked, pushed from `poseKernelSeats`
+  // as `!absent`, and read AT THE DEAL — which is where D8 relocated the
+  // presence gate this file's own dealer used to carry.
 
   // ---- encounter state ---------------------------------------------------
   // One seat's survival-and-wallet record. hull/hullMax/invuln/hitFlash are
@@ -883,7 +534,26 @@
              // through a GUARDED fold that costs zero bytes at these defaults —
              // see hashEncounter, and the pvpCd block it copies
              claimT: 0, absent: false,
-             owned: SHOP.map(() => 0), termSeq: 0 };
+             owned: SHOP.map(() => 0), termSeq: 0,
+             // ---- D37's MARKET HAND (PORT-S S7) ---------------------------
+             // `hand` is up to four CATALOG INDICES — the cards this seat was
+             // dealt at the last reward wave — and `bought` is a parallel 0/1
+             // per card. Both HASHED, through a guarded fold that costs zero
+             // bytes while the hand is empty (hashEncounter again, the pvpCd
+             // idiom the pair above already copies).
+             //
+             // THEY START EMPTY, and that is a ruling and not an oversight:
+             // the first hand is dealt at the FIRST CLEAR, so wave 1 is a pure
+             // flying wave with HULL PATCH the only purchasable row. Dealing at
+             // run start instead was MEASURED and costs all 46 checkpoints of
+             // 12 of the 13 committed traces plus the server's boot self-check.
+             //
+             // THE IDS ARE STORED RATHER THAN RE-DERIVED, which is what makes
+             // D37's *"a purchase marks its card and never rerolls the others"*
+             // true at all: a purchase can push a row OUT of the pool (a maxed
+             // row is not offered), so a hand re-derived after a sale would be
+             // a DIFFERENT hand.
+             hand: [], bought: [] };
   }
   const E = {
     state: "idle", // idle | warning | active | cleared | dead (every seat down
@@ -891,11 +561,42 @@
                    // quarter rule; open play cycles the first four forever)
     wave: 1,
     waveTick: 0,
-    groups: [],
-    stats: null,   // this wave's resolved statsFor object — startWave deals it
-    enemies: [],
-    missiles: [], // live seeker missiles — a projectile family the encounter owns
-                  // outright, wholly separate from G.bullets
+    loop: 0,       // THE ARC LOOP COUNTER — arc turns AND wipes since restart().
+                   // PRODUCTION'S OWN, and that is the whole point of it: the
+                   // kernel's `S.cycle` says the same thing, but it is unhashed
+                   // here, absent from the host seam and absent from the wire
+                   // (see the stallIdentity block below, which says so itself),
+                   // so a hashed hand keyed on it could not be reproduced by a
+                   // replay or by a client. `loop` is HASHED — under a guarded
+                   // zero-default fold, so a run that never turns and never
+                   // wipes folds zero bytes for it and every trace captured
+                   // before it existed still reproduces. Written in exactly
+                   // three places: applyKernelHud (the arc turn, watched as
+                   // E.wave FALLING), the wipe block, and restart(), which
+                   // zeroes it. Read by the market's deal key.
+    // ---- THE THREE ARRAYS ARE DELETED (S3b lane 3, commit D5) ------------
+    // `groups`, `enemies` and `missiles` — the wave SCHEDULE, the BODIES and
+    // the ORDNANCE. Commit D4 deleted every producer, every stepper and every
+    // reaper of all three and left the storage standing, because emptying a
+    // list and deleting it are different changes and they were owed different
+    // commits. This is the second one.
+    //
+    // THE PLAN'S OWN SENTENCE was *"the four arrays (bullets, enemies,
+    // missiles, orbs) become one registry-driven list"*. THREE OF THE FOUR ARE
+    // GONE rather than merged, which is the same end state reached from the
+    // other side: production fields TWO entity kinds now, `bolt` and `orb`,
+    // and js/engine.js's registry declares exactly those two under
+    // `KINDS.production`. What a body IS on this plane is the KERNEL's row,
+    // and this file reaches it through `EncounterHost.bodies()`.
+    //
+    // AND THE FOURTH IS NOT MERGED INTO THE SECOND, deliberately and with the
+    // reason stated rather than left to be re-derived: `G.bullets` lives in
+    // js/game.js and `E.orbs` here, they cross two different wire rows, two
+    // different PRES rings and two different hash folds, and R7 owns the
+    // codec that would give a merged row its encoding. A physical single list
+    // for two kinds with no shared consumer buys nothing and spends hazard 3
+    // — the 45 id-less synthetic pushes — for it. STATED FOR THE SEAT.
+    stats: null,   // this wave's resolved statsFor object — never written since D4
     orbs: [],
     seats: players.map(() => makeSeat()), // one record per seat, index = seat id;
                                           // restart() keeps it in step with players[]
@@ -904,6 +605,22 @@
     shopHover: -1,               // the shop-panel card under the pointer, or -1 — the ONE piece
                                  // of shop input state, read by the draw, the detail line and
                                  // the hover art alike, so they cannot disagree inside a frame
+    // ---- THE MARKET'S IDENTITY (PORT-S S7, D37) --------------------------
+    // WHICH deal the hands standing in E.seats belong to: the PHYSICAL wave
+    // whose clear dealt them, and the arc loop that wave sat in. `0` is NEVER
+    // DEALT — waves start at 1 — so a fresh run and a wiped room read the
+    // same, which is what a wipe is supposed to mean. The identity is the
+    // physical clear and NOT the derived reward wave, so a live ENCPERREWARD
+    // retune can neither re-deal a clear already dealt nor alias a later one
+    // onto it (S7-CX-01); `rewardWave` is the substream key and the due test.
+    //
+    // IT IS AN IDENTITY, NOT AN EDGE, and that is the whole design: `cleared`
+    // is RE-DERIVED every tick of the 480-tick break, so an edge-triggered
+    // deal would re-deal 480 times. The deal check compares the identity it
+    // WOULD deal against the one standing and does nothing when they match —
+    // idempotent by construction, demo-v4's `marketId` idea by spec.
+    marketWave: 0,
+    marketLoop: 0,
     wipePending: false,          // the deferred WIPE edge: the death that leaves NO seat
                                  // alive arms it — and so does the LEAVE that takes the
                                  // last standing seat (unseatSeat) — and encStep consumes
@@ -1020,6 +737,14 @@
   }
   function unseatSeat(s) {
     const S = E.seats[s];
+    // THE PARK IS CLEARED FIRST, AND UNCONDITIONALLY (S4-CX-1, the fix round).
+    // The guard below refuses an already-absent seat, and a PARKED seat is
+    // absent — so a grant revoked while parked used to leave `joinParked`
+    // standing and `releaseParkedJoiners` seated it anyway at the clear: a
+    // socketless seat, PRESENT in the next deal's budget, holding a slot no
+    // real joiner could take. Leaving is leaving on every route into this
+    // function, so the queue entry goes before the guard reads anything.
+    if (joinParked.length > s) joinParked[s] = false;
     if (!S || S.absent) return;
     const wasStanding = S.hull > 0; // read BEFORE the terminal write takes the hull
     vacateSeat(s);
@@ -1050,11 +775,81 @@
   // the grant down on the next tick and told the player they spectate.
   // Idempotent and absent-only: a live or already-waiting seat is untouched, so a
   // reclaim landing twice cannot extend a window or resurrect a flying ship.
-  function reseatSeat(s) {
+  // ---- D17: PARK UNTIL THE SETPIECE ENDS, THEN SEAT (S4, commit F) --------
+  // *"A joiner never lands inside a boss telegraph they did not see begin, and
+  // the director's threat budget never shifts mid-encounter."* Both halves are
+  // paid by the same wait: an unseated seat is NOT PRESENT, so a joiner that
+  // parks cannot move D14's budget until the deal that follows the break.
+  //
+  // THE MECHANISM THE POR NAMED DOES NOT EXIST. D17's row says it "reuses the
+  // shipped Route A mechanism (4 seats parked behind a presence-gated deal)",
+  // and that gate lived inside production's own `startWave` deal, which S3b
+  // commit D4 deleted. So the wait is rebuilt here and the PRESENCE half of it
+  // lives in the kernel's budget, which is where D8 relocated it.
+  //
+  // THE BOUNDARY IS THE CLEAR, and D21 is what makes that a boundary at all.
+  // The POR row says a parked joiner's wait "is bounded by play, not by a
+  // clock" — true only while the room CAN clear, which is why D21(a)'s stall
+  // surface and this release are the same mechanism seen from two sides. A room
+  // that cannot clear holds its joiners exactly as long as it holds its pilots,
+  // and the HUD says so.
+  //
+  // ---- WHY THE PARK LIST IS MODULE STATE ---------------------------------
+  // It is a fact about SOCKETS, not about the simulation: the only caller of
+  // `reseatSeat` is `server/server.js`'s grant, no browser reaches it, and no
+  // hash, snapshot or wire field carries it. `restart()` clears it, so a run
+  // cannot inherit the previous one's queue.
+  let joinParked = [];
+  function roomIsClear() {
+    // ONE derivation again — the kernel's own gate, through the host, which is
+    // the same call `foeCount()` and the HUD state map read. "Is this setpiece
+    // over" must not be two questions.
+    return typeof window !== "undefined" && window.EncounterHost
+      && window.EncounterHost.installed() && window.DemoKernel
+      && typeof window.DemoKernel.roomClear === "function"
+      ? window.DemoKernel.roomClear() : true;
+  }
+  function seatJoiner(s) {
     const S = E.seats[s];
     if (!S || !S.absent) return;
     S.absent = false;
     S.claimT = ECFG.player.claim;
+  }
+  function reseatSeat(s) {
+    const S = E.seats[s];
+    if (!S || !S.absent) return;
+    // MID-SETPIECE: the seat waits. It stays `absent` — on the card, on the
+    // wire and in the budget — until the room clears, and the release below
+    // deals it back with the same claim window a straight reseat would have.
+    //
+    // ...AND ONLY WHILE SOMEBODY IS FLYING. MEASURED, not anticipated: without
+    // this clause a joiner walking into a room where NO seat is alive parks
+    // against a setpiece nobody is fighting, and the wipe that follows deals a
+    // fresh wave 1 which is not clear either — so the wait never ends. Both of
+    // D17's stated reasons are about a room in play: there is no telegraph to
+    // protect a joiner from and no budget to shift when the field has nobody in
+    // it. `server/afk.test.mjs`'s "the promised click seats the pilot on a LIVE
+    // seat" is the leg that found it, and its own header calls that path THE
+    // BLOCKER.
+    if (!roomIsClear() && players.some((_, i) => seatAlive(i))) { joinParked[s] = true; return; }
+    joinParked[s] = false;
+    seatJoiner(s);
+  }
+  // ...and the release, called once per tick from `encStep` after the HUD map
+  // has read the kernel. A seat whose socket left while it was parked is
+  // skipped by `seatJoiner`'s own `absent` test on the way through — there is
+  // nothing here that can seat a player who is no longer there.
+  function releaseParkedJoiners() {
+    if (!joinParked.length) return 0;
+    if (E.state !== "cleared") return 0;
+    let n = 0;
+    for (let i = 0; i < joinParked.length; i++) {
+      if (!joinParked[i]) continue;
+      joinParked[i] = false;
+      const S = E.seats[i];
+      if (S && S.absent) { seatJoiner(i); n++; }
+    }
+    return n;
   }
   // PARKING (the drop-in round): a seat the fresh deal leaves with nobody
   // behind it. The same terminal shape as an AFK unseat — the ONE shared
@@ -1071,6 +866,14 @@
   // leave the schedule.
   function parkSeat(s) {
     vacateSeat(s);
+  }
+  // BOUND AND PARKED, as one readable state (S4-CX-1, the fix round). The two
+  // planes disagreed about what an absent seat means: to the sim a parked seat
+  // is a seat waiting for the clear, to `server.js`'s absent-seat sweep it was
+  // a seat whose player left. One published question settles it — the sweep
+  // asks, and skips the seats that answer yes.
+  function seatParked(s) {
+    return !!joinParked[s];
   }
   // the previous-tick ship position for seat s — see E.shipPrev's comment
   function prevOf(s) {
@@ -1108,6 +911,33 @@
   // (both files load in the page; drift fails the leg).
   const LIVE_SWEEP = { seek: 1, tele: 0, pulse: 0, lockon: 0, windup: 0,
                        dash: 0, tired: 0 };
+  // ---- THE REBATE'S ENEMY ARM RETIRES (PORT-S S3b lane 3, commit B) -------
+  // A RULING WITH A MEASUREMENT UNDER IT, not a scope cut. The successor
+  // plane's bodies do NOT join the rebate sweep, and the ring's enemy rows go
+  // empty when the old plane does. The PvP arm — the one R3 measured honest at
+  // n=470, d200 j20 — is untouched, and so is the ring itself.
+  //
+  // WHAT WAS MEASURED. The table above must equal js/net.js's ENEMY_POLICY
+  // `project` flags, and a browser leg pins the two. A kernel body has no
+  // `mode` at all: it carries one of thirty-six per-type STATE values, the
+  // wire has no row for its type (`ty` encodes -1 — the program's standing
+  // fact until R7's v11), and `wireMode(-1)` falls back to `"seek"`, which is
+  // the ONE policy row with `project: 1`. So the CLIENT would project every
+  // kernel body forward by the lead, while this table's lookup on an absent
+  // `mode` yields undefined and this sweep would REWIND it. The two halves
+  // would compensate in opposite directions at once — about 2x the lead — and
+  // that is precisely the double-compensation this table exists to prevent.
+  //
+  // AND THERE IS NO SURFACE TO SERVE. The rebate is lag compensation, which
+  // means it has a client on the other end of a wire; `?mp` is undeployable
+  // until R7 re-planes that wire, so an enemy arm re-aimed here would be a
+  // mechanism with no live consumer, measured against a policy nobody has
+  // written yet.
+  //
+  // SO IT IS R7's, and it arrives with the thing it depends on: the round that
+  // gives kernel types and states real wire rows is the round that can say
+  // which of them project. A lane that re-aims it before then is choosing that
+  // policy by accident.
   function recordPoseRow() {
     poseLog.push({
       t: simTick, // diagnostic stamp — the wave-boundary contiguity leg pins
@@ -1117,10 +947,16 @@
       // vx,vy ride every row (corrective pass 2): a live-class (projected)
       // body's rebated sweep reconstructs the PRESENTED pose from its era
       // pose and era velocity — the frozen-NOW form was an aim assist
-      enemies: E.enemies.map((e) => ({ id: e.id, x: e.x, y: e.y, r: e.r,
-                                       vx: e.vx, vy: e.vy,
-                                       live: LIVE_SWEEP[e.mode] ? 1 : 0 })),
-      missiles: E.missiles.map((m) => ({ id: m.id, x: m.x, y: m.y, r: m.r })),
+      // ---- THE TWO BODY ROWS ARE EMPTY LITERALS (S3b lane 3, commit D5) ---
+      // The arrays they mapped are DELETED. They are written as `[]` rather
+      // than dropped because the ROW'S SHAPE is a contract with every reader of
+      // the ring — `sweepRebateSegment` reads `row.enemies`, the derived-state
+      // leg pokes one in, and lane 2's own harness stages rows by hand. A key
+      // that vanishes turns each of those into a `TypeError`; a key that reads
+      // empty turns them into a loop that runs zero times, which is what the
+      // retirement actually did.
+      enemies: [],
+      missiles: [],
     });
     if (poseLog.length > REWIND_ROWS) poseLog.shift();
   }
@@ -1139,7 +975,9 @@
   // the sim. ("cleared" must not freeze anyway: encStep's early return
   // would never let E.waveTick advance past E.clearTick.)
   const frozen = () => E.state === "dead";
-  const queuedCount = () => E.groups.reduce((n, g) => n + (g.spawned ? 0 : g.count), 0);
+  // (`queuedCount` RETIRED at commit D5 — it summed the unspawned shares of
+  //  `E.groups`, production's wave schedule, which is deleted with the deal it
+  //  belonged to. Its one reader was the FOES readout; see there.)
   // Prices derive from the BUYING seat's own rank — two seats holding
   // different ranks read different prices for the same row. The seat
   // defaults to localSeat(), which is what every panel/label caller means:
@@ -1150,14 +988,54 @@
   // and a missing entry means rank 0 — never `undefined`. Both callers below
   // do arithmetic on this result, so an undefined here prints NaN prices.
   const rankAt = (i, seat) => { const S = E.seats[seat]; return S ? S.owned[i] | 0 : 0; };
+  // ---- D38's BUILD TOTAL (the SEVENTH AMENDMENT, S4 fix 10) ---------------
+  // *"If turned on it sums PRESENT seats' purchases."* Σ `rankAt(i, seat)` over
+  // the eight SHOP rows, for the seats that are CLAIMED AND NOT PARKED — the
+  // same sentence D14's budget counts by, and `absent` is production's own word
+  // for the second half of it (`parkSeat` and `unseatSeat` both reach it through
+  // `vacateSeat`; `reseatSeat` clears it). A parked seat's ranks do not count:
+  // nobody is flying them.
+  //
+  // COMPUTED HERE because the shop is this plane's and the kernel reads no
+  // production surface (the S3b-C rule). It crosses as ONE scalar, pushed by
+  // `poseKernelSeats` beside the presence flags and read by `bossHull` at the
+  // deal. A DEAD seat and a seat waiting on its claim click both count — the
+  // build is bought and the player is there; only an EMPTY seat is not.
+  const presentPurchases = () => {
+    let n = 0;
+    for (let s = 0; s < E.seats.length; s++) {
+      const S = E.seats[s];
+      if (!S || S.absent) continue;
+      for (let i = 0; i < SHOP.length; i++) n += rankAt(i, s);
+    }
+    return n;
+  };
   const shopCost = (i, seat = localSeat()) => SHOP[i].curve === "double" ? SHOP[i].base * Math.pow(2, rankAt(i, seat)) : SHOP[i].base;
   const shopMaxed = (i, seat = localSeat()) => SHOP[i].cap !== undefined && rankAt(i, seat) >= SHOP[i].cap;
   // What a row COSTS, as the player reads it. Both places that print a price —
   // the gutter card and the field hover panel — call this, so the two cannot
   // disagree: a row that says MAXED on its card must not say "64 XP" on the
   // panel naming that same card.
+  //   ...AND A SPENT CARD SAYS SO (PORT-S S8). A card the seat has already
+  // bought used to print the price of its NEXT rank — shopCost doubled at the
+  // sale — which is an invitation to a click the gate then refuses with
+  // `denied`. The card is dimmed (S7) and now it is also LABELLED.
+  //   THE ORDER IS THE RULE. MAXED comes first because it is the stronger
+  // fact: a card bought to its cap carries both bits, and "you cannot buy any
+  // more of this ever" outranks "you cannot buy this one again".
+  //   CATALOG IN, SLOT OUT. Every price derivation here is catalog-addressed
+  // and the spent bit is SLOT-addressed, so the hand is what bridges them —
+  // and it bridges unambiguously, because a hand cannot repeat a card
+  // (dealHand throws on a repeat; dealSeatHand splices from a pool).
+  const shopSpent = (i, seat) => {
+    const S = E.seats[seat];
+    if (!S || !S.hand) return false;
+    const k = S.hand.indexOf(i);
+    return k >= 0 && !!S.bought[k];
+  };
   const shopPriceLabel = (i, seat = localSeat()) =>
     shopMaxed(i, seat) ? "MAXED"
+    : shopSpent(i, seat) ? "SOLD"
     : (!SHOP[i].can || SHOP[i].can(seat)) ? shopCost(i, seat) + " XP"
     : "—";
 
@@ -1172,13 +1050,37 @@
   // still wins an exact tie. The class is SHIP and the mask is the default, so
   // D25's boundary applies here as it will to every later consumer — this
   // function is where "which B do I choose" stops having a second copy.
+  //
+  // THE POLICY IS DECLARED RATHER THAN DEFAULTED (PORT-S S3a). Every field
+  // below says something this call site is entitled to say, and the whole
+  // record is stated so a reader never has to work out which silence was a
+  // decision:
+  //   mask     SHIP, because D18's ruling is "nearest living SHIP" and the seat
+  //            roster is ships and nothing else. It admits exactly the set the
+  //            default admitted here, so the narrowing moves nothing today; it
+  //            just stops the seat pick from inheriting a rule about weapons.
+  //   metric   EUCLIDEAN, EXPLICITLY. Production's world has WALLS — clampWorld
+  //            is the whole boundary story and there is no seam to go round —
+  //            so the straight line IS this world's topology-aware distance.
+  //            That is a claim about THIS world, and after S3a the same
+  //            authority also serves a toroidal one, so it is stated here where
+  //            the world is known instead of being assumed inside the selector.
+  //   no priority, no exclusion: D18 declined both. Owner-ruled 2026-08-25 —
+  //            sticky aggro and a threat table were offered and refused, and
+  //            "positioning stays the whole game" is the reason. The commitment
+  //            window that does exist (e.aggroT) lives on the BODY, hashed,
+  //            never inside the selector.
+  const NEAREST_SEAT_POLICY = {
+    mask: Engine.CLASS.SHIP,
+    metric: Engine.METRIC.EUCLIDEAN,
+  };
   function nearestSeat(x, y) {
     const cand = [];
     for (let s = 0; s < players.length; s++) {
       const p = players[s].ship;
       cand.push({ cls: Engine.CLASS.SHIP, live: seatAlive(s), seat: s, x: p.x, y: p.y });
     }
-    const hit = Engine.acquire(x, y, cand);
+    const hit = Engine.acquire(x, y, cand, NEAREST_SEAT_POLICY);
     return hit === null ? -1 : hit.seat;
   }
   // Which player an entity acts against, from the asker's position: the
@@ -1194,7 +1096,10 @@
   const targetOf = (e) => (e.tgtSeat >= 0 && seatAlive(e.tgtSeat) ? players[e.tgtSeat] : null);
 
   function clampWorld(x, y, r) {
-    const m = (r || ECFG.enemy.r) + 1;
+    // SHIP_R is the default now — it was `ECFG.enemy.r`, the dart's radius,
+    // which went with the roster at commit D4. Every surviving caller passes
+    // SHIP_R explicitly, so the default is a floor rather than a live path.
+    const m = (r || SHIP_R) + 1;
     return { x: Math.max(m, Math.min(WW - m, x)), y: Math.max(m, Math.min(WH - m, y)) };
   }
 
@@ -1239,62 +1144,31 @@
     return Math.atan2(Math.sin(d), Math.cos(d));
   }
 
-  // Predicted-intercept aim for a radar body: advance the ship through the
-  // attack's fixed delay, then (for a real projectile) solve the intercept
-  // quadratic |rel + vel·t| = speed·t and take the smallest positive root.
-  // Falls back to the pure-pursuit time when no positive root exists (a
-  // faster-than-projectile or receding ship). Pure arithmetic on live state —
-  // no rand(), no clock — and clamped into the world so a lead can never
-  // point at a spot the ship cannot occupy.
-  function predictAim(e, delayTicks, projSpeed) {
-    const R = ECFG.radar;
-    // the latch tracks the body's CHOSEN target (e.tgtSeat); a caller without
-    // one — the __test hook hands in bare {x, y} probes — falls back to the
-    // nearest living ship, which is what a fresh body would have chosen
-    const tgt = (e.tgtSeat >= 0 && seatAlive(e.tgtSeat) ? players[e.tgtSeat] : null) ||
-                targetPlayer(e.x, e.y);
-    if (!tgt) return { a: e.face || 0, x: e.x, y: e.y }; // all dead — hold the bearing, never throw
-    let vx = tgt.vel.x, vy = tgt.vel.y;
-    if (Math.hypot(vx, vy) < R.deadband) { vx = 0; vy = 0; }
-    vx *= R.leadScale; vy *= R.leadScale;
-    let tx = tgt.ship.x + vx * delayTicks;
-    let ty = tgt.ship.y + vy * delayTicks;
-    if (projSpeed > 0 && (vx || vy)) {
-      const rx = tx - e.x, ry = ty - e.y;
-      const a = vx * vx + vy * vy - projSpeed * projSpeed;
-      const b = 2 * (rx * vx + ry * vy);
-      const c = rx * rx + ry * ry;
-      let t = -1;
-      if (Math.abs(a) < 1e-9) { if (b < 0) t = -c / b; }
-      else {
-        const disc = b * b - 4 * a * c;
-        if (disc >= 0) {
-          const sq = Math.sqrt(disc);
-          const t1 = (-b - sq) / (2 * a), t2 = (-b + sq) / (2 * a);
-          t = Math.min(t1, t2) > 0 ? Math.min(t1, t2) : Math.max(t1, t2);
-        }
-      }
-      if (!(t > 0)) t = Math.hypot(rx, ry) / projSpeed; // pure-pursuit fallback
-      tx += vx * t; ty += vy * t;
-    }
-    tx = Math.max(SHIP_R, Math.min(WW - SHIP_R, tx));
-    ty = Math.max(SHIP_R, Math.min(WH - SHIP_R, ty));
-    return { a: Math.atan2(ty - e.y, tx - e.x), x: tx, y: ty };
-  }
+  // (`predictAim` RETIRED at commit D4 — the RADAR LATCH's aim solver, which
+  // read `ECFG.radar` and led a shot against the body's chosen target. The
+  // radar tier went with the roster; the successor plane leads its own shots
+  // through `leadTarget` in js/demo-kernel.js.)
 
-  // ---- spawning ----------------------------------------------------------
-  // One anchor per group, dealt on an edge of a view-sized DEALING RECTANGLE
-  // centred on the target ship, spawnGap px outside it, clamped into the
-  // world and held off the player. The rectangle is FW×FH and world-clamped
-  // exactly as the camera clamp was, so edge-of-world spawn distances stay
-  // fair — but it is a dealing construct anchored on a SHIP, never the render
-  // camera: the sim deals the same spawns with no camera at all.
-  function rollAnchor(owner) {
-    const gap = ECFG.spawnGap;
-    // the wave's OWNER anchors the deal: the rectangle is that seat's own
-    // FW×FH view rect, world-clamped, so the group lands OFF-SCREEN FROM THE
-    // OWNER — the per-player-waves decision. With one seat this is the seat
-    // the old targetPlayer always answered, byte for byte.
+  // ---- THE RE-ENTRY ANCHOR (PORT-S S3b lane 3, commit D4) -----------------
+  // `rollAnchor` had TWO callers and only one of them was the enemy plane's.
+  // The other is `respawnSeat`, and its rule is production's own: A RETURNING
+  // PILOT IS DEALT OFF-SCREEN FROM ITS OWN WRECK, which is what stops a
+  // three-XP corpse run from being a refund. So the seat arm survives under
+  // its own name and the deal arm goes with the deal.
+  //
+  // TWO OF THE THREE NUMBERS IT READ WERE THE ENEMY PLANE'S and are inlined
+  // here at their retired values rather than left pointing at a deleted table:
+  // `ECFG.spawnGap` was 48 px outside the view rect and `ECFG.minPlayerDist`
+  // was the 90 px hold-off, both at commit C's x2.5 — 120 and 225. The third,
+  // `ECFG.enemy.jitter`, was the spawn scatter and has no meaning for a seat
+  // that is placed exactly; it is dropped, and the hold-off absorbs it.
+  //
+  // IT STILL DRAWS FROM `rand()`, in the same order, for the same reason it
+  // always did: `respawnSeat` is reached from `encStep`'s claim loop and the
+  // seeded stream's position is hashed state.
+  const REENTRY_GAP = 120;   // px outside the view rect — was ECFG.spawnGap x2.5
+  const REENTRY_HOLD = 225;  // px of hold-off from the nearest living ship — was minPlayerDist x2.5
+  function reentryAnchor(owner) {
     const s = players[owner >= 0 && players[owner] ? owner : 0].ship;
     const rx = Math.max(0, Math.min(WW - FW, s.x - FW / 2));
     const ry = Math.max(0, Math.min(WH - FH, s.y - FH / 2));
@@ -1302,108 +1176,36 @@
       const edge = Math.floor(rand() * 4);
       const t = rand();
       let x, y;
-      if (edge === 0) { x = rx - gap; y = ry + t * FH; }
-      else if (edge === 1) { x = rx + FW + gap; y = ry + t * FH; }
-      else if (edge === 2) { x = rx + t * FW; y = ry - gap; }
-      else { x = rx + t * FW; y = ry + FH + gap; }
-      const c = clampWorld(x, y);
+      if (edge === 0) { x = rx - REENTRY_GAP; y = ry + t * FH; }
+      else if (edge === 1) { x = rx + FW + REENTRY_GAP; y = ry + t * FH; }
+      else if (edge === 2) { x = rx + t * FW; y = ry - REENTRY_GAP; }
+      else { x = rx + t * FW; y = ry + FH + REENTRY_GAP; }
+      const c = clampWorld(x, y, SHIP_R);
       // a rectangle pinned against a world wall clamps this edge's candidate
       // back INSIDE it — reject it, another edge always has room
       const inRect = c.x > rx && c.x < rx + FW && c.y > ry && c.y < ry + FH;
       // the hold-off is against the NEAREST living ship: if the nearest one
-      // clears the ring, every ship does — "held off all living ships"
+      // clears the ring, every ship does
       const tgt = targetPlayer(c.x, c.y);
-      if (!inRect && (!tgt || Math.hypot(c.x - tgt.ship.x, c.y - tgt.ship.y) >= ECFG.minPlayerDist + ECFG.enemy.jitter)) return c;
+      if (!inRect && (!tgt || Math.hypot(c.x - tgt.ship.x, c.y - tgt.ship.y) >= REENTRY_HOLD)) return c;
     }
-    // no candidate — the owner's own position stands in
-    return clampWorld(s.x + ECFG.minPlayerDist + ECFG.enemy.jitter + ECFG.spawnGap, s.y);
+    // no candidate — the seat's own position stands in
+    return clampWorld(s.x + REENTRY_HOLD + REENTRY_GAP, s.y, SHIP_R);
   }
 
-  function rollGroupPoints(count, owner) {
-    const anchor = rollAnchor(owner === undefined ? 0 : owner);
-    const pts = [];
-    for (let i = 0; i < count; i++) {
-      const p = clampWorld(anchor.x + (rand() * 2 - 1) * ECFG.enemy.jitter,
-                           anchor.y + (rand() * 2 - 1) * ECFG.enemy.jitter);
-      pts.push(p);
-    }
-    return { anchor, pts };
-  }
-
-  // The ONE body constructor. spawnEnemy runs it after the scheduled push-out;
-  // the husk's split runs it directly, because a burst is not a spawn.
-  function makeBody(x, y, kind, i, vx, vy, owner) {
-    const st = E.stats[kind];
-    // the body's OPENING target: a wave-owned spawn aggros its wave's owner
-    // and holds it for the owner-lock window (the user's ≥2 s rule); an
-    // unowned body (shards, direct test spawns) takes the nearest living
-    // ship with no lock. All three aggro fields are HASHED simulation state.
-    const owned = owner !== undefined && owner >= 0 && seatAlive(owner);
-    const tgtSeat = owned ? owner : nearestSeat(x, y);
-    const tgt = tgtSeat >= 0 ? players[tgtSeat] : null; // the anvil opens facing its chosen target
-    E.enemies.push({
-      id: nextId(), // identity, not simulation state — the hash allow-list ignores it
-      x, y, vx: vx || 0, vy: vy || 0, r: st.r, hp: st.hp, type: kind,
-      tgtSeat,                             // the CHOSEN seat, or -1 with all dead
-      aggroT: owned ? ECFG.aggro.ownerLock : 0, // commitment ticks left on that choice
-      lastAtk: -1,                         // the most recent seat that damaged this body
-      stats: st,      // the resolved per-wave stats ride on the body — a live
-                      // enemy keeps them even after the wave clock moves on
-      orbDrop: st.orbDrop,
-      mode: "seek", // seek | tele | pulse (dart) — seek | windup | dash | tired
-                    // (charger) — seek | lockon (harrier); the shieldless drifters
-                    // and the shards never leave seek at all
-      cd: 30 + (i || 0) * 24, // staggered first attacks — the pack never sync-fires
-      t: 0,
-      // a body that TURNS instead of snapping (the anvil) must not open the
-      // fight facing +x while its shield is what the player has to read, so it
-      // is dealt already looking at the ship; everything else overwrites face
-      // on its first seek tick anyway and keeps the old 0
-      face: st.turnRate && tgt ? Math.atan2(tgt.ship.y - y, tgt.ship.x - x) : 0,
-      lockA: 0, flash: 0, pulseHit: false, dashHit: false,
-      predT: 0, // ticks left on a radar latch's ping at (predX, predY) — drawing only
-      contactCd: 0, // ticks left before this body can take contact damage again
-      contactTaken: false, // this body already paid a contact THIS tick — cleared in stepEnemy
-    });
-  }
-
-  function spawnEnemy(x, y, i, type, owner) {
-    // an unnamed or unknown type is a dart, which is what keeps every 3-arg
-    // call in the suites and in this file spawning exactly what it always did.
-    // Membership is tested against the ROSTER, never with a bare `E.stats[type]`
-    // read: that read walks Object.prototype, so "constructor", "toString" and
-    // "__proto__" would all answer truthy and stamp a body whose hp, r and
-    // steer are undefined — NaN coordinates on the next tick and a phantom kill
-    // on the one after. Production only ever passes a roster name; the __test
-    // hook is open to anything.
-    const kind = ROSTER.includes(type) ? type : "dart";
-    const st = E.stats[kind];
-    // never on a ship — push out to the minimum ring against EVERY living
-    // seat, ascending, so a spawn can land in no one's lap. With one seat
-    // this is exactly the old single push-out.
-    for (let s = 0; s < players.length; s++) {
-      if (!seatAlive(s)) continue;
-      const ship = players[s].ship;
-      let dx = x - ship.x;
-      let dy = y - ship.y;
-      let d = Math.hypot(dx, dy);
-      if (d < ECFG.minPlayerDist) {
-        if (d < 0.001) { dx = 1; dy = 0; d = 1; }
-        const c = clampWorld(ship.x + (dx / d) * ECFG.minPlayerDist,
-                             ship.y + (dy / d) * ECFG.minPlayerDist, st.r);
-        x = c.x;
-        y = c.y;
-      }
-    }
-    makeBody(x, y, kind, i, 0, 0, owner);
-  }
-
-  function spawnGroup(g) {
-    if (!g.points) g.points = rollGroupPoints(g.count, g.owner);
-    // a radar-stamped pack deals its variant as member 0 — the pack leader
-    // wearing the cyan ring is the first thing the pack shows
-    g.points.pts.forEach((p, i) => spawnEnemy(p.x, p.y, i, g.radar && i === 0 ? "radarDart" : g.type, g.owner));
-  }
+  // ---- THE SPAWN PLANE IS RETIRED (S3b lane 3, commit D4) ----------------
+  // `rollAnchor`, `rollGroupPoints`, `makeBody`, `spawnEnemy` and `spawnGroup`.
+  // Every one of them built a record for the seven-type roster D9 replaced —
+  // `makeBody` alone stamped its `stats` off `statsFor`, its `mode` off the
+  // seven-value vocabulary and its `arc`/`face` off the anvil's shield.
+  //
+  // WHERE THE GEOMETRY WENT, and it is not lost: the successor plane deals its
+  // own arrivals through PORTALS placed by its director's `formationPoints`
+  // and `spawnEnemy` in js/demo-kernel.js, off six NAMED RNG streams rather
+  // than production's one `rand`. `rollAnchor`'s own rule — never inside the
+  // camera rectangle, never closer than `minPlayerDist` to a pilot — is the
+  // one piece with no direct counterpart there, and D8's shared director is
+  // where that becomes a question again, at S4.
 
   // ---- combat ------------------------------------------------------------
   // hitPlayer takes a damage SOURCE again, and it is a DIFFERENT parameter
@@ -1605,6 +1407,15 @@
     S.xp = 0;
     S.score = 0;
     resetSeatUpgrades(seat);
+    // ...and the MARKET's bought bits, cleared HERE and not inside
+    // resetSeatUpgrades (D37, PORT-S S7). The ranks this line just took are
+    // gone, so every card in the hand is BUYABLE AGAIN and a shelf still marked
+    // spent would show the player something they can see and cannot use. THE
+    // IDS STAY: a death does not reroll — the same four cards are what the seat
+    // climbs back with, until the next clear deals it a new hand. The wipe and
+    // restart() take the ids as well, at their own sites, because those two are
+    // the events that end a run.
+    S.bought = S.bought.map(() => 0);
     S.hullMax = ECFG.player.hull;
     const c = clampWorld(players[seat].ship.x, players[seat].ship.y, ECFG.orb.r);
     for (let k = 0; k < PVPORBS; k++) {
@@ -1613,439 +1424,35 @@
     }
   }
 
-  // One mutual contact event — the single primitive every physical ship-body
-  // touch routes through (the generic overlap sweep and the charger's dash
-  // connect alike; the lance is a beam, not a body, and stays a bare
-  // hitPlayer). The two sides are gated INDEPENDENTLY: the player side keeps
-  // the i-frame rules inside hitPlayer, while the enemy side pays one bullet
-  // (BDMG) whenever its own contact cooldown has expired. That is deliberate —
-  // an i-framed ram still bites every body it sweeps through, which is the
-  // point of a melee tactic; CONTACTCD, not the gate structure, is the knob
-  // that paces it, and no caller may hang the PLAYER side off the body's
-  // cooldown — that would make an enemy-facing slider a hidden invulnerability.
-  // The enemy side is claimed per tick as well as per window: contactCd alone
-  // cannot mark the claim, because CONTACTCD is dialable to 0 and a 0 stamp is
-  // indistinguishable from "free", which would let a dash connect bill itself
-  // twice on one tick (stepEnemy's dash sweep, then resolveContacts).
-  // Returns whether the PLAYER took the hit, so the dash's one-hit-per-lunge
-  // flag keeps its exact old meaning.
-  function contactEvent(e, dmgToPlayer, seat) {
-    // BODY CONTACT: the enemy hull touching the ship. This is the ONE class
-    // D28 lets a burning pilot refuse, and the refusal happens inside
-    // hitPlayer where the grandfather lives.
-    const playerHit = hitPlayer(seat, dmgToPlayer, { kind: "ram", cls: Engine.CLASS.BODY });
-    if (e.contactCd <= 0 && !e.contactTaken) {
-      // a comet-mode touch is the comet's own weapon: COMETDMG instead of the
-      // one-bullet BDMG — and OVERLOAD makes a DRAINING comet bite harder, the
-      // rank's fraction paid out linearly as the pool empties. The cd/claim
-      // pacing is untouched: CONTACTCD still paces the windows, contactTaken
-      // still claims the tick. The ram bills COMETHIT, the other half of the
-      // knob hitPlayer's negation pays — 0 by default, so the comet is priced
-      // by TIME and not by work until someone drags that slider.
-      if (cometActive(seat)) {
-        const fury = 1 + COMETFURY * termsFor(seat).fury * (1 - energyFrac(seat)); // the RAMMING seat's own rank
-        Engine.applyEffect({ kind: "ram", target: e, tgtCls: Engine.CLASS.BODY,
-                             source: { cls: Engine.CLASS.SHIP, seat }, baseAmount: COMETDMG * fury });
-        energySpend(seat, COMETHIT);
-      } else {
-        Engine.applyEffect({ kind: "ram", target: e, tgtCls: Engine.CLASS.BODY,
-                             source: { cls: Engine.CLASS.SHIP, seat }, baseAmount: BDMG });
-      }
-      e.flash = 8; // the same hit feedback a bullet gives
-      // the two rates were welded together until now: the comet's bite rate is
-      // what prices COMETHIT and pays OVERLOAD, so it gets its own knob and a
-      // normal ram keeps CONTACTCD untouched. The stamps are read off the
-      // constants independently — moving one must never move the other.
-      e.contactCd = cometActive(seat) ? COMETCD : CONTACTCD;
-      e.contactTaken = true; // one contact per body per tick, at every slider value —
-                             // UNTOUCHED by the split, and it is what keeps a COMETCD of
-                             // 0 from billing a dash connect twice on one tick
-      // `e.lastAtk = seat` used to sit here. A ram is damage and the aggro
-      // switch still reads it at the next decision point — the CREDIT just
-      // moved into the funnel above, which now stamps it at the subtraction.
-      // Nothing between the two points reads it, so the move is invisible.
-      E.contactsDealt++;
-      // visual only — the burst sits on the body's surface facing the ship and
-      // rides game.js's own hash stream, never the sim's seeded rand().
-      // pl is the player who MADE the contact — never the enemy's chosen target
-      const pl = players[seat];
-      const cdx = e.x - pl.ship.x;
-      const cdy = e.y - pl.ship.y;
-      const cm = Math.hypot(cdx, cdy) || 1;
-      spawnImpactFx(e.x - (cdx / cm) * e.r, e.y - (cdy / cm) * e.r, cdx / cm, cdy / cm, "enemy");
-      // inside the claim block on purpose: the claim IS the damage edge, so a
-      // sustained overlap sounds once per CONTACTCD window, never per tick.
-      // The seat is the rammer's — the throttle keys it like fire's
-      emit("hit", e, undefined, seat);
-    }
-    return playerHit;
-  }
-
-  // The aggro decision, taken ONLY at a decision point (a seek-mode tick) —
-  // never mid-windup, mid-dash, mid-lock-on or mid-pulse, which is the whole
-  // telegraph-honesty rule: a planted attack keeps the line it showed.
-  // Rules, in order: a live committed target holds for its whole commitment
-  // window; then the most recent attacker (damage aggro) wins if alive; then
-  // the nearest living ship. Every actual switch opens a fresh commitment
-  // window, so alternating shots from two seats can never flip-flop a body
-  // faster than once per window. A dead target voids its commitment at once.
-  function retargetAtDecision(e) {
-    const curAlive = e.tgtSeat >= 0 && seatAlive(e.tgtSeat);
-    if (curAlive && e.aggroT > 0) return; // committed — hold, whatever happened
-    const atk = e.lastAtk >= 0 && seatAlive(e.lastAtk) ? e.lastAtk : -1;
-    const want = atk >= 0 ? atk : nearestSeat(e.x, e.y);
-    if (want !== e.tgtSeat) {
-      e.tgtSeat = want;
-      e.aggroT = want >= 0 ? ECFG.aggro.commit : 0;
-    }
-    e.lastAtk = -1; // the grievance is consumed at the decision, kept or not
-  }
-
-  function stepEnemy(e) {
-    const P = e.stats;       // stamped at spawn — never a mutated mid-wave global
-    const L = ECFG.lance;    // beam geometry — unchanged at every wave
-    const CH = ECFG.charger; // lunge geometry — likewise constant
-    if (e.flash > 0) e.flash--;
-    if (e.predT > 0) e.predT--; // the ping fades on the sim clock, like flash —
-                                // the draw path never mutates it
-    if (e.contactCd > 0) e.contactCd--;
-    if (e.aggroT > 0) e.aggroT--; // commitment is wall-tick time, telegraphs included
-    e.contactTaken = false; // a fresh tick — this body's contact is unclaimed again
-    if (e.mode === "seek") retargetAtDecision(e); // the ONE decision point
-    // the body's CHOSEN target — headings and ranges only; the delivery
-    // sweeps below take their own per-seat loops. With every seat down the
-    // body has no target: it separates, damps and never attacks or throws.
-    const tgt = targetOf(e);
-    const dx = tgt ? tgt.ship.x - e.x : 0;
-    const dy = tgt ? tgt.ship.y - e.y : 0;
-    const dist = tgt ? Math.hypot(dx, dy) || 0.001 : 0.001;
-    const ux = dx / dist;
-    const uy = dy / dist;
-    if (e.mode === "seek") {
-      let tx = 0;
-      let ty = 0;
-      if (tgt) {
-        const aim = Math.atan2(dy, dx);
-        // a body carrying a turnRate ROTATES toward the player at that rate — it
-        // is the one thing that makes a directional shield a skill check instead
-        // of a wall — and everything else snaps, exactly as it always has
-        e.face = P.turnRate ? e.face + Math.max(-P.turnRate, Math.min(P.turnRate, angDiff(aim, e.face))) : aim;
-        // hold the preferred ring: approach outside it, back off inside it
-        if (dist > P.prefer + P.band) { tx = ux * P.maxSpeed; ty = uy * P.maxSpeed; }
-        else if (dist < P.prefer - P.band) { tx = -ux * P.backSpeed; ty = -uy * P.backSpeed; }
-        // ...unless it has been FLANKED: a shielded body whose armored face has
-        // been walked around thrusts along its OWN heading, forward and away,
-        // instead of closing. It cannot escape a 2.0 px/tick ship, so this never
-        // denies the kill — it keeps the flank a moving problem and drags the
-        // fight across the field, into whatever else the wave dealt.
-        if (P.flee > 0 && dist < P.flee && Math.abs(angDiff(aim, e.face)) > P.arc) {
-          tx = Math.cos(e.face) * P.maxSpeed;
-          ty = Math.sin(e.face) * P.maxSpeed;
-        }
-      }
-      // separation — the pack crowds apart instead of stacking
-      for (const o of E.enemies) {
-        if (o === e || o.hp <= 0) continue;
-        const sx = e.x - o.x;
-        const sy = e.y - o.y;
-        const sd = Math.hypot(sx, sy) || 0.001;
-        if (sd < P.sepR) {
-          const w = (1 - sd / P.sepR) * P.maxSpeed;
-          tx += (sx / sd) * w;
-          ty += (sy / sd) * w;
-        }
-      }
-      // the cap is the FASTER of the two gaits, not the approach one: the
-      // harrier is the first body that retreats quicker than it closes, and a
-      // flat maxSpeed cap would silently delete exactly the behavior that makes
-      // it a kiter. Every body whose backSpeed is the slower of the two — dart
-      // and charger both — sees the identical number it always saw.
-      const cap = Math.max(P.maxSpeed, P.backSpeed);
-      const tm = Math.hypot(tx, ty);
-      if (tm > cap) { tx *= cap / tm; ty *= cap / tm; }
-      e.vx += (tx - e.vx) * P.steer;
-      e.vy += (ty - e.vy) * P.steer;
-      if (e.cd > 0) e.cd--;
-      // the range comes off the body's own stats — dart 130, harrier 200,
-      // charger 240 — and a type whose engage is 0 (the anvil, the husk, the
-      // shards) has no attack mode to enter at any distance
-      else if (tgt && P.engage > 0 && dist <= P.engage) {
-        // a radar variant behaves as its base archetype everywhere but the
-        // latch itself: the bearing points at the predicted intercept instead
-        // of the ship, computed ONCE, right here — never re-aimed during the
-        // telegraph, the same honesty every base attack keeps
-        const kin = P.base || e.type;
-        const latch = (delay, projSpeed) => {
-          if (P.radar) {
-            const pr = predictAim(e, delay, projSpeed);
-            e.lockA = pr.a;
-            e.face = pr.a;        // the nose shows the lead — one more honest tell
-            e.predX = pr.x; e.predY = pr.y; e.predT = 20; // the latch ping, drawing only
-          } else {
-            e.lockA = e.face;
-          }
-        };
-        if (kin === "charger") { // rested and in range — plant to lunge
-          e.mode = "windup";
-          e.t = CH.windup;
-          latch(CH.windup, CH.dashSpeed); // the dash line locks NOW, so the lunge
-          e.dashHit = false;              // can be dodged; the dash IS the projectile
-          // the tell starts the tick the line locks, so the sound and the
-          // dodge window begin together — same deal as the dart's charge
-          emit("windup", e);
-        } else if (kin === "harrier") { // standoff and rested — plant to launch
-          e.mode = "lockon";
-          e.t = ECFG.harrier.lockon;
-          latch(ECFG.harrier.lockon, ECFG.missile.speed); // the missile leaves on
-                                    // THIS bearing, not the live one
-          emit("lock", e); // a smaller sibling of windup — the
-                           // same family, a lighter body
-        } else { // in range and rested — plant and telegraph
-          e.mode = "tele";
-          e.t = L.telegraph;
-          latch(L.telegraph, 0); // the lance direction locks here, so it can be
-          e.pulseHit = false;    // dodged; the beam is instant at fire — no
-                                 // intercept term, just the delay
-          emit("charge", e);
-        }
-      }
-    } else if (e.mode === "tele") {
-      e.vx *= 0.8; // plant to fire — the telegraph stays honest
-      e.vy *= 0.8;
-      if (--e.t <= 0) { e.mode = "pulse"; e.t = ECFG.lance.pulse; emit("zap", e); }
-    } else if (e.mode === "pulse") {
-      e.vx *= 0.8;
-      e.vy *= 0.8;
-      if (!e.pulseHit) {
-        const bx = e.x + Math.cos(e.lockA) * L.len;
-        const by = e.y + Math.sin(e.lockA) * L.len;
-        const rr = L.halfWidth + SHIP_R;
-        // DELIVERY, not choice: the beam sweeps EVERY living ship, ascending
-        // seat order, whoever the body was chasing — and each ship's own
-        // travel is sampled too, so a top-slider-speed ship must not step
-        // across the beam between two ticks untouched. One hit per pulse.
-        for (let s = 0; s < players.length && !e.pulseHit; s++) {
-          if (!seatAlive(s)) continue;
-          const pl = players[s];
-          const pv = prevOf(s);
-          const n = Math.max(1, Math.ceil(Math.hypot(pl.ship.x - pv.x, pl.ship.y - pv.y) / rr));
-          for (let k = 1; k <= n; k++) {
-            const sx = pv.x + ((pl.ship.x - pv.x) * k) / n;
-            const sy = pv.y + ((pl.ship.y - pv.y) * k) / n;
-            if (segCircleHit(e.x, e.y, bx, by, sx, sy, rr)) {
-              // a BEAM, and a beam has no body — nothing can intercept it, so
-              // D26 makes this one of the families that hurt a burning pilot
-              if (hitPlayer(s, L.dmg, { kind: "beam", cls: Engine.CLASS.BODY })) e.pulseHit = true; // one hit per pulse
-              break;
-            }
-          }
-        }
-      }
-      if (--e.t <= 0) { e.mode = "seek"; e.cd = P.cooldown; } // per-wave lance cadence
-    } else if (e.mode === "lockon") {
-      e.vx *= 0.85; // plant while the launch reticle brightens along lockA — the
-      e.vy *= 0.85; // same sinking body the charger's windup shows
-      if (--e.t <= 0) {
-        launchMissile(e);   // exactly one missile per lock, on the latched angle
-        e.mode = "seek";
-        e.cd = P.cooldown;  // the cadence is paid whether or not the launch above
-                            // was refused by the missile cap, so a capped harrier
-                            // cannot spin the lock over and over
-      }
-    } else if (e.mode === "windup") {
-      e.vx *= 0.85; // plant — the body sinks to rest while the intent line brightens
-      e.vy *= 0.85;
-      if (--e.t <= 0) { e.mode = "dash"; e.t = CH.dashTicks; emit("dash", e); }
-    } else if (e.mode === "dash") {
-      // constant-speed lunge along the LOCKED line — reassigned every tick
-      // so no damping bleeds in; the wall clamp below can still end it
-      e.vx = Math.cos(e.lockA) * CH.dashSpeed;
-      e.vy = Math.sin(e.lockA) * CH.dashSpeed;
-      if (!e.dashHit) {
-        // ram contact sweeps BOTH motions, like the lance: the charger's own
-        // movement segment against sampled positions along the ship's travel
-        // — neither the dashing body nor a top-speed ship can tunnel through.
-        // Delivery, not choice: the lunge bites ANY living ship on its lane,
-        // ascending seat order, at most one registered hit per dash.
-        const nx = e.x + e.vx;
-        const ny = e.y + e.vy;
-        const rr = e.r + SHIP_R;
-        for (let s = 0; s < players.length && !e.dashHit; s++) {
-          if (!seatAlive(s)) continue;
-          const pl = players[s];
-          const pv = prevOf(s);
-          const n = Math.max(1, Math.ceil(Math.hypot(pl.ship.x - pv.x, pl.ship.y - pv.y) / rr));
-          for (let k = 1; k <= n; k++) {
-            const sx = pv.x + ((pl.ship.x - pv.x) * k) / n;
-            const sy = pv.y + ((pl.ship.y - pv.y) * k) / n;
-            if (segCircleHit(e.x, e.y, nx, ny, sx, sy, rr)) {
-              // both sides pay: the player at most once per dash (dashHit), the
-              // charger at most once per CONTACTCD window even though this sweep
-              // keeps re-firing while the player is graced
-              if (contactEvent(e, CH.dmg, s)) e.dashHit = true; // at most one hit per dash
-              break;
-            }
-          }
-        }
-      }
-      if (--e.t <= 0) { e.mode = "tired"; e.t = P.rest; }
-    } else if (e.mode === "tired") {
-      if (tgt) e.face = Math.atan2(dy, dx); // spent but watching — the body turns back
-      e.vx *= 0.92; // drift down from the lunge
-      e.vy *= 0.92;
-      if (--e.t <= 0) { e.mode = "seek"; e.cd = CH.cooldown; }
-    }
-    e.x += e.vx;
-    e.y += e.vy;
-    let walled = false;
-    if (e.x < e.r) { e.x = e.r; e.vx = 0; walled = true; }
-    else if (e.x > WW - e.r) { e.x = WW - e.r; e.vx = 0; walled = true; }
-    if (e.y < e.r) { e.y = e.r; e.vy = 0; walled = true; }
-    else if (e.y > WH - e.r) { e.y = WH - e.r; e.vy = 0; walled = true; }
-    if (walled && e.mode === "dash") { e.mode = "tired"; e.t = P.rest; } // the wall ends the lunge early
-  }
-
-  // ---- the seeker missile -------------------------------------------------
-  // The harrier's ordnance: a small, fast, lightly-homing body the encounter
-  // owns end to end. It consumes NO randomness at all — every term below is
-  // arithmetic on live state — so a wave replays identically whether a missile
-  // flew, hit, was shot down or fizzled.
+  // ---- contactEvent, retargetAtDecision AND stepEnemy ARE RETIRED --------
+  // PORT-S S3b lane 3, commit D4. Three of S3B-MAP's nine ENTANGLEMENTS, and
+  // the largest block in the plane.
   //
-  // The one constructor, shared by the launcher and the test hook, so a check
-  // drives production code rather than a fixture. Returns the missile, or null
-  // when the safety cap refuses it.
-  function spawnMissile(x, y, a, radar) {
-    const M = ECFG.missile;
-    if (E.missiles.length >= M.max) return null;
-    const m = {
-      id: nextId(), // same id space as the bodies — see nextId
-      x, y, vx: Math.cos(a) * M.speed, vy: Math.sin(a) * M.speed,
-      r: M.r, hp: M.hp,
-      age: 0,      // ticks flown — arm, decay and expiry all read this one clock
-      trail: [],   // recent positions, newest last; drawing only
-      radar: !!radar, // a radar launcher's round steers on ECFG.radar.missileTurn
-                      // instead of the base turn — everything else is identical
-    };
-    E.missiles.push(m);
-    return m;
-  }
+  // `stepEnemy` (216 lines) WAS THE AI: nine archetypes' movement, their
+  // telegraphs, their attacks and the seven-value `mode` machine they ran on.
+  // D9 replaced the roster it drove; the successor plane has twenty-one
+  // per-type state machines in js/demo-kernel.js, thirty-six states between
+  // them, and its own `committedToALine` telegraph-honesty gate that five
+  // vendor-cross rounds settled at lane 2.
+  //
+  // `retargetAtDecision` WAS THE AGGRO GRIEVANCE, and it is the one piece here
+  // that DID survive — PORTED, not deleted. Lane 2 carried it into the kernel
+  // whole: the hold on a committed body, the most-recent-attacker preference,
+  // the consume-at-the-decision rule and `AGGRO.commit`'s 90-tick window are
+  // all there, keyed off the same `lastAtk` the R5 funnel writes. What retires
+  // is this COPY of it.
+  //
+  // `contactEvent` was ONE PRIMITIVE FOR EVERY SHIP-BODY TOUCH and it split
+  // exactly where S3B-MAP said it would: its PLAYER side is `hitPlayer`, which
+  // the successor plane reaches through the host's HURT ROUTE (commit A) with
+  // a source record and every one of production's gates; its ENEMY side paid
+  // BDMG into an `E.enemies` record and has nothing left to pay.
 
-  // One missile leaves the rail on the angle the lockon LATCHED, not the live
-  // bearing — the same honesty the lance and the dash keep, so the telegraph
-  // can be sidestepped. It starts clear of the launcher's own hull so the
-  // launch frame draws it at the muzzle rather than inside the body.
-  function launchMissile(e) {
-    const M = ECFG.missile;
-    const off = e.r + M.r + 1;
-    const m = spawnMissile(e.x + Math.cos(e.lockA) * off, e.y + Math.sin(e.lockA) * off, e.lockA, e.stats.radar);
-    if (m) emit("launch", e); // positional, on the launcher — a
-                              // harrier firing from the screen's
-                              // edge is heard as well as seen
-  }
-
-  // Every way a missile ends, in one place: the list removal, the burst and
-  // the cue can never disagree about which happened. `kind` is the fx look —
-  // "enemy" for a detonation on the player, "wall" for the inert endings.
-  function endMissile(i, kind, seat) {
-    const m = E.missiles[i];
-    E.missiles.splice(i, 1);
-    const s = Math.hypot(m.vx, m.vy) || 1; // a UNIT heading, like every other fx
-    spawnImpactFx(m.x, m.y, m.vx / s, m.vy / s, kind); // call site — the burst sprays
-                                                       // back off the direction of travel
-    // one cue per ending, however it ended: the audio table's boom is defined
-    // as "a missile ending", and most endings are the player's own bullet
-    // killing it — which is why it sits on the shot bus and not on foe.
-    // `seat` is the seat the ending belongs to, handed in by the three call
-    // sites that have one in scope — the ship struck, the bullet's shooter, the
-    // rewound hit's source — so the cue rides THAT seat's throttle bucket like
-    // hit/clang/kill/blast/wall do (6418a4e), and four players no longer share
-    // one 70 ms bucket (boom's own gap in js/audio.js) for every missile that
-    // comes apart. The two WALL endings (the boundary and the fuse) have only
-    // the missile, hand undefined, and stay on the room-wide bucket — which in
-    // SOLO play means a shoot-down and a fuse-out inside the same 70 ms now
-    // both sound, one on the seat's bucket and one on the room's; intended,
-    // they are two different endings. The audio-order trace pins (tick, kind)
-    // only, so the seat moves no hash.
-    emit("boom", m, undefined, seat);
-  }
-
-  // Steer, then move, once per tick. The rotation form is provably
-  // speed-preserving and has no angle-wrap seam: homing changes HEADING only,
-  // which is what keeps a 4 px/tick body readable.
-  function stepMissiles() {
-    const M = ECFG.missile;
-    for (let i = E.missiles.length - 1; i >= 0; i--) {
-      const m = E.missiles[i];
-      const ttl = M.life - m.age;
-      // 0 while arming (a straight opening segment is what makes the bearing
-      // readable), full through the middle, then fading linearly to 0 over the
-      // last decay ticks — the fuse tell and the anti-orbit fix in one term
-      // the radar round's turn reads LIVE, so the tuner slider acts on missiles
-      // already in flight; at 0 it is a pure ballistic predictor
-      const turn = m.radar ? ECFG.radar.missileTurn : M.turn;
-      const lim = m.age < M.arm ? 0 : ttl < M.decay ? turn * (ttl / M.decay) : turn;
-      const tgt = targetPlayer(m.x, m.y); // homing tracks the nearest living ship —
-                                          // ordnance is delivery, it holds no grudge
-      if (lim > 0 && tgt) {
-        const dx = tgt.ship.x - m.x;
-        const dy = tgt.ship.y - m.y;
-        const cross = m.vx * dy - m.vy * dx; // sign: which way to turn
-        const dot = m.vx * dx + m.vy * dy;
-        const ang = Math.atan2(cross, dot);  // signed, already wrapped
-        const w = Math.max(-lim, Math.min(lim, ang));
-        const cs = Math.cos(w);
-        const sn = Math.sin(w);
-        const nvx = m.vx * cs - m.vy * sn;
-        const nvy = m.vx * sn + m.vy * cs;
-        m.vx = nvx;
-        m.vy = nvy;
-      }
-      m.trail.push({ x: m.x, y: m.y }); // sampled BEFORE the move, so the newest
-      if (m.trail.length > M.trail) m.trail.shift(); // sample is the last frame drawn
-      const nx = m.x + m.vx;
-      const ny = m.y + m.vy;
-      // swept contact against BOTH motions, exactly as the lance and the dash
-      // do it: neither a 4 px/tick missile nor a top-slider ship may tunnel
-      let struck = -1; // the seat the warhead met, or -1
-      const rr = m.r + SHIP_R;
-      // delivery over EVERY living ship, ascending — the first one on the
-      // missile's segment eats it, whoever it was homing on
-      for (let s = 0; s < players.length && struck < 0; s++) {
-        if (!seatAlive(s)) continue;
-        const pl = players[s];
-        const pv = prevOf(s);
-        const n = Math.max(1, Math.ceil(Math.hypot(pl.ship.x - pv.x, pl.ship.y - pv.y) / rr));
-        for (let k = 1; k <= n; k++) {
-          const sx = pv.x + ((pl.ship.x - pv.x) * k) / n;
-          const sy = pv.y + ((pl.ship.y - pv.y) * k) / n;
-          if (segCircleHit(m.x, m.y, nx, ny, sx, sy, rr)) { struck = s; break; }
-        }
-      }
-      if (struck >= 0) {
-        // the detonation is unconditional: an i-framed player still eats the
-        // missile, because the grace is the PLAYER's and never the ordnance's
-        hitPlayer(struck, M.dmg, { kind: "shot", cls: Engine.CLASS.ORDNANCE });
-        m.x = nx;
-        m.y = ny;
-        endMissile(i, "enemy", struck); // the ship it hit is the seat the boom belongs to
-        continue;
-      }
-      m.x = nx;
-      m.y = ny;
-      m.age++;
-      if (m.x < 0 || m.x > WW || m.y < 0 || m.y > WH) {
-        // dies AT the boundary, not wherever the overshoot landed, so the
-        // burst sits on the wall the player watched it hit
-        m.x = Math.max(0, Math.min(WW, m.x));
-        m.y = Math.max(0, Math.min(WH, m.y));
-        endMissile(i, "wall"); // no seat in scope — the boom takes the room bucket
-      } else if (m.age >= M.life) {
-        endMissile(i, "wall"); // a fuse running out is an inert thing coming
-                               // apart — the burst is what confirms a dodge;
-                               // no seat in scope here either, the room bucket
-      }
-    }
-  }
+  // ---- THE SEEKER PLANE IS RETIRED (S3b lane 3, commit D4) ---------------
+  // `spawnMissile`, `launchMissile`, `endMissile` and `stepMissiles` — the
+  // harrier's ordnance. The successor plane's ordnance is one flat
+  // `S.bullets` list discriminated by `team` and ~15 `kind` values, stepped in
+  // js/demo-kernel.js, and it has no counterpart to any of this.
 
   // ---- BLAST CHARGE — the splash a terminating player bullet leaves --------
   // Rank 0 is off and blastAt() is a no-op; every rank above it reaches
@@ -2086,23 +1493,43 @@
   function blastAt(x, y, direct, dmg, attacker, captured, directSeat) {
     const R = captured === undefined ? blastRadius(attacker) : captured;
     if (R <= 0) return;
-    for (const e of E.enemies) {
-      if (e === direct || e.hp <= 0) continue; // the direct hit already paid; a
-                                               // corpse is reapDead's, not ours
-      const dx = e.x - x;
-      const dy = e.y - y;
-      const reach = R + e.r; // the body CIRCLE has to intersect the blast, not its center
-      if (dx * dx + dy * dy <= reach * reach) {
-        // exactly one bullet-equivalent, exactly once per body per blast. The
-        // credit guard the funnel spells is THIS site's guard, verbatim:
-        // `attacker` is optional here (the wall and missile paths call in
-        // without one), which is why the door tests it at all.
-        Engine.applyEffect({ kind: "blast", target: e, tgtCls: Engine.CLASS.BODY,
-                             source: attacker === undefined ? undefined : { cls: Engine.CLASS.SHIP, seat: attacker },
-                             baseAmount: dmg });
-        e.flash = 8;
+    // ---- THE KERNEL ARM (PORT-S S3b lane 3, commit B) ---------------------
+    // The same splash, over the successor plane's bodies, with the same three
+    // rules: the DIRECT hit does not pay twice, a corpse is nobody's, and the
+    // body CIRCLE has to intersect the blast rather than its centre. `direct`
+    // is compared by reference and a kernel body reaches this function as
+    // `direct` from the sweep above, so the exclusion works across both planes
+    // with no second parameter.
+    //
+    // THE CAUSE IS `blast`, DECLARED. It reaches the kernel's door under that
+    // name, which consults the matrix's blast SHIP -> BODY row and — as
+    // production's own anvil precedent has always had it — bypasses that body's
+    // DIRECTIONAL shield, because a splash arrives from no direction. Under
+    // the door's old two-way cause test this would have been reclassified a
+    // `shot` and taken the bulwark's frontal reduction; commit B replaced that
+    // test with a declared table for exactly this arrival.
+    //
+    // A REACH IS NOT A HIT COUNT: `hitsDealt` is not incremented, on the enemy
+    // half's own rule directly below — a blast that paid a statistic per body
+    // in reach would make one shot read as five hits.
+    if (window.EncounterHost && attacker !== undefined) {
+      const kbodies = EncounterHost.bodies();
+      for (let i = 0; i < kbodies.length; i++) {
+        const ke = kbodies[i];
+        if (ke === direct || ke.dead || ke.hp <= 0) continue;
+        const kdx = ke.x - x;
+        const kdy = ke.y - y;
+        const kreach = R + ke.r;
+        if (kdx * kdx + kdy * kdy <= kreach * kreach) {
+          EncounterHost.damageKernelBody(ke, dmg, x, y, attacker, "blast");
+        }
       }
     }
+    // (the PRODUCTION-BODY splash arm is DELETED at commit D5 with the array it
+    //  walked. The successor plane's arm is directly above it, and it is the
+    //  one commit B wrote — same radius rule, same one-payment-per-body rule,
+    //  the credit through the R5 funnel. Two arms over one live list and one
+    //  empty one was the shape the deletion had left.)
     // ---- D1: the PvP splash ------------------------------------------------
     // The row is consulted HERE as a GATE — "is this pairing on at all" — and
     // the FACTOR is applied by the door, once. Reading the answer as a number
@@ -2219,6 +1646,152 @@
     }
   }
 
+  // ---- THE COMET'S BODY RAM, RESTORED (S3b lane 3, FIX 2 / S3BR-02) ------
+  // WHAT THE RETIREMENT LOST, precisely. The deleted `contactEvent` was ONE
+  // primitive for every ship-body touch and it paid BOTH sides. Its PLAYER side
+  // survives — the successor plane's own contact pass reaches production's
+  // `hitPlayer` through the host's HURT ROUTE, and D28's refusal correctly
+  // protects a burning pilot there. Its BODY side did not survive, so a burning
+  // ship passing through a body lost no hull AND dealt no damage: the shipped
+  // ATTACK had become a defensive invulnerability mode. The `comet-run` trace
+  // rams a dart dead; nothing in the tree could do that any more.
+  //
+  // THIS IS THE RAM AND ONLY THE RAM. The seat's scoping, recorded so a reader
+  // does not go looking for the other half: **the D26 AURA — the persistent
+  // area pass that kills hp-bearing ordnance — is S5's scheduled unit and is
+  // NOT built here.** `js/engine.js`'s `AURA_PASS_SLOT` block assigned that
+  // pass, with its ordering rule, to S5 — and S5 BUILT IT. The aura lives in
+  // js/demo-kernel.js's `resolveCometAura`, at the seam inside `updateBullets`,
+  // and this file's own contribution is the staged-child flush below
+  // `reapRamClaims`. The anchor here read `js/engine.js:1316-1325`, which is
+  // the ORB registry row; the pass-order law is the `AURA_PASS_SLOT` block.
+  // Both corrected at PORT-S S5 commit H.
+  //
+  // AND THE NON-BURNING ARM IS NOT RESTORED EITHER, deliberately. The old
+  // primitive also paid BDMG into the body on an ORDINARY ram. That was
+  // production's rule for production's own bodies; the successor plane's
+  // contact model is its own — the pilot pays, the body takes a 110-unit
+  // knockback and pays nothing — and D29's "ram free" is the ruling that
+  // settled it. Reinstating BDMG here would be re-deciding that behind S4.
+  //
+  // WHY IT LIVES IN PRODUCTION AND NOT IN THE KERNEL'S CONTACT BLOCK. The
+  // comet is production's ability: its arm state, its OVERLOAD rank, its energy
+  // pool and its `COMETDMG`/`COMETFURY`/`COMETHIT` knobs are all on this side.
+  // Putting the test in the kernel would mean exporting four production
+  // concepts across the seam so the kernel could re-derive an answer production
+  // already has. This pass is `resolvePvpRams`'s twin in every respect and sits
+  // beside it: the same relative-frame sweep, the same `E.pvpCd` pacing, the
+  // same fury formula, the same `COMETHIT` billing.
+  //
+  // IT GOES THROUGH THE ONE DOOR. `EncounterHost.damageKernelBody` is the only
+  // way this file may hurt a successor body (commit B), and the seat rides it
+  // as the credit — so `lastAtk`, lane 2's aggro grievance and the kill cue all
+  // read a comet kill exactly as they read a bullet kill. A direct
+  // `Engine.applyEffect` here would be the second authority commit B's own
+  // block refuses.
+  //
+  // AND IT SITS INSIDE THE DEATH WINDOW, before the bullet pass — which is the
+  // keeps-half order S3B-MAP names: "a ram kill still lands before the bullet
+  // pass". A body rammed dead is marked here and reaped at the flush.
+  function resolveCometBodyRams() {
+    const KH = typeof window !== "undefined" && window.EncounterHost
+      && window.EncounterHost.installed() ? window.EncounterHost : null;
+    if (!KH) return;
+    const bodies = KH.bodies();
+    if (!bodies.length) return;
+    const cd = E.pvpCd; // expired by resolvePvpRams above, on the same tick
+    // ---- THE CLAIM IS THE BODY'S (FIX 14 / the final review's HIGH) --------
+    // FIX 2 keyed the window `a + ":b" + id` — one claim PER ATTACKER per body.
+    // That is not the contract the retirement is restoring. The deleted
+    // `contactEvent` stamped `e.contactCd` and `e.contactTaken` ON THE BODY, so
+    // ONE claim covered the body however many seats were burning, and the
+    // measured cost of the per-attacker shape was exact: two seats billed one
+    // body in one window for damage 6 against a contract of 3, with
+    // `contactsDealt` moving twice.
+    //
+    // SO THE KEY IS THE BODY ALONE — `"b" + e.id` — and the loops invert with
+    // it: BODIES OUTER, SEATS INNER, ascending. The nesting is the claim rule
+    // written as control flow rather than asserted beside it: the window is
+    // read once per body, the first seat that lands takes it, and the `break`
+    // is what "one claim per window regardless of how many seats burn" means.
+    // ASCENDING SEAT ORDER is the tiebreaker, which is the pinned order every
+    // per-seat walk in this file already keeps.
+    //
+    // AND IT SHARES `E.pvpCd` RATHER THAN OPENING A SECOND STORE. That store is
+    // hashed, guarded (zero bytes when empty), expired by one loop and cleared
+    // by restart and by the wipe; a parallel store would need all five of those
+    // again and would be a second answer to "is this window open". `"b7"` is a
+    // key no `a:v` seat pair can spell.
+    //
+    // WHY NOT A FIELD ON THE BODY, which is what the retired plane had: a
+    // kernel body is EVERY-OWN-KEY serialized, so `e.contactCd` on a successor
+    // body re-keys `tests/fixtures/demo-bounded-reference` — S3a's STOP class,
+    // and the same rule the pose-driven flag and FIX 1's death mark both obey.
+    // The claim therefore lives on PRODUCTION'S side and is made to DIE WITH
+    // THE BODY by `reapRamClaims` below, which is the half a bare key would
+    // have lost.
+    for (let i = 0; i < bodies.length; i++) {
+      const e = bodies[i];
+      if (e.dead || !(e.hp > 0)) continue;
+      const key = "b" + e.id;
+      if (cd[key]) continue; // the body's window is open — no seat may bill it
+      for (let a = 0; a < players.length; a++) {
+        if (!cometActive(a) || !seatAlive(a)) continue;
+        const pa = prevOf(a);
+        const sa = players[a].ship;
+        // THE RELATIVE FRAME, exactly as the PvP ram uses it and for the same
+        // measured reason: an attacker-only sweep misses outright once both
+        // parties are fast. `px`/`py` are the body's PREVIOUS tick pose — the
+        // kernel writes them before it integrates, which is the property the
+        // pose bridge's own leg pins.
+        const ex = Number.isFinite(e.px) ? e.px : e.x;
+        const ey = Number.isFinite(e.py) ? e.py : e.y;
+        if (!segCircleHit(pa.x - ex, pa.y - ey, sa.x - e.x, sa.y - e.y,
+                          0, 0, SHIP_R + (e.r || 0))) continue;
+        // the RAMMING seat's own rank, the enemy side's exact OVERLOAD formula
+        const fury = 1 + COMETFURY * termsFor(a).fury * (1 - energyFrac(a));
+        if (KH.damageKernelBody(e, COMETDMG * fury, sa.x, sa.y, a, "ram")) {
+          energySpend(a, COMETHIT); // the ram half of the knob, as contactEvent billed it
+          E.contactsDealt++;        // the counter the retired primitive moved
+          if (COMETCD > 0) cd[key] = COMETCD;
+          break;                    // the body is claimed — see the block above
+        }
+      }
+    }
+  }
+
+  // ---- THE CLAIM DIES WITH THE BODY (FIX 14) -------------------------------
+  // The retired contract's second half, and the one a bare key cannot keep on
+  // its own: `e.contactCd` lived ON the body, so a reaped body took its window
+  // with it. A key in `E.pvpCd` does not — it would sit in HASHED state for the
+  // rest of the window describing a body nobody can touch, and a fresh body
+  // that reused the id would inherit a window it never earned.
+  //
+  // IT RUNS IMMEDIATELY AFTER THE DEATH FLUSH, which is where bodies actually
+  // die now (FIX 1). "The field dies with the reaped body" is then true in the
+  // same tick and not one tick later, which is what makes it the same contract
+  // rather than an approximation of it.
+  //
+  // ONLY `b`-PREFIXED KEYS ARE WALKED. The seat-pair windows in the same store
+  // belong to `resolvePvpRams` and are paced by ships, which do not get reaped.
+  function reapRamClaims() {
+    const cd = E.pvpCd;
+    let live = null;
+    for (const k in cd) {
+      if (k.charCodeAt(0) !== 98 /* 'b' */) continue;
+      if (live === null) {
+        live = new Set();
+        const KH = typeof window !== "undefined" && window.EncounterHost
+          && window.EncounterHost.installed() ? window.EncounterHost : null;
+        if (KH) {
+          const bs = KH.bodies();
+          for (let i = 0; i < bs.length; i++) if (!bs[i].dead && bs[i].hp > 0) live.add(bs[i].id);
+        }
+      }
+      if (!live.has(+k.slice(1))) delete cd[k];
+    }
+  }
+
   // Bullets arbitrate against enemies, missiles AND other players' ships in
   // ONE first-along-the-path pass. Several passes could each hand the same
   // bullet a target and bill it twice; one pass means the NEARER thing always
@@ -2233,19 +1806,46 @@
                        // the legacy "player" string reads as seat 0 (bulletSeat)
       if (shooter < 0) continue;
       let bestT = -1;
-      let hit = null;   // the enemy body, when a body is nearest
-      let mi = -1;      // ...or the missile's index, when ordnance is
-      let vs = -1;      // ...or the VICTIM SEAT, when another player's hull is
-      for (const e of E.enemies) {
-        if (e.hp <= 0) continue;
-        const t = segCircleEntryT(b.px, b.py, b.x, b.y, e.x, e.y, e.r + b.r);
-        if (t >= 0 && (bestT < 0 || t < bestT)) { bestT = t; hit = e; mi = -1; vs = -1; }
+      // (`hit`, the PRODUCTION-BODY winner, is deleted at commit D5 with the
+      //  array it was drawn from. Two winner classes are left.)
+      let vs = -1;      // ...the VICTIM SEAT, when another player's hull is
+      let kb = null;    // ...or the KERNEL BODY, when the successor plane's is
+      // ---- THE KERNEL ARM, FIRST IN THE ORDER (PORT-S S3b lane 3, commit B)
+      // The successor plane's bodies join the SAME running `bestT` minimum, so
+      // a round is still consumed exactly once whichever family it stopped on.
+      //
+      // FIRST, AND THE POSITION IS THE WHOLE OF WHAT IT DECIDES. The classes
+      // join under a strict `<`, so the tie order IS the test order, and the
+      // pinned rule this file states two screens up is that "a ship LOSES an
+      // exact tie against either" body class. Testing the kernel arm LAST would
+      // hold that rule today and INVERT it the day the old plane retires, when
+      // ships would start winning exact ties against the only bodies left.
+      // Testing it first keeps one rule across the retirement, and it can cost
+      // nothing in between: an exact tie between the two planes needs both to
+      // be non-empty, which happens on no surface in this tree.
+      //
+      // NO ARC BRANCH. The frontal-shield block below reads `stats.arc` and
+      // `face`, which are the OLD roster's shield. A kernel body has its own —
+      // the bulwark's frontal 76 %, the minelayer's 55 %, the station's five
+      // weak points — applied INSIDE its own damage door on the `shot` cause.
+      // Two shields, one owner each, and neither file re-implements the other's.
+      const kbodies = window.EncounterHost ? EncounterHost.bodies() : null;
+      if (kbodies) {
+        for (let i = 0; i < kbodies.length; i++) {
+          const ke = kbodies[i];
+          if (ke.dead || ke.hp <= 0) continue;
+          const t = segCircleEntryT(b.px, b.py, b.x, b.y, ke.x, ke.y, ke.r + b.r);
+          if (t >= 0 && (bestT < 0 || t < bestT)) { bestT = t; kb = ke; vs = -1; }
+        }
       }
-      for (let i = 0; i < E.missiles.length; i++) {
-        const m = E.missiles[i];
-        const t = segCircleEntryT(b.px, b.py, b.x, b.y, m.x, m.y, m.r + b.r);
-        if (t >= 0 && (bestT < 0 || t < bestT)) { bestT = t; hit = null; mi = i; vs = -1; }
-      }
+      // (the PRODUCTION-BODY sweep arm is DELETED at commit D5 with the array
+      //  it walked. `hit` — the production-body winner — can no longer be set
+      //  and every branch that reads it is dropped with it; `kb`, the kernel
+      //  body, is the only body class a round can win against now.)
+      // (the ORDNANCE class is RETIRED — commit D4. The seeker plane went with
+      // the harrier that fired it; `E.missiles` is permanently empty and the
+      // successor plane's enemy ordnance has no wire representation until R7,
+      // so there is nothing here for a round to intercept.)
       // ...and the PvP class. A seat never shoots itself (v !== shooter), and
       // an UNOWNED bullet reaches no ship at all — the shooter < 0 continue
       // above already dropped it, so no unattributable round can take a hull.
@@ -2253,7 +1853,34 @@
         if (v === shooter || !seatAlive(v)) continue;
         const sh = players[v].ship;
         const t = segCircleEntryT(b.px, b.py, b.x, b.y, sh.x, sh.y, SHIP_R + b.r);
-        if (t >= 0 && (bestT < 0 || t < bestT)) { bestT = t; hit = null; mi = -1; vs = v; }
+        if (t >= 0 && (bestT < 0 || t < bestT)) { bestT = t; vs = v; kb = null; }
+      }
+      if (kb) {
+        // THE SUCCESSOR PLANE'S BODY TOOK IT. The block mirrors the old plane's
+        // below, member for member, and every difference is named:
+        //   - the damage goes through the HOST's one door rather than through
+        //     Engine.applyEffect here, because the credit that door writes is
+        //     the kernel's `lastAtk` and this file may not reach into it. The
+        //     funnel is the same funnel — the door calls it — so lane 2's aggro
+        //     grievance and kill cue work unmodified and unaware.
+        //   - `hit.flash = 8` has no counterpart: the kernel's own door sets
+        //     its own hit tint (`e.hit`), which is that plane's spelling.
+        //   - the `hit` cue is emitted against the IMPACT POINT rather than the
+        //     body, because production's cue payload is a position and a kernel
+        //     body is not one of this file's records.
+        //   - the KILL cue is NOT emitted here. The kernel raises its own, on
+        //     its sink, with its own crediting seat — one kill, one cue, and
+        //     `reapDead`'s rule that the reap owns the canonical kill sound is
+        //     the same rule seen from the other plane.
+        const bm = Math.hypot(b.vx, b.vy) || 1;
+        const ix = b.px + (b.x - b.px) * bestT;
+        const iy = b.py + (b.y - b.py) * bestT;
+        b.dead = true; // consumed exactly once — the game sweep removes it
+        if (EncounterHost.damageKernelBody(kb, b.dmg, ix, iy, shooter, "shot")) E.hitsDealt++;
+        spawnImpactFx(ix, iy, b.vx / bm, b.vy / bm, "enemy");
+        emit("hit", { x: ix, y: iy }, undefined, shooter);
+        blastAt(ix, iy, kb, b.dmg, shooter, b.blastR);
+        continue;
       }
       if (vs >= 0) {
         // The round struck a body. It is CONSUMED whatever the gate decided —
@@ -2281,65 +1908,22 @@
         blastAt(ix, iy, null, b.dmg, shooter, b.blastR, vs);
         continue;
       }
-      if (mi >= 0) {
-        const bx = b.px + (b.x - b.px) * bestT;
-        const by = b.py + (b.y - b.py) * bestT;
-        b.dead = true;   // consumed exactly once, same as a body hit
-        E.missilesShot++; // not a kill: no orb, no XP, no entry in E.kills
-        endMissile(mi, "enemy", shooter); // the shooter's seat carries the boom
-        // the file's standing rule — every player bullet that TERMINATES pays
-        // its splash where it stopped, bodies and walls alike — so an
-        // interception is not quietly the one shot that forfeits the upgrade.
-        // null, because the thing the bullet paid for was not an enemy body;
-        // blastAt itself never reaches ordnance, so no missile is ever swept
-        // out of the air by a splash.
-        blastAt(bx, by, null, b.dmg, shooter, b.blastR);
-        continue;
-      }
-      if (hit) {
-        const bm = Math.hypot(b.vx, b.vy) || 1; // visual only — the burst rides game.js's own hash stream
-        const ix = b.px + (b.x - b.px) * bestT;
-        const iy = b.py + (b.y - b.py) * bestT;
-        // The anvil's shield, and the whole of it: a bullet whose swept ENTRY
-        // POINT lands inside the frontal arc is consumed with no damage. The
-        // test reads the same entry parameter the spark is drawn at, so the
-        // block and the spark can never disagree about where the bullet
-        // stopped. Three deliberate asymmetries live here: a blocked bullet
-        // still DIES (and sparks with the wall kind, so the clang reads as an
-        // inert thing struck, not as a hit), it pays no hitsDealt — nothing was
-        // hit — and its splash still goes off for every OTHER body in reach,
-        // because blastAt applies damage at a POINT rather than along a path.
-        // The shielded body itself is excluded from that splash, and it is the
-        // one place this file does not simply follow "a terminating bullet
-        // splashes where it stopped": the impact point sits 13 px off the
-        // anvil's centre and BLASTR alone is 18, so passing null here would let
-        // an 8 XP purchase deal FULL damage through the shield on every blocked
-        // round — the archetype would evaporate at rank 1. BLAST CHARGE still
-        // answers this body, in the honest way: kill anything near it, or bury
-        // a shot in the wall behind it, and the splash washes over its back.
-        if (hit.stats.arc > 0 && Math.abs(angDiff(Math.atan2(iy - hit.y, ix - hit.x), hit.face)) <= hit.stats.arc) {
-          b.dead = true;
-          spawnImpactFx(ix, iy, b.vx / bm, b.vy / bm, "wall");
-          emit("clang", hit, undefined, shooter); // pitched and short, obviously not
-                              // the hit click — the shield is
-                              // learnable by ear in one volley
-          blastAt(ix, iy, hit, b.dmg, shooter, b.blastR); // hit, not null: everything else in reach
-                                       // pays, the body that stopped the round does not
-          continue;
-        }
-        // the first body along the path takes the hit. `shooter` is >= 0 here
-        // by the `if (shooter < 0) continue;` at the top of this loop, so the
-        // funnel's guarded credit is this site's unconditional one, exactly.
-        Engine.applyEffect({ kind: "shot", target: hit, tgtCls: Engine.CLASS.BODY,
-                             source: { cls: Engine.CLASS.SHIP, seat: shooter }, baseAmount: b.dmg });
-        hit.flash = 8;
-        b.dead = true; // consumed exactly once — the game sweep removes it
-        E.hitsDealt++;
-        spawnImpactFx(ix, iy, b.vx / bm, b.vy / bm, "enemy");
-        emit("hit", hit, undefined, shooter); // the landing, not the kill —
-                          // reapDead owns the one canonical kill sound
-        blastAt(ix, iy, hit, b.dmg, shooter, b.blastR); // the splash lands where the bullet stopped
-      }
+      // (the interception branch is RETIRED with the seeker plane — commit D4.)
+      // ---- AND THE PRODUCTION-BODY WINNER'S BRANCH IS DELETED (commit D5) ---
+      // Forty lines: the ANVIL'S SHIELD (the frontal-arc block, its `clang`,
+      // its own excluded splash), the funnel's body payment, `hit.flash`, the
+      // `hit` cue and the splash. Every line read a ROSTER body's own fields —
+      // `stats.arc`, `face`, `flash` — and the array that held them is deleted.
+      //
+      // WHERE EACH PIECE WENT, because a shield is a rule and not a draw:
+      // the successor plane's own frontal reduction is the BULWARK'S, applied
+      // by `Engine.applyEffect` at the door and measured in demo-host LEG 9(e)
+      // — a `shot` head-on takes it, a `blast` arrives from no direction and
+      // lands whole. Its payment, its hit tint and its cues are the kernel's
+      // own `damageBody` door, which commit B pointed this file's rounds at.
+      // The one thing with no counterpart is the anvil's `clang`: the kernel
+      // spells a blocked round in its own vocabulary, and R7 is the round that
+      // gives those cues wire rows.
     }
   }
 
@@ -2429,28 +2013,22 @@
   function sweepRebateSegment(b, age, dTotal, pvpTicks, shooter) {
     const row = rowForAge(age);
     if (!row) return; // before the match's first settled row nothing existed
-    const cands = []; // { t, kind (0 enemy | 1 missile | 2 ship), id/seat }
-    for (const re of row.enemies) {
-      let t;
-      if (re.live) {
-        if (!findEnemy(re.id)) continue; // a live-sweep body resolves before it sweeps
-        // the presented pose: era pose led by the era velocity over the
-        // whole rebate window, clamped into the world exactly as the
-        // client's projection clamps (presentBody's wall rule)
-        let ex = re.x + (re.vx || 0) * dTotal;
-        let ey = re.y + (re.vy || 0) * dTotal;
-        ex = Math.max(re.r, Math.min(WW - re.r, ex));
-        ey = Math.max(re.r, Math.min(WH - re.r, ey));
-        t = segCircleEntryT(b.px, b.py, b.x, b.y, ex, ey, re.r + b.r);
-      } else {
-        t = segCircleEntryT(b.px, b.py, b.x, b.y, re.x, re.y, re.r + b.r);
-      }
-      if (t >= 0) cands.push({ t, kind: 0, id: re.id });
-    }
-    for (const rm of row.missiles) {
-      const t = segCircleEntryT(b.px, b.py, b.x, b.y, rm.x, rm.y, rm.r + b.r);
-      if (t >= 0) cands.push({ t, kind: 1, id: rm.id });
-    }
+    const cands = []; // { t, kind (2 ship), seat } — see the two retired arms
+    // ---- THE ENEMY AND ORDNANCE ARMS ARE RETIRED (S3b lane 3, commit D4) -
+    // Commit B ruled the rebate's ENEMY arm retired, with the measurement
+    // written at `LIVE_SWEEP`: a successor-plane body carries no wire `mode`,
+    // so `wireMode(-1)` falls back to `"seek"` — the ONE policy row with
+    // `project: 1` — and the client would PROJECT every body forward while
+    // this sweep REWOUND it, compensating in opposite directions by about
+    // twice the lead. That is exactly the double-compensation `LIVE_SWEEP`
+    // exists to prevent, and R7 is the round that gives those types and states
+    // real wire rows and can therefore say which of them project.
+    //   The ORDNANCE arm went with the seeker plane at this commit.
+    //   THE SHIP ARM BELOW IS UNTOUCHED. It is the one R3 measured honest at
+    // n=470, d200 j20, and it is the only lag compensation this file now does.
+    // The RING ITSELF STAYS, and its enemy rows go empty rather than absent —
+    // `recordPoseRow` still writes an `enemies: []` per row, so a reader of a
+    // ring row still finds the shape it expects.
     for (let v = 0; v < players.length; v++) {
       if (v === shooter) continue;
       // the cap: a player target's era clamps to max(era, now - pvpTicks) —
@@ -2468,18 +2046,15 @@
       const t = segCircleEntryT(b.px, b.py, b.x, b.y, sx, sy, SHIP_R + b.r);
       if (t >= 0) cands.push({ t, kind: 2, seat: v });
     }
-    // earliest entry wins; on an exact tie the smaller kind — enemies, then
-    // missiles, then ships — exactly the live pass's tie order
+    // earliest entry wins; the kind tiebreak is KEPT rather than simplified
+    // away — one class can still tie with itself only by sharing a `t`, and a
+    // sort whose comparator stopped mentioning `kind` would change the order
+    // silently if a class is ever added back.
     cands.sort((a, c) => a.t - c.t || a.kind - c.kind);
     for (const c of cands) {
       const ix = b.px + (b.x - b.px) * c.t;
       const iy = b.py + (b.y - b.py) * c.t;
       const bm = Math.hypot(b.vx, b.vy) || 1;
-      if (c.kind === 0) {
-        const e = findEnemy(c.id);
-        if (!e || e.hp <= 0) continue; // died in the window — discarded, sweep on
-      }
-      if (c.kind === 1 && E.missiles.findIndex((m) => m.id === c.id) < 0) continue;
       // the winner: consume the bullet NOW (kinematics), pay at the resolve
       // phase (applyRebateHits) — a ship winner is consumed regardless of
       // what hitPlayer will decide there (phase 14's rule)
@@ -2498,45 +2073,21 @@
     if (!rebateQueue.length) return;
     rebateQueue.sort((a, c) => a.bid - c.bid);
     for (const h of rebateQueue) {
-      if (h.kind === 0) {
-        const e = findEnemy(h.id);
-        if (!e || e.hp <= 0) continue; // died before the resolve slot — dropped
-        // the anvil's frontal shield HOLDS against rebated hits (corrective
-        // pass 2): the winner is resolved at NOW, so face and arc are in
-        // hand — the same block the live path runs, angle taken from the
-        // NOW body to the rebated impact point (the available truth; the
-        // ring holds no face). Blocked is consumed-with-no-damage: the
-        // clang, the wall-kind spark, and the shield-excluded splash all
-        // mirror the live branch.
-        if (e.stats.arc > 0 && Math.abs(angDiff(Math.atan2(h.iy - e.y, h.ix - e.x), e.face)) <= e.stats.arc) {
-          spawnImpactFx(h.ix, h.iy, h.dx, h.dy, "wall");
-          emit("clang", e, undefined, h.src);
-          blastAt(h.ix, h.iy, e, h.dmg, h.src, h.br);
-          continue;
-        }
-        // the landed branch, mirroring the live sweep's. blastAt at the
-        // REBATED impact point damages LIVE bodies — era-mixed splash is
-        // deliberate: damage-at-NOW, wherever the terminating point was.
-        // `h.src` is the rebate's shooter, which arrives from fire(seat) and
-        // is therefore a live seat index — the funnel's guarded credit is this
-        // site's unconditional one, exactly.
-        Engine.applyEffect({ kind: "shot", target: e, tgtCls: Engine.CLASS.BODY,
-                             source: { cls: Engine.CLASS.SHIP, seat: h.src }, baseAmount: h.dmg });
-        e.flash = 8;
-        E.hitsDealt++;
-        spawnImpactFx(h.ix, h.iy, h.dx, h.dy, "enemy");
-        emit("hit", e, undefined, h.src);
-        blastAt(h.ix, h.iy, e, h.dmg, h.src, h.br);
-        continue;
-      }
-      if (h.kind === 1) {
-        const mi = E.missiles.findIndex((m) => m.id === h.id);
-        if (mi < 0) continue; // already down or detonated — dropped
-        E.missilesShot++;
-        endMissile(mi, "enemy", h.src); // the rewound hit's source seat carries the boom
-        blastAt(h.ix, h.iy, null, h.dmg, h.src, h.br);
-        continue;
-      }
+      // ---- THE ENEMY AND ORDNANCE ARMS ARE RETIRED (commit D4) ---------
+      // `kind` 0 (an enemy body) and `kind` 1 (a seeker) can no longer be
+      // QUEUED: commit B ruled the rebate's enemy arm retired with a
+      // measurement — the successor plane's bodies carry no wire `mode`, so
+      // the client would PROJECT every one of them while this sweep REWOUND
+      // it, compensating in opposite directions by about twice the lead —
+      // and the seeker plane went with the harrier that fired it. The SHIP
+      // arm below is the one R3 measured honest at n=470, d200 j20, and it
+      // is untouched.
+      //
+      // THEY ARE SKIPPED RATHER THAN ASSUMED ABSENT. `rebateQueue` is a
+      // within-tick transient with three producers' worth of history in this
+      // file's fixtures; a branch that fell through to the SHIP arm on a
+      // stale `kind` would pay a hull for a body.
+      if (h.kind !== 2) continue;
       // a SHIP: hitPlayer's own gates decide at the resolve phase — a
       // mutual lethal trade lands BOTH tolls, because both shots were
       // already spawned and consumed during the drain while both seats
@@ -2554,21 +2105,19 @@
     }
     rebateQueue.length = 0;
   }
-  // id-resolve against the LIVE array. No id index exists and ids are
-  // monotonic, never reused — a linear scan is fine at these counts.
-  function findEnemy(id) {
-    for (const e of E.enemies) if (e.id === id) return e;
-    return null;
-  }
-
-  // The other way a player bullet terminates on an impact: it left the world at
-  // a wall, which game.js marks spent and sparks (FX_KINDS.wall). This runs
-  // AFTER resolveBulletHits so a bullet a body ate on its exit tick is already
-  // dead here and blasts on the body instead — exactly the rule flushWallFx
-  // uses for the spark. A BOUNCING bullet never reaches this: it was mirrored
-  // back inside the world and did not terminate. The contact point comes from
-  // game.js's own wallExitPoint(), so damage and spark can never disagree, and
-  // nothing here reads FXINT — the splash is sim, the spark is decoration.
+  // ---- resolveWallBlasts SURVIVES, AND THE SUITE CAUGHT THAT -------------
+  // PORT-S S3b lane 3, commit D4. This function was deleted with its two
+  // neighbours on the reasoning that "blastAt has no bodies left to reach from
+  // a wall", and THAT REASONING WAS WRONG: the successor plane's bodies are
+  // reachable from a wall exactly as the old roster's were, and commit B
+  // already re-aimed `blastAt` at them. wave1's section U measured it — a body
+  // hugging the wall that a wall-terminating round no longer splashed — and it
+  // is restored unchanged.
+  //
+  // IT HAS NO RETIRED DEPENDENCY, which is what makes the mistake legible in
+  // hindsight: every name in it is production's own and survives. `G.bullets`,
+  // `bulletSeat`, `termsFor`, `outOfWorld`, `wallExitPoint` and `blastAt`.
+  // What it does NOT do — and never did — is walk `E.enemies`.
   function resolveWallBlasts() {
     for (const b of G.bullets) {
       // per seat: the OWNER's rank gates its own bullets — a rank-0 seat's
@@ -2582,98 +2131,40 @@
     }
   }
 
-  // Generic ship-body contact — swept along the ship's own travel like the
-  // lance and the dash, so a top-slider ship cannot skip through a 14 px body
-  // between two ticks. Only a dead body is skipped here: the touch itself is
-  // real every tick it happens, and contactEvent owns BOTH gates — the player's
-  // i-frames and the body's own cooldown/per-tick claim. Skipping the whole
-  // event on contactCd would silently pace the player's damage off an
-  // enemy-facing knob (and pace it differently from the dash path, which calls
-  // contactEvent unconditionally). The dash cannot double-count either: it ran
-  // first in stepEnemy and took this tick's claim.
-  function resolveContacts() {
-    for (const e of E.enemies) {
-      if (e.hp <= 0) continue;
-      // every living ship's travel is swept, ascending seat order; each
-      // side's own gates (i-frames, contactCd, the per-tick claim) still
-      // arbitrate inside contactEvent exactly as before
-      for (let s = 0; s < players.length; s++) {
-        if (!seatAlive(s)) continue;
-        const pl = players[s];
-        const pv = prevOf(s);
-        // a comet-mode seat's reach grows with its POOL, so the halo the player
-        // already sees becomes the thing that actually connects. At the shipped
-        // COMETAOEDMG of 0 this is byte-identical to the body contact the sweep
-        // has always done — the committed traces move only because the pool is
-        // hashed. The PLAYER side is deliberately NOT widened: contactEvent
-        // routes both, and a comet negates all incoming damage anyway
-        // (hitPlayer), so a wider comet reach cannot cost the player a thing.
-        const reach = e.r + SHIP_R + (cometActive(s) ? COMETAOEDMG * energyFrac(s) : 0);
-        if (segCircleHit(pv.x, pv.y, pl.ship.x, pl.ship.y, e.x, e.y, reach)) {
-          contactEvent(e, ECFG.contact.dmgToPlayer, s);
-        }
-      }
-    }
-  }
+  // ---- findEnemy AND resolveContacts ARE RETIRED -------------------------
+  // PORT-S S3b lane 3, commit D4. One more of S3B-MAP's nine ENTANGLEMENTS,
+  // split the way the map said it would — one sweep, two victim classes, and
+  // the ENEMY class is gone.
+  //
+  //   `resolveContacts` was the ship-versus-BODY overlap. Its player half is
+  //   `hitPlayer`, which the successor plane reaches through the host's HURT
+  //   ROUTE with a `ram` source record and every one of production's gates —
+  //   the comet refusal included, which is D28 working across the seam. Its
+  //   body half paid BDMG into an `E.enemies` record.
+  //   `findEnemy` was an id lookup into that array.
+  //
+  // NEITHER LEFT A STUB. A pass with no candidates is not a smaller pass, and a
+  // lookup into an empty list is a function that answers null.
 
-  // pitch is mass: the three bodies that read as heavy sing killheavy, the
-  // light hulls sing kill. A lookup rather than a ternary, so appending a type
-  // is a row here and not a nested conditional. The same set names the heavy
-  // SPAWN cue, for the same reason — the lone body arriving on the edge is
-  // either something big or it is not.
-  const HEAVY = { charger: true, radarCharger: true, anvil: true, husk: true,
-                  eliteCharger: true, wardAnvil: true, eliteAnvil: true,
-                  packHusk: true, eliteHusk: true };
-
-  // A husk's death burst: `stats.split` shards on a seeded fan — the husk
-  // tiers' currency, 3/4/5 by tier — ONE rand() draw for the
-  // base angle whatever the count, evenly spaced, each pushed clear of the
-  // corpse and given
-  // outward velocity. It deliberately does NOT route through spawnEnemy: a husk
-  // killed in your face is SUPPOSED to burst in your face, and the
-  // minPlayerDist push-out that protects a scheduled spawn would teleport the
-  // threat away from the player who just earned it.
-  function splitBody(e) {
-    const H = ECFG.husk;
-    const n = e.stats.split;
-    const st = E.stats.shard;
-    const base = rand() * Math.PI * 2; // exactly one draw per burst, whatever n is
-    for (let k = 0; k < n; k++) {
-      const a = base + (k * 2 * Math.PI) / n;
-      const c = clampWorld(e.x + Math.cos(a) * e.r * H.push, e.y + Math.sin(a) * e.r * H.push, st.r);
-      makeBody(c.x, c.y, "shard", k, Math.cos(a) * H.kick, Math.sin(a) * H.kick);
-    }
-  }
-
-  function reapDead() {
-    for (let i = E.enemies.length - 1; i >= 0; i--) {
-      const e = E.enemies[i];
-      if (e.hp > 0) continue;
-      E.enemies.splice(i, 1); // a body dies at most once
-      E.kills++;
-      // the ONE canonical kill site — bullet, blast and contact deaths all
-      // arrive here, so no path can sound a body twice. BEFORE the orb loop,
-      // which consumes rand(): the emit reads nothing and reorders nothing,
-      // and keeping it above the draws makes that obvious at a glance. The
-      // seat is the last one that damaged the body — -1 when none has (all but
-      // unreachable: every damage site stamps lastAtk before reapDead runs),
-      // and the audio layer keys that as its own single "kill#-1" bucket.
-      emit(HEAVY[e.type] ? "killheavy" : "kill", e, undefined, e.lastAtk);
-      for (let k = 0; k < e.orbDrop; k++) { // 1 a dart or a shard, 2 a charger or a
-                                            // harrier, 3 an anvil, 1 the husk itself —
-                                            // whose split shards each pay 1 more, so a
-                                            // tier-1 burst pays 4 and the tiers pay up
-                                            // the split line
-        const a = rand() * Math.PI * 2; // each drop dealt its own drift
-        E.orbs.push({ id: nextId(), x: e.x, y: e.y, vx: Math.cos(a) * ECFG.orb.drift, vy: Math.sin(a) * ECFG.orb.drift });
-      }
-      // after the orbs, and on the reverse-iterating loop that makes appending
-      // safe: the shards land at the end of the list, below the index this loop
-      // is walking down through, so they are never reaped on the tick they were
-      // born. A shard carries no split field, so there is no recursion to bound.
-      if (e.stats.split) splitBody(e);
-    }
-  }
+  // ---- HEAVY and reapDead ARE RETIRED (S3b lane 3, commit D4) ------------
+  // The seventh of S3B-MAP's nine ENTANGLEMENTS, and the one whose split is
+  // most worth writing down: `reapDead` did FOUR things at once, and three of
+  // them survive somewhere else while the fourth simply has nothing left.
+  //
+  //   THE BODY REAP is gone — there is no `E.enemies` to walk.
+  //   THE KILL CUE moved to lane 2, verbatim in both halves: the successor
+  //     plane's `killEnemy` splits the name on heaviness (`killheavy` or
+  //     `kill`) and stamps the CREDIT with `e.lastAtk`, the same field the R5
+  //     funnel writes and the aggro grievance reads. `HEAVY`'s job is the
+  //     `heavy`/`boss` columns of that plane's own STATS rows.
+  //   THE ORB DROP moved with it, and its ECONOMY did not move at all: the
+  //     successor plane's orbs pay `credit(seat, value)` on the sink, and
+  //     js/encounter-host.js routes that into `addXp(n, seat)` — production's
+  //     ONE credit site, still the only one.
+  //   `E.kills` is the counter that has nothing left to count, and it is not
+  //     silently zeroed: it stays a hashed field at 0 rather than being
+  //     deleted, because a counter that vanishes and a counter that reads zero
+  //     say different things to a reader of a snapshot.
 
   // The ONE credit site, now per seat: the collecting seat's wallet, its
   // scoreboard and its high-water mark all rise together. Nothing HERE ever
@@ -2681,9 +2172,21 @@
   // deathToll, on every death. The seat defaults to 0 so every
   // existing single-seat caller (the suites' enc.addXp(n)) still credits the
   // local seat unchanged.
+  // IT REPORTS WHETHER IT PAID (PORT-S S3b lane 2, fix 4). The `if (!S) return`
+  // below has always been a silent decline — a seat index production does not
+  // own is not an error, and every caller in this file and in the suites passes
+  // an index it just took off `E.seats`. js/encounter-host.js does not: it
+  // carries a seat index across from a SECOND simulation whose roster is sized
+  // separately, so "production has no such seat" is a real answer there and a
+  // route that could not hear it recorded a payment nobody received.
+  //
+  // A BOOLEAN, ADDITIVE, AND NOTHING EXISTING READS IT. The silent decline is
+  // preserved exactly — same branch, same absence of a throw — because the
+  // caller that needs to know is the one that asked, and a throw would make a
+  // roster-size mismatch a page crash instead of a refused payment.
   function addXp(n, seat = 0) {
     const S = E.seats[seat];
-    if (!S) return;
+    if (!S) return false;
     S.xp += n; // an uncapped wallet — no threshold, no level; the shop is the only drain
     S.score += n; // the scoreboard rides EVERY wallet credit; the only thing that
                   // takes it back down is dying (deathToll)
@@ -2694,6 +2197,7 @@
     // score only ever rises here, best === score for a living, climbing seat
     // and holds above it after a death — the board's own line reads that gap.
     if (S.score > S.best) S.best = S.score;
+    return true;
   }
 
   function stepOrbs() {
@@ -2759,6 +2263,79 @@
   // one purchase against seat `seat`'s wallet — callable at any moment of
   // play: buying mid-flight is the panel shop's whole point. Returns whether
   // the sale went through — refusals change nothing at all.
+  // ---- D37'S DEALER (PORT-S S7) ------------------------------------------
+  // THE POOL is the SEVEN DOUBLING ROWS, availability-filtered and ascending.
+  // HULL PATCH is exempt by `curve: "flat"` — it is the consumable whose own
+  // row comment calls an escalating repair price *"a death spiral aimed at the
+  // player already losing"*, so it stays always-purchasable OUTSIDE the four
+  // cards rather than competing for one of them.
+  //
+  // THE LIST IS SORTED BEFORE IT IS SAMPLED, which is R6's candidate-list rule
+  // and not a style choice: a substream makes the DRAW reproducible, sorting
+  // makes the SELECTION reproducible, and a stable draw over an unstable list
+  // is still unstable. Here it is ascending BY CONSTRUCTION — the loop walks
+  // the catalog in index order — so there is no sort call to forget.
+  //
+  // THE POOL CAN NEVER BE EMPTY: AFTERBURNER and MAX HULL carry no `cap`, and
+  // `shopMaxed` answers false for a row with no cap, so at least two rows stand
+  // however much a seat has bought. A SHORT pool deals a SHORT hand and is
+  // never padded with a repeat and never topped up from the catalog — the fold
+  // carries a length prefix precisely so a short hand is expressible.
+  //
+  // FOUR SUCCESSIVE DRAWS WITHOUT REPLACEMENT from ONE substream keyed
+  // `(ECFG.seed, rewardWave, seat, loop, 0, PURPOSE.MARKET)` — the mapping
+  // table beside js/engine.js's PURPOSE block says which of D37's four parts
+  // rides which slot. It is `Engine.substream`, never the shared global `rand`
+  // this file draws FX from: a particle must never be able to change a deal.
+  function dealSeatHand(seat, rewardWave, loop) {
+    const S = E.seats[seat];
+    if (!S) return false;
+    const pool = [];
+    for (let i = 0; i < SHOP.length; i++) {
+      if (SHOP[i].curve !== "double") continue;   // HULL PATCH, and only it
+      if (shopMaxed(i, seat)) continue;           // a maxed row is not an offer
+      pool.push(i);
+    }
+    const g = Engine.substream(ECFG.seed, rewardWave >>> 0, seat >>> 0, loop >>> 0, 0,
+                               Engine.PURPOSE.MARKET);
+    const hand = [];
+    const n = Math.min(4, pool.length);
+    for (let k = 0; k < n; k++) {
+      // the clamp is for a generator that ever returned exactly 1 — mulberry32
+      // does not, and an index one past the end would splice nothing and deal a
+      // hand with an `undefined` in it, which is a hash the fold would accept
+      const at = Math.min(pool.length - 1, Math.floor(g() * pool.length));
+      hand.push(pool.splice(at, 1)[0]);
+    }
+    S.hand = hand;
+    S.bought = hand.map(() => 0);
+    return true;
+  }
+  // ...and the room's deal. EVERY seat record, present or PARKED — records
+  // exist for every slot from the moment the room is built, so a D17 joiner
+  // released mid-break finds its hand already waiting, and the key is per seat
+  // so no two of them can be the same hand by accident.
+  function dealAll(rewardWave, loop) {
+    for (let s = 0; s < E.seats.length; s++) dealSeatHand(s, rewardWave, loop);
+    // the PHYSICAL clear is the identity; `rewardWave` stays the SUBSTREAM KEY
+    // and the due test only, so a live ENCPERREWARD retune cannot re-key a
+    // clear that has already been dealt (or alias a later one onto it).
+    E.marketWave = E.wave;
+    E.marketLoop = loop;
+    // ...and the PRESENTATION hover the old shelf left behind (S7-CX-03). The
+    // deal above replaced EVERY seat's hand, the local one included, so the
+    // stored catalog index can name a row that is on no card any more — and
+    // shopHoverPlan() reads that index and nothing else (it tests SHOP[i], the
+    // CATALOG, never S.hand), so the field panel would go on naming and pricing
+    // a departed row, with no card lit, until the next mousemove re-hit-tests
+    // it. The pointer has not moved; -1 ("no hover") is the honest answer for a
+    // shelf that changed underneath it, and the next mousemove lights the new
+    // card. UNHASHED, so this moves no trace: hashEncounter's allow-list names
+    // "the shop's hover state" as presentation and keeps it out, no golden
+    // checkpoint's `st` carries it, and on the server it writes -1 over -1.
+    E.shopHover = -1;
+  }
+
   function buy(i, seat = localSeat()) {
     // the cues live HERE, not at the click site, so one site covers the
     // pointer and the suites' direct enc.buy() calls alike. The refusals a
@@ -2767,7 +2344,39 @@
     const S = E.seats[seat];
     const row = SHOP[i];
     if (!S || !row) return false;
-    if (E.state === "dead") return false; // the match is over — nothing sells
+    // ---- D37'S HAND-MEMBERSHIP GATE (PORT-S S7) --------------------------
+    // *"What is available for each player should stay for that wave"* is a REAL
+    // RULE at four seats and not a client-side filter, and this is the line
+    // that makes it one. It is server-side BY CONSTRUCTION: the wire's purchase
+    // route (`server/server.js`, `{ v, ui: "buy", item }`) reaches THIS
+    // function, so a hostile `item` is refused here and nowhere else has to
+    // know. Today `Number.isInteger(msg.item)` is the route's ONLY validation.
+    //
+    // HULL PATCH IS EXEMPT, by its `curve: "flat"` and by that alone — the
+    // consumable is outside the four cards and buyable at every moment of a
+    // run, which is the whole point of the row.
+    //
+    // TWO REFUSALS, and they take opposite sides of this function's own rule
+    // (the five player-reachable refusals below cue; the two programming-error
+    // ones above do not):
+    //   NOT IN THE HAND refuses SILENTLY. The shipped panel never draws a card
+    //     for a row the seat was not dealt, so a player cannot reach this by
+    //     clicking — it is `SHOP[i]` missing, in a different spelling.
+    //   ALREADY BOUGHT refuses WITH THE CUE. That card IS on the shelf, the
+    //     pointer can land on it, and a player pressing a spent card has asked
+    //     a question that deserves an answer.
+    let handAt = -1;
+    if (row.curve !== "flat") {
+      handAt = S.hand.indexOf(i);
+      if (handAt < 0) return false;
+      if (S.bought[handAt]) { if (window.Sfx) Sfx.cue("denied", null, undefined, seat); return false; }
+    }
+    // ...and the match being OVER is a player-reachable refusal too, so it
+    // ANSWERS (S7-CX-02). The shop is a persistent panel: the shelf is still
+    // painted, still lit and still under the pointer on the terminal screen, so
+    // a press there is a question. PRE-EXISTING — this door has been silent
+    // since before S7 — but S7 is what put a dealt hand under that pointer.
+    if (E.state === "dead") { if (window.Sfx) Sfx.cue("denied", null, undefined, seat); return false; } // the match is over — nothing sells
     // a downed seat may browse the shelf; only a live one may spend — the
     // documented choice, surfaced at the phase gate
     if (S.hull <= 0) { if (window.Sfx) Sfx.cue("denied", null, undefined, seat); return false; }
@@ -2777,6 +2386,12 @@
     if (S.xp < cost) { if (window.Sfx) Sfx.cue("denied", null, undefined, seat); return false; }
     S.xp -= cost; // the wallet pays; S.score never moves — spending is not un-scoring
     S.owned[i]++; // the purchase IS the rank — termsFor derives everything else
+    if (handAt >= 0) S.bought[handAt] = 1; // ...and the CARD is spent (D37, S7). ONE
+                                 // card, by its slot: a purchase marks its own and never
+                                 // rerolls its siblings, which is why the ids are stored
+                                 // rather than re-derived — a re-derived hand after a
+                                 // sale can be a different hand, because a maxed row
+                                 // leaves the pool
     if (row.apply) row.apply(S.owned[i], seat); // the rank AFTER the sale, for the rows
                                  // that keep a side effect (hull, the CELL's fill)
     // the term epoch: the effects above took hold at THIS tick — the tick the
@@ -2791,9 +2406,15 @@
     return true;
   }
 
-  // Reset ONE seat's ranks to stock. TWO callers: deathToll (every death now,
-  // not just a PvP kill — the note here used to say "phase 14's PvP death")
-  // and restart(), which walks every seat. The epoch INCREMENTS — never
+  // Reset ONE seat's ranks to stock. THREE callers, and the note here used to
+  // say two: deathToll (every death now, not just a PvP kill — it used to say
+  // "phase 14's PvP death"), restart(), which walks every seat, and THE WIPE
+  // BLOCK in encStep, which walks every seat too. The third one is why the
+  // market's bought-bit clear is NOT in here: a death must clear the bits and
+  // KEEP the ids (the ranks are gone, so the cards are buyable again), while a
+  // wipe must take the whole hand away and return the room to never-dealt. One
+  // primitive cannot say both, so deathToll and the wipe each say their own.
+  // The epoch INCREMENTS — never
   // rewinds — because a reset changes the seat's effective terms exactly as a
   // purchase does, and the marker rides the stream for the same predictor.
   function resetSeatUpgrades(seat) {
@@ -2816,7 +2437,7 @@
     const pl = players[s];
     if (!S || !pl) return;
     const anchorSeat = nearestSeat(pl.ship.x, pl.ship.y);
-    const p = rollAnchor(anchorSeat >= 0 ? anchorSeat : s);
+    const p = reentryAnchor(anchorSeat >= 0 ? anchorSeat : s);
     const c = clampWorld(p.x, p.y, SHIP_R);
     pl.ship.x = c.x;
     pl.ship.y = c.y;
@@ -2866,40 +2487,70 @@
     // many draws the previous wave consumed (orb drift angles and anchor
     // retries vary with play), so every wave is reproducible on its own
     rand = mulberry32(n === 1 ? ECFG.seed : (ECFG.seed ^ Math.imul(n, 0x9E3779B9)) >>> 0);
-    // PER-PLAYER WAVES (the user's phase-05-gate decision): every seat gets
-    // its OWN copy of the wave's schedule, owner-stamped. The owner anchors
-    // the spawn geometry (off-screen from the owner — rollAnchor) and takes
-    // the pack's initial aggro for the owner-lock window (makeBody). Copies
-    // interleave seat-ascending inside each base group, so with one seat the
-    // deal is byte-identical to the single-player schedule.
-    //   THE PRESENCE GATE (the drop-in round): a PARKED seat — `absent`,
-    // nobody behind it — is dealt NO copy at all. The gate lives HERE, at the
-    // deal, and nowhere else: skipping an absent owner at SPAWN time instead
-    // would leave its groups forever un-spawned and deadlock the wave-clear
-    // check (`every g.spawned`). The deal is the one place the wave's size is
-    // decided, so it is the one place presence may shrink it — and a deal in
-    // which EVERY seat is absent lawfully produces ZERO groups: the schedule
-    // holds, `every` on an empty list clears vacuously, and the field stays
-    // empty until a reclaim asks for wave 1 (see the re-deal in encStep).
-    // E.seats[] can be shorter than players[] mid-setup, so the record's
-    // existence is guarded; a missing record reads as "present" — exactly
-    // what syncSeats is about to make it.
-    E.groups = [];
-    for (const g of waveGroups(n)) {
-      for (let s = 0; s < players.length; s++) {
-        const S = E.seats[s];
-        if (S && S.absent) continue;
-        E.groups.push({ count: g.count, type: g.type, radar: g.radar, owner: s,
-                        warnAt: g.warnAt, spawnAt: g.spawnAt, points: null, spawned: false });
-      }
-    }
-    E.stats = statsFor(n); // resolved ONCE — bodies stamp this at spawn
+    // ---- WHAT THIS BLOCK USED TO DESCRIBE, AND WHERE IT WENT --------------
+    // It described PER-PLAYER WAVES (the user's phase-05-gate decision) — every
+    // seat dealt its own owner-stamped copy of the schedule — and THE PRESENCE
+    // GATE that skipped a parked owner's copy at deal time. Commit D4 deleted
+    // the dealer and both went with it; the prose stayed, and the S4-MAP's own
+    // correction table had to say so: *"THE PRESENCE-GATED DEAL IS DELETED ...
+    // commit D4 deleted the dealer and left the prose."*
+    //
+    // BOTH FACTS NOW LIVE IN THE SUCCESSOR PLANE, and this is the routing note
+    // rather than the mechanism (PORT-S S4, commits D and F):
+    //   THE SIZE OF A DEAL is D14's threat budget in `js/demo-kernel.js` —
+    //   `dealCount()` at `queueGroup`, per group, per PRESENT seat, bosses
+    //   once. There is ONE shared stream (D8), not a copy per seat.
+    //   THE PRESENCE GATE is the same call's `presentCount()`, fed by
+    //   `poseKernelSeats` pushing `!absent` per seat — production's own word for
+    //   "nobody is behind this one". D8's row is where it moved: *"the presence
+    //   gate moves from the deal into the director's budget."*
+    //   AND A ROOM WITH EVERYBODY PARKED still gets an arc: the budget FLOORS
+    //   at one present seat, because a room that dealt nothing until somebody
+    //   claimed a seat would be a room with no encounter to walk into. The old
+    //   rule's answer here was the opposite — ZERO groups — and it worked only
+    //   because a re-deal in `encStep` re-armed it, which is a mechanism this
+    //   plane no longer has.
+    // ---- THE DEAL IS DELETED (S3b lane 3, commit D4) ---------------------
+    // Commit C made it DORMANT against the flip predicate; this commit deletes
+    // the dealer, its counts, its tier ladder and its stat table. What is left
+    // of `startWave` is production's own half and every line of it is
+    // load-bearing:
+    //
+    //   THE WAVE NUMBER AND THE CLOCK. `applyKernelHud` overwrites both from
+    //   the successor plane's director on every tick, so these are the values
+    //   a restart shows for exactly one tick — which is one tick more honest
+    //   than leaving them at the last run's.
+    //   THE PER-WAVE RESEED, and this is the one that would be missed.
+    //   `rand` is production's ONE stream and it is still read — by the orb
+    //   drift on a PvP payout and by `reentryAnchor`'s roll. Dropping the
+    //   reseed would make those draws depend on how many the last wave
+    //   happened to consume, which is exactly the property this line was added
+    //   to remove.
+    //
+    // `E.stats` GOES WITH `statsFor`. It held a wave's resolved stat table for
+    // bodies to stamp at spawn, and there are no bodies and no table; the field
+    // stays on `E` at its `null` default so a reader finds the shape it
+    // expects, and it is never written again.
   }
 
   // full restart: back to wave 1 with enemies, bullets, orbs and transient
   // state cleared, mods included; recenters the ship and camera — and
   // touches no tuner value, so every slider survives
   function restart(seed) {
+    // THE STALL CLOCK GOES WITH THE RUN (S4 commit E). It is presentation state
+    // and unhashed, but a clock carried across a restart would tell the new run
+    // how long the OLD one stood still. -1 is a count no census can return, so
+    // the first frame after this arms the clock rather than inheriting one.
+    stallSig = "";
+    stallSince = 0;
+    stallFired = false;
+    stallActive = false;
+    stallRoom = "";   // ...and the room it was armed in (S4-CX-4): a restart is
+                      // a boundary too, and the identity must not survive it
+    // ...and D17's park queue (S4 commit F). A joiner parked against the
+    // PREVIOUS run has no setpiece to wait for; the server re-grants across a
+    // restart, so the queue is the run's and dies with it.
+    joinParked = [];
     syncSeats(); // seats[] tracks players[] — BEFORE the wave deal reads the count
     // every seat's ranks die with the run, through the same primitive every
     // DEATH uses — each epoch still INCREMENTS. Deliberately BEFORE
@@ -2907,12 +2558,17 @@
     // client resynchronizes across anyway, so its termChange markers die
     // with the queue like every other stale cue.
     for (let s = 0; s < E.seats.length; s++) resetSeatUpgrades(s);
+    // ...and every seat's MARKET HAND dies with the run too (D37, S7), for the
+    // wipe's reason and beside the identity zeroed further down: a restarted
+    // run and a booted one must be one state, or the hash of the first would
+    // differ from the hash of the second over a shelf nobody was dealt.
+    for (const S of E.seats) { S.hand = []; S.bought = []; }
     startWave(1);
     if (seed !== undefined) rand = mulberry32(seed >>> 0); // explicit test seeds still override
     E.state = "idle";
-    E.enemies = [];
-    E.missiles = []; // ordnance never survives a restart — a wave-9 seeker
-                     // arriving on the new wave 1 would be unaccountable
+    // (the body and ordnance clears are deleted at commit D5 with their
+    //  arrays. The successor plane's own field is cleared by its `reset`,
+    //  which the wipe and this restart both reach on the same seed.)
     E.orbs = [];
     E.pvpCd = {};        // no PvP window survives a restart — a stale pair stamp would
                          // refuse the new run's first ram for up to COMETCD ticks
@@ -2956,6 +2612,11 @@
     E.wipePending = false;         // no armed wipe survives a restart — the arm belongs to
                                    // the run that died, and consuming it on the new run's
                                    // first tick would re-deal the wave 1 restart just dealt
+    E.marketWave = 0;              // ...and the market goes back to NEVER DEALT, with every
+    E.marketLoop = 0;              // seat's own hand emptied in the per-seat walk above
+    E.loop = 0;                    // ...and the arc loop counter dies with the run it counted.
+                                   // The startWave(1) above already wrote E.wave, so the next
+                                   // tick's kernel mirror sees no fall and adds nothing back.
     E.shopHover = -1;              // no hover — and so no hover art — survives a restart
     syncCursor();
     E.shipPrev = null;
@@ -2999,12 +2660,479 @@
     cam.t = 1;
     gate.seeded = false; // the lookahead commit gate re-seeds too
     gate.timer = 0;
+    // ---- ...AND THE SUCCESSOR PLANE (S3b lane 3, commit C) ---------------
+    // LAST, so the ORDER IS THE HOST'S: production first, because its restart
+    // is the GLOBAL discontinuity everything else in the tree already
+    // resynchronizes across, and the kernel second. That order is
+    // js/encounter-host.js's contract and this is the same order, not a second
+    // opinion about it.
+    //
+    // IT IS HERE RATHER THAN AT EACH CALLER for one measured reason: this
+    // function has FOUR live entry points on a flipped surface — the load-time
+    // call at the tail of this file, the death screen's R key, `Net.restart`'s
+    // upstream route and the `__test` seam — and a rule that has to be repeated
+    // at four call sites is a rule three of them will eventually miss.
+    //
+    // THE SEED IS `ECFG.seed` when the caller named none, which is exactly the
+    // stream `startWave(1)` above just reseeded from: one seed, both planes.
+    // ...AND IT GOES THROUGH THE HOST (FIX 10 / S3BR-10). `resetKernel` resets
+    // and RE-POSES every seat the host holds an accepted pose for, in one
+    // operation — because `resetRun` rebuilds native live pilots at hull 100
+    // and this call can land after the tick's only pose push. A reset that left
+    // the re-pose to the next tick left a phantom pilot standing behind a dead
+    // production seat for that tick.
+    if (kernelDriving() && window.EncounterHost) {
+      EncounterHost.resetKernel((seed === undefined ? ECFG.seed : seed) >>> 0);
+      // ...AND PRODUCTION RE-POSES IN THE SAME STATEMENT (FIX 10 / S3BR-10).
+      // `resetRun` rebuilds native live pilots at hull 100, and this call can
+      // land AFTER the tick's only pose push — so without these two lines a
+      // phantom kernel pilot stands behind the dead seat until the next tick.
+      // `poseKernelSeats` is js/game.js's own per-tick push, called here rather
+      // than copied, so the mirror is re-established from PRODUCTION'S state as
+      // it is NOW — after the reset, not from the pose that preceded it.
+      // `applyPosesNow` lands them on the records: the bridge BANKS for the
+      // next step and there is no next step before this function returns.
+      if (typeof poseKernelSeats === "function") poseKernelSeats();
+      EncounterHost.applyPosesNow();
+    }
+  }
+
+  // ---- IS THE SUCCESSOR PLANE DRIVING? (PORT-S S3b lane 3, commit C) ------
+  // ONE PREDICATE, asked wherever the OLD WAVE MACHINE would otherwise run. It
+  // is `installed()` and nothing more: a host is installed by a PAGE, and the
+  // two lab pages that install one as a CAMERA load no js/game.js and no
+  // js/encounter.js at all, so this function is never asked there. On the two
+  // surfaces that do load this file — index.html and server/sim-host.mjs's vm —
+  // an installed host is a driven kernel by construction.
+  //
+  // THE OLD PLANE IS DORMANT, NOT DELETED, and that is commit C's own line: the
+  // ~1,860 lines go at commit D, once the flip is proved. Between the two, the
+  // deal simply does not run, `E.groups` stays empty, `E.enemies` stays empty,
+  // and every one of the sixty-three readers S3B-MAP enumerated sees the empty
+  // plane it was measured against.
+  // ONE frozen empty list rather than a fresh `[]` at each dormant walk — the
+  // group loop runs every tick and an allocation per tick for a plane that does
+  // not exist is a cost with nothing on the other side of it.
+  const EMPTY_GROUPS = [];
+    const kernelDriving = () => !!(typeof window !== "undefined" && window.EncounterHost
+    && window.EncounterHost.installed());
+
+  // ---- THE HUD'S MINIMAL STATE MAPPING (commit C) -------------------------
+  // Production's UI reads four fields the old wave machine wrote. With the
+  // machine dormant they are written from the kernel's director instead, and
+  // the mapping is deliberately MINIMAL — four fields, no invention.
+  //
+  //   E.wave      <- S.wave, one for one.
+  //   E.waveTick  <- S.waveTime x 60. The kernel counts SECONDS and every
+  //                  production reader counts TICKS; the tick is the unit on
+  //                  this side of the seam, so the conversion lands here.
+  //   E.state     <- `warning` while the field carries no live body and
+  //                  `active` while it carries one, which is exactly what the
+  //                  old machine's own `warning -> active` line said.
+  //   the banner  <- S.bannerText while S.banner is up.
+  //
+  // ---- THE ONE CENSUS (PORT-S S4, commit E) --------------------------------
+  // `!dead && hp > 0`, counted ONCE, in the kernel, and read here through the
+  // host. Three readers: this file's HUD state map, its `foeCount()` FOES line,
+  // and — on the other side of the seam — the kernel's own clear gate. They
+  // were two hand-rolled loops in this file before commit E, and the gate would
+  // have been a third; D21 turns on whether a room is EMPTY, so a room that is
+  // empty to the gate and not to the HUD is a defect with no symptom until it
+  // is a deadlock.
+  //
+  // ---- ...AND ON EVERY SURFACE (S4-CX-2, the fix round) --------------------
+  // THE ONE CENSUS WAS ONE PLANE SHORT. A net client steps NO simulation — the
+  // loop's own fork says so, `js/game.js`'s `frameBody` calls `Net.clientTick()`
+  // instead of `clientStep()` — so `EncounterHost.bodies()` is empty on it and
+  // the room's bodies live in `Net.view().enemies`, which `mapState()` already
+  // selects. The FOES line and the stall surface read the dormant local host
+  // anyway: the map drew a constructor while the count said zero, and D21's
+  // mandatory deadlock signal failed its own `foeCount() > 0` guard and never
+  // appeared. Worse if the dormant kernel still held bodies — then both
+  // described a room this screen is not in.
+  //
+  // ONE PROVIDER, then. The presentation body plane is asked for by one
+  // function and `mapState` asks the same question, so "one census" is true on
+  // the solo page, on the server's own sim and on a decoding client.
+  //
+  // (`?mp` is undeployable until R7 regardless — the wire fact — so nothing
+  // observable moves today. This makes the HUD honest for that day rather than
+  // leaving a known-wrong reader for it to be discovered on.)
+  //
+  // NULL WITH NO PLANE AT ALL, which is the truth on a page with no encounter.
+  function presentedBodies() {
+    if (typeof window === "undefined") return null;
+    if (window.Net && Net.active() && Net.view) return Net.view().enemies;
+    return window.EncounterHost && window.EncounterHost.installed()
+      ? window.EncounterHost.bodies() : null;
+  }
+  // ...and the census over it, `!dead && hp > 0` — the kernel's own words. A
+  // decoded body carries `hp: 1` and no `dead` key, so the same filter counts
+  // the wire's rows without a second rule for them.
+  const bodyIsLive = (b) => !!b && !b.dead && b.hp > 0;
+  // ---- ...AND D39's ROLE, ON THIS SIDE OF THE SEAM (S4 fix 9) -------------
+  // *"Hostile BODIES block; ordnance, hazards, fields, cues and non-hostile
+  // transit never block."* The RULE lives in the kernel's registry and the
+  // kernel publishes the question (`DemoKernel.blocksClear`), because the
+  // BODIES this file counts are its own presentation plane's — on a net client
+  // they are decoded rows the kernel never sees. So the reader crosses the seam
+  // and the rule does not, and "one census" survives D39: a placed mine is not
+  // a FOE and a leaving warden is not a FOE, here as in the gate.
+  //
+  // ---- R7 DEBT, CORRECTED AND NAMED (the HOLD round, fix 15) --------------
+  // THIS NOTE UNDERSTATED IT. It said the wire carries a body's `type`, and the
+  // scoped check measured that it does not: wire v10 encodes EVERY successor
+  // body as `ty: -1` (`server/snapshot.mjs:316`) and the client decodes `dart`,
+  // `hp: 1`, with no `state` (`js/net.js:416,2424-2475` — the band stops one
+  // line short in the note this corrects: `hp: 1` is CONSTRUCTED at `:2473`,
+  // inside the enemy record the decoder builds, so a band ending at `:2455`
+  // names the fallback and not the line that spends it). So on a decoding
+  // client D39's roles cannot be applied AT ALL — a real decoded mine and a real
+  // spent warden both BLOCK and both count as FOES — and the miss is a whole
+  // room's worth, not one warden's 4.5 s.
+  //
+  // THE SEAT DEFERRED IT TO R7 BY NAME (finding 1): the fix is the WIRE, a kind
+  // index and the body's state at v11, which R7 owns and PORT-S does not, and
+  // `?mp` is undeployable until R7 regardless. `tests/net-checks.js`'s
+  // `(R7 BILL)` legs assert the limit as the current contract, so the day the
+  // wire grows those fields a green suite says so. Solo and the server's own
+  // sim — which is where the authoritative gate runs — are exact.
+  const bodyBlocks = (b) => {
+    if (typeof window === "undefined" || !window.DemoKernel
+        || typeof window.DemoKernel.blocksClear !== "function") return true;
+    return window.DemoKernel.blocksClear(b);
+  };
+  const bodyGates = (b) => bodyIsLive(b) && bodyBlocks(b);
+  // 0 WITH NO PLANE INSTALLED, which is the truth on a page with no encounter.
+  const kernelFoes = () => {
+    const bodies = presentedBodies();
+    if (!bodies) return 0;
+    let n = 0;
+    for (let i = 0; i < bodies.length; i++) if (bodyGates(bodies[i])) n++;
+    return n;
+  };
+
+  // ---- THE STALL TRACKER (PORT-S S4, commit E) -----------------------------
+  // MODULE STATE, NOT `E` STATE, and never hashed. What a room's HUD says about
+  // being stuck is a fact about PRESENTATION: a client decodes `E` off the wire
+  // every tick and computes this line for itself from the bodies it already
+  // has, so a value carried in `E` would be a value the wire had to carry and
+  // `hashEncounter` had to fold. `stallSeen` starts at -1, which no census can
+  // return, so the first frame of any run arms the clock rather than inheriting
+  // one. `restart()` puts it back.
+  let stallSig = "";     // the SIGNATURE when the clock last restarted (D39)
+  let stallSince = 0;    // ...and the waveTick it restarted on
+  let stallRoom = "";    // ...and WHICH ROOM it was restarted in — see below
+  let stallFired = false; // ...and whether THIS episode has already spoken
+
+  // ---- D39's STALL SIGNATURE (the SEVENTH AMENDMENT, S4 fix 9) -------------
+  // The tracker watched the LIVE COUNT alone, which is the weakest of the three
+  // things a fight moves. demo-v4's signature is the shape the ruling names:
+  //
+  //   hash( blocking count , blocking hull sum to a tenth , blocker damage )
+  //
+  // Each term catches what the others cannot. The COUNT misses a fight nobody
+  // is winning yet. The HULL SUM catches every point of damage that lands — a
+  // boss being ground down for two minutes changes it every second. The DAMAGE
+  // EVENTS catch the case both others miss: a shot that lands on a shield or an
+  // invulnerable phase and moves no hp at all (this kernel has both — the
+  // bulwark's shield and the snapper's `vulnerable: false`).
+  //
+  // THE TWO CORRECTIONS THE SCOPED CHECK ASKED FOR (fix 11), both to match
+  // demo-v4's accepted signature exactly:
+  //   * THE HULL SUM IS SUMMED FIRST AND ROUNDED ONCE, to a TENTH. S4 rounded
+  //     each hull to an integer and summed those, which discards a fraction per
+  //     body — twenty bodies losing 0.4 hp each moved nothing at all.
+  //   * THE DAMAGE TERM IS THE KERNEL'S BLOCKER COUNT, not this file's cue
+  //     stream. Counted off `emit`, a pilot firing into a WALL kept an
+  //     unreachable blocker from ever stalling; a PvP blast and a shot into a
+  //     nonblocking mine did the same. `DemoKernel.blockerDamageSeen()` counts
+  //     player-credited damage applied to a BLOCKING body and nothing else.
+  //
+  // ONLY BLOCKERS ARE SUMMED, which is D39 again: a drifting mine's hp is not a
+  // thing the room is waiting for, so shooting one is not progress toward the
+  // clear and must not reset a deadlock clock.
+  //
+  // R7 DEBT, STATED, and fix 11 widened it: on a decoding client every body
+  // arrives with `hp: 1` (js/net.js's fallback — the wire carries no body hp
+  // until R7), so the hull term degenerates to the count; and the damage term
+  // now comes from the LOCAL kernel, which a net client does not step, so it is
+  // frozen there. A net client's signature is therefore its blocking count
+  // alone. That is the same R7 bill the client census already carries (a
+  // decoded body has no kind and no state — see `bodyBlocks`), and it is
+  // deferred with it by name. Solo and the server's own sim are exact.
+  //
+  // A STRING, not a number: three integers joined is a total order-free
+  // identity, cheap, allocation-per-frame only on the one draw that reads it,
+  // and readable in a failure message — which a folded 32-bit hash is not.
+  // "" is the armed value because no census can produce it.
+  const blockerDamageSeen = () => (typeof window !== "undefined" && window.DemoKernel
+    && typeof window.DemoKernel.blockerDamageSeen === "function"
+    ? window.DemoKernel.blockerDamageSeen() : 0);
+  // ---- THE DETECTOR RUNS IN THE SIM STEP (the HOLD round, fix 12) ---------
+  // IT LIVED IN `drawHud()` AND THAT WAS WRONG, and the scoped check found the
+  // exact shape of the wrong: the AUTHORITATIVE server calls `stepSim()` and
+  // drains `events[]` WITHOUT EVER DRAWING, so the one-shot `stall` event D39
+  // requires could never enter the stream that matters. A surface only a screen
+  // can raise is not an observable; it is a pixel.
+  //
+  // SO THE ADVANCE IS A SIM STEP and the draw is a READ. `encStep` calls this
+  // once per tick, right after `applyKernelHud` — where the census, `E.state`
+  // and `E.waveTick` are all this tick's — and the draw paints whatever this
+  // decided. Two consequences, both wanted: the event enters the authoritative
+  // stream (the server emits it, the wire carries it as any cue does, and
+  // production's own drain hands it on), and a paused or unfocused client can no
+  // longer disagree with the room about whether it is stuck.
+  //
+  // A NET CLIENT DOES NOT STEP THE LOCAL SIM (`js/game.js`'s frame fork calls
+  // `Net.clientTick()` instead of `clientStep()`), so on a decoding client this
+  // never runs and the banner never lights. THAT IS PART OF THE R7 BILL already
+  // recorded at `bodyBlocks` and `stallSignature`: a decoded body carries no
+  // kind and no state, so the client's census cannot apply D39's roles anyway,
+  // and `?mp` is undeployable until R7 regardless. When R7 puts the kind and the
+  // state on the wire, this detector reads the decoded plane through the same
+  // `presentedBodies()` provider and lights on a client too — no second copy.
+  let stallActive = false;  // ...the surfaced state the draw reads
+  function advanceStall() {
+    // The same two guards the draw used to carry: a room is `active` exactly
+    // when a live body is on the field, and the census guard is what keeps a
+    // staged state with no host installed from surfacing a sentence about
+    // nothing. Outside them the detector holds its clock rather than clearing
+    // it — a break is not a room that stopped being stuck.
+    if (!(E.state === "active" && foeCount() > 0)) { stallActive = false; return; }
+    const foes = foeCount();
+    // the room's identity FIRST: a boundary re-arms the clock whatever the
+    // signature does, so a fresh room can never inherit an old room's timestamp
+    const room = stallIdentity();
+    if (room !== stallRoom || E.waveTick + 60 < stallSince) {
+      stallRoom = room;
+      stallSig = "";
+      stallFired = false;
+    }
+    const sig = stallSignature(foes);
+    if (sig !== stallSig) { stallSig = sig; stallSince = E.waveTick; stallFired = false; }
+    stallActive = E.waveTick - stallSince >= ECFG.stallTicks;
+    // ---- AND IT SPEAKS ONCE PER EPISODE (D39) -------------------------
+    // It rides `events[]` like any cue and carries no wire field. ONCE: the
+    // flag is cleared by a moving signature or a room boundary, which are the
+    // only two ways an episode can end. No golden trace stalls, so no fixture
+    // carries one — proven at the gate, not assumed.
+    if (stallActive && !stallFired) {
+      stallFired = true;
+      emit("stall");
+    }
+  }
+
+  const stallSignature = (foes) => {
+    const bodies = presentedBodies();
+    let hull = 0;
+    if (bodies) {
+      for (let i = 0; i < bodies.length; i++) {
+        const b = bodies[i];
+        if (bodyGates(b)) hull += b.hp;
+      }
+    }
+    // SUMMED FIRST, ROUNDED ONCE, TO A TENTH — demo-v4's own arithmetic. The
+    // tenth is what keeps a float tail from making a still room look busy while
+    // still seeing a fifth of a point of damage across a whole room.
+    return foes + ":" + (Math.round(hull * 10) / 10) + ":" + blockerDamageSeen();
+  };
+
+  // ---- THE CLOCK RE-ARMS ON A ROOM BOUNDARY (S4-CX-4, the fix round) -------
+  // `restart()` put these back and nothing else did. An ordinary setpiece
+  // transition does not call it, and the production WIPE deliberately does not
+  // either (see the wipe block's four "restart() may, a wipe may not" clauses)
+  // — so a new room whose first pack happened to hold the same number of
+  // bodies INHERITED the old room's timestamp. Measured by the review: old wave
+  // 9 last saw six bodies at wave tick 2400; a wipe opens a fresh wave 1 with
+  // six bodies at wave tick 100; at fresh tick 1900 the count had been
+  // unchanged for the required 1800 ticks and the surface was still off — it
+  // arrived at 4200. That delays a MANDATORY deadlock signal by 2,300 ticks,
+  // and D21(a) has no other visibility.
+  //
+  // THE IDENTITY, and why it is three parts:
+  //   the WAVE, which changes at every ordinary transition and at a wipe from
+  //     any setpiece past the first;
+  //   the CYCLE, which is what distinguishes setpiece 4 of this arc from
+  //     setpiece 4 of the next. It is read through the local kernel and is
+  //     absent on a net client, where the wire carries no cycle — every arc
+  //     turn also turns the wave, so the wave half covers it there;
+  //     AND IT IS PRESENTATION-ONLY, and stays so: `E.loop` is production's own
+  //     arc loop counter, hashed and written by this file (PORT-S S7), and it
+  //     is what a SIM decision — the market's deal key — is allowed to read.
+  //     `S.cycle` is read HERE and nowhere else, for this unhashed clock;
+  //   and the ROOM CLOCK GOING BACKWARDS, which is the one signal that catches
+  //     a wipe of setpiece 1 INTO setpiece 1, where neither number moves.
+  //     `E.waveTick` cannot fall inside a room, so a fall is a new room.
+  //
+  // THE 60-TICK MARGIN on that last clause is the presented clock's slew. On a
+  // net client `E.waveTick` is LERPED between two snapshots and the adaptive
+  // depth walks the presented moment by up to a handful of ticks, so a bare
+  // `<` would re-arm on ordinary jitter and a jittering client would never
+  // surface a stall at all. One second is a 10x margin on that slew and a
+  // thirtieth of the 1,800-tick window, so the worst case this leaves is a
+  // wipe of setpiece 1 before its own 60th tick, whose inherited timestamp is
+  // then at most 60 ticks stale.
+  const stallIdentity = () => {
+    const cycle = typeof window !== "undefined" && window.DemoKernel
+      && window.DemoKernel.S ? window.DemoKernel.S.cycle : 0;
+    return E.wave + "/" + cycle;
+  };
+
+  // WHICH SOURCE IS HOLDING THE ROOM. Read off the kernel's own declared list
+  // — `DemoKernel.SPAWN_SOURCES`, which `test/node-golden.mjs`'s (c5) census
+  // holds against a scan of the kernel in both directions — so a source added
+  // to that file without a row there cannot end up unnamed here. The label is
+  // the STATS row's own, which is what the banner already prints.
+  //
+  // ASCENDING OVER THE BODY LIST, so a room holding two sources names the same
+  // one on every frame instead of flickering between them.
+  // ...OVER THE SAME PLANE THE COUNT READS (S4-CX-2). The published list is a
+  // fact about the kernel and travels with the page; the BODIES are whichever
+  // plane this surface presents. A decoded row carries its `type` string
+  // verbatim (js/net.js's `wireType`), so the lookup is the same lookup.
+  function stallSourceLabel() {
+    const K = typeof window !== "undefined" ? window.DemoKernel : null;
+    const bodies = presentedBodies();
+    if (!K || !Array.isArray(K.SPAWN_SOURCES) || !bodies) return "";
+    for (let i = 0; i < bodies.length; i++) {
+      const b = bodies[i];
+      if (!bodyIsLive(b)) continue;
+      if (K.SPAWN_SOURCES.indexOf(b.type) < 0) continue;
+      const st = K.STATS && K.STATS[b.type];
+      return String((st && st.label) || b.type).toUpperCase();
+    }
+    return "";
+  }
+
+  // ---- `cleared` AND `E.clearTick` ARE MAPPED NOW (PORT-S S4, commit E) ---
+  // What stood here was a REFUSAL and it named the round that would end it:
+  // *"`cleared` AND `E.clearTick` HAVE NO KERNEL SOURCE ... Production's 10 s
+  // break (`ECFG.clearHold` 480, the OWNER'S RULING S-bpzbzy) and D21's
+  // clear-to-advance are S4's work ... with no `cleared` state the WAVE CLEAR
+  // card does not show and the cleared-banner orb sweep does not run. Both are
+  // S4's to restore."* They are restored here.
+  //
+  // THE KERNEL'S DIRECTOR NOW HAS AN INTER-WAVE PHASE. It clears a setpiece
+  // when the room has cleared what it dealt (D21) and then holds for
+  // `CLEAR_HOLD` seconds before dealing the next. `clearHoldLeft()` is what is
+  // left of that hold, in seconds, and 0 whenever no break is running — so the
+  // question "is the room in its break" is one call with no threshold of this
+  // file's own.
+  //
+  // `E.clearTick` IS DERIVED, NEVER STORED TWICE. Production's six `cleared`
+  // consumers all read `E.waveTick - E.clearTick` against `ECFG.clearHold`, so
+  // what they need is the waveTick the break BEGAN on. The kernel's wave clock
+  // keeps running through the break, so that tick is this tick minus the part
+  // of the hold already spent — and because both terms advance by one per tick,
+  // the value is CONSTANT for the length of the break, which is exactly what a
+  // hashed field written every tick has to be.
+  //
+  // THE SAME NUMBER TWICE, AND A LEG HOLDS THEM EQUAL. `ECFG.clearHold` (480
+  // ticks) and the kernel's `CLEAR_HOLD` (8 seconds) are one break in two
+  // units; `test/tools/demo-director.mjs` asserts the equality, because two
+  // dials for one break is how they drift and the countdown numeral would be
+  // the first thing to lie about it.
+  //
+  // `dead` IS NOT MAPPED, and for the reason it never was: it is PRODUCTION'S,
+  // written by its own death path, and the kernel has no opinion about
+  // production's death screen.
+  function applyKernelHud() {
+    const K = window.DemoKernel;
+    if (!K || !K.S) return;
+    const S0 = K.S;
+    // ---- THE ARC TURN, COUNTED (PORT-S S7) -------------------------------
+    // The kernel ends its arc with `S.cycle++` then `startWave(1, false)`, so
+    // the ONE observable of a turn on this side is the mirrored wave FALLING.
+    // There is no write of E.wave anywhere in the dev-jump chain to hook
+    // instead: the setpiece lever (the 'dev'-prefixed jump this file reaches
+    // through EncounterHost, spelled ONCE in this file and counted by
+    // test/node-golden.mjs) moves the KERNEL's wave and E.wave follows here.
+    // SO A DOWNWARD DEV JUMP READS EXACTLY LIKE AN ARC TURN and increments the
+    // loop. That is stated here so a latency-rig run that selects a lower
+    // setpiece and then sees a fresh market hand is read as this rule, not as
+    // a market defect.
+    //   The WIPE does not reach this line: its own startWave(1) writes E.wave
+    // before the next tick's mirror runs, so the fall is never observed here.
+    // It counts its own loop, at its own site.
+    if (Number.isFinite(S0.wave) && S0.wave < E.wave) E.loop++;
+    if (Number.isFinite(S0.wave)) E.wave = S0.wave;
+    if (Number.isFinite(S0.waveTime)) E.waveTick = Math.round(S0.waveTime * 60);
+    // ONE CENSUS, and it is the kernel's — the same call `foeCount()` makes and
+    // the same one the clear gate itself reads. This file used to walk the body
+    // list here and `foeCount` used to walk it again a thousand lines below;
+    // two copies of a census is how a gate and a HUD come to disagree about
+    // whether a room is empty.
+    const live = kernelFoes();
+    const held = K.clearHoldLeft ? K.clearHoldLeft() : 0;
+    if (E.state !== "dead") {
+      if (held > 0) {
+        E.state = "cleared";
+        const hold = Number.isFinite(K.CLEAR_HOLD) ? K.CLEAR_HOLD : 0;
+        E.clearTick = E.waveTick - Math.round((hold - held) * 60);
+      } else {
+        E.state = live > 0 ? "active" : "warning";
+      }
+    }
+    E.kernelBanner = S0.banner > 0 ? String(S0.bannerText || "") : "";
   }
 
   // ---- per-tick update — called from game step() after the bullet sweep --
   function encStep() {
     if (E.state === "idle") E.state = "warning"; // the first played tick opens Wave 1
     if (frozen()) return; // double safety — game step() already gates these
+    // ---- THE FLIP (commit C): the successor plane owns the wave machine ---
+    // With the kernel driving, the whole old machine below — the clear
+    // elevator, the fast-clear slide, the schedule hold, the group loop, the
+    // warning/active line and the clear gate — is dormant, and the four HUD
+    // fields it wrote come from the kernel's director instead. Everything else
+    // in this function is the KEEPS half (PvP rams, the rebate resolve, orbs,
+    // the seat grace loop, the wipe, the claim/respawn loop, shipPrev, the pose
+    // ring) and runs unchanged: those are production's and stay production's.
+    const flipped = kernelDriving();
+    if (flipped) applyKernelHud();
+    // ---- D37'S DEAL, AT THE CLEAR (PORT-S S7) ----------------------------
+    // OUTSIDE the `flipped` guard on purpose. It reads `E.state`, `E.wave` and
+    // `E.loop` — whoever wrote them — so a surface with no kernel driving it,
+    // or a check that stages `E.state = "cleared"` itself, reaches the same
+    // rule through the same line. A deal gated on `flipped` would be a second
+    // predicate that could disagree with the state it is reading.
+    //
+    // KEYED ON THE WAVE BEING CLEARED, NOT ON THE WAVE THE KERNEL ADVANCES TO.
+    // The kernel holds `S.wave` at the cleared setpiece for the whole 480-tick
+    // break and only calls `advanceWave` when the hold reaches zero, so the
+    // hand dealt here IS the hand the player shops with during the break. That
+    // break is the shopping window the owner already ruled at 10 s.
+    //
+    // AN IDENTITY, NEVER AN EDGE. `E.state === "cleared"` is RE-DERIVED every
+    // tick of the break, so an edge would re-deal 480 times. Comparing the
+    // identity this clear WOULD deal against the one standing makes the check
+    // idempotent by construction — demo-v4's `marketId` idea, by spec.
+    //
+    // THE ARC TURN needs no special case: wave 16's clear deals (16, L); the
+    // turn tick has no hold left, so `E.state` is not `cleared` and nothing
+    // deals; wave 1's clear then deals (1, L+1), a different identity from the
+    // (1, L) this arc opened with. One deal per clear, across the turn.
+    {
+      const rewardWave = rewardWaveOf(E.wave);
+      if (E.state === "cleared" && dueForReward(E.wave)
+          && !(E.marketWave === E.wave && E.marketLoop === E.loop)) {
+        dealAll(rewardWave, E.loop);
+      }
+    }
+    // ...and D17's PARK RELEASE, immediately after the map that decides the
+    // boundary (S4 commit F). It reads `E.state === "cleared"`, so it has to
+    // run after the tick's own HUD write and before the claim/respawn loop
+    // below — a joiner released here is dealt its claim window on THIS tick and
+    // is PRESENT for the deal the break ends with, which is exactly what D17's
+    // row promises. Costs nothing when nobody is parked.
+    if (flipped) releaseParkedJoiners();
+    // ...and D39's STALL DETECTOR, on the same footing and for the same reason
+    // (the HOLD round, fix 12): it reads the census and `E.waveTick` this tick's
+    // HUD write just established, and it EMITS — so it has to run inside the
+    // step, on the authoritative server as much as on a page. See
+    // `advanceStall` for why it is not in the draw any more.
+    if (flipped) advanceStall();
     // the clear banner has held long enough — deal the next wave. The world
     // never froze here: the banner faded over the same ticks the orb sweep
     // banked the field, and the shop panel was live throughout. The return
@@ -3018,34 +3146,26 @@
     // clear-elevator tick; without the term this return would deal wave N+1
     // and the consume below would throw it away one tick later, two deals and
     // two reseeds paid for one wipe.
-    if (E.state === "cleared" && !E.wipePending && E.waveTick - E.clearTick >= ECFG.clearHold) {
-      startWave(E.wave + 1);
-      E.state = "warning";
-      recordPoseRow(); // the deal tick still SETTLES a pose set (nothing
-                       // moved — the poses are last tick's, which is exactly
-                       // what settled means); skipping it left every era one
-                       // tick (~15 px) too old for a ring-depth of ticks
-                       // after every wave deal (corrective pass 2)
-      return;
-    }
-    E.waveTick++;
-    // A cleared field does not wait out the clock. Once the wave is under way,
-    // if every body is dead and no ordnance is in the air, the REST of the
-    // schedule slides forward so the next group warns on this tick and lands
-    // its 90 ticks later. Only the dead time is cut: the warning still runs in
-    // full, and the remaining groups keep their pitch relative to each other,
-    // so a wave the player clears fast reads as pressure instead of a timer.
-    // The wave's OPENING beat is deliberately exempt — the gate needs a group
-    // already down, so continuing from the shop still lands its first pack on
-    // the committed 126-tick offset. "Settled" is the clear gate's own test,
-    // missiles included: a dead harrier's last seeker is still the wave.
-    if (E.state === "active" && E.enemies.length === 0 && E.missiles.length === 0) {
-      const next = E.groups.find((g) => !g.spawned);
-      if (next && E.waveTick < next.warnAt) {
-        const slide = next.warnAt - E.waveTick;
-        for (const g of E.groups) if (!g.spawned) { g.warnAt -= slide; g.spawnAt -= slide; }
-      }
-    }
+    // ---- THE DORMANT WAVE MACHINE IS DELETED (S3b lane 3, commit D5) -----
+    // Commit C made these branches DORMANT against `flipped`; this commit
+    // deletes them, and with them the last of production's own wave clock.
+    // What went, and what each one was:
+    //
+    //   THE CLEAR ELEVATOR — the `cleared` banner's hold, its `startWave(E.wave
+    //     + 1)` and the load-bearing `return` that kept the dealing tick from
+    //     advancing the sim. It dealt a wave, and there is no dealer.
+    //   `E.waveTick++` — production's own wave clock. `applyKernelHud` writes
+    //     `E.waveTick` from the kernel's director on every tick, so the
+    //     increment was writing a field that was overwritten before anything
+    //     read it.
+    //   THE FAST-CLEAR SLIDE — it walked pending `E.groups` forward when the
+    //     field was settled. There are no groups and no field of production's
+    //     to settle.
+    //
+    // AND WITH NO HOST INSTALLED THE HUD FIELDS SIMPLY STAND STILL. That is
+    // the honest end state and it is the point of the retirement: there is no
+    // second wave machine to fall back to. Every page that runs production
+    // installs the host unconditionally and throws if it refuses (commit C).
     // THE SCHEDULE HOLD (the user's call). While NO seat is flying, the pending
     // schedule does not close on the field: every pending group's warnAt and
     // spawnAt walk forward one tick per tick, so the schedule is frozen
@@ -3081,39 +3201,76 @@
     //   Only PENDING groups move. A spawned group's warnAt/spawnAt are spent
     // history that nothing reads again, and they are HASHED — walking them
     // would move the state hash every tick of an absence for no behaviour.
-    if (!players.some((_, s) => seatAlive(s)))
-      for (const g of E.groups) if (!g.spawned) { g.warnAt++; g.spawnAt++; }
-    for (const g of E.groups) {
-      // the warn event lands strictly AFTER the seeded anchor draws — emit
-      // touches no randomness, and the queue keeps it that way by design;
-      // the spawn event is one per GROUP, never per body — spawnEnemy is
-      // also a test hook and three darts landing is one event — and it
-      // carries the anchor the incoming marker points at, so the ear and
-      // the chevron agree on the direction
-      if (!g.points && E.waveTick >= g.warnAt) { g.points = rollGroupPoints(g.count, g.owner); emit("warn", g.points.anchor); }
-      if (!g.spawned && E.waveTick >= g.spawnAt) { spawnGroup(g); g.spawned = true; emit(HEAVY[g.type] ? "spawnheavy" : "spawn", g.points.anchor); }
-    }
-    if (E.state === "warning" && E.enemies.length) E.state = "active";
-    // BEFORE the enemy loop, so a missile launched this tick first flies on the
-    // NEXT one and the launch frame always draws it at the muzzle
-    stepMissiles();
-    for (const e of E.enemies) stepEnemy(e);
-    // this tick's settled positions, after the dash branch has had first claim
-    // on its own window, and before reapDead() so a contact kill reaps, counts
-    // and pays its orbs on the same tick a bullet kill would
-    resolveContacts();
-    // BETWEEN the two: enemy contacts keep today's timing to the tick (they
-    // resolve before anything a PvP death could remove from the field), and a
-    // ram kill still lands before the bullet pass, so a seat killed by a ram
-    // is already excluded from bullet candidacy on the same tick
+    // ---- THE SCHEDULE, THE GROUP LOOP AND THE ENEMY SLICE ARE DELETED ----
+    // PORT-S S3b lane 3, commit D4, and this is the last of S3B-MAP's nine
+    // ENTANGLEMENTS: `encStep` was ONE 423-line function serving both halves,
+    // interleaving at nine points, and the ordering comments below were
+    // load-bearing — each said which kill lands first and why.
+    //
+    // THE KEEPS-HALF ORDER IS PRESERVED VERBATIM, which is what the split
+    // owed. Every surviving comment below is the one that was there, in the
+    // place it was, saying what it said. The enemy-half calls are gone and
+    // the reasons the keeps half gave for sitting BETWEEN them are kept,
+    // because they are still the reasons: a ram kill still lands before the
+    // bullet pass, the rebate resolve still shares the live pass's slot, and
+    // the reap that used to follow the wall blasts is the successor plane's
+    // own now.
+    //
+    // WHAT WENT: the schedule hold, the group loop, the `warning -> active`
+    // line, `stepMissiles`, the `stepEnemy` walk, `resolveContacts` and
+    // `reapDead`. `resolveWallBlasts` STAYS — see its own block above.
+    // ---- THE DEATH WINDOW OPENS (S3b lane 3, FIX 1 / S3BR-01) -----------
+    // Every production path that can hurt a successor body runs between this
+    // line and the flush below: the comet ram, the rebate's queued winners,
+    // the live bullet sweep and the wall blasts. A kernel body killed by any of
+    // them is MARKED here and dies at the flush — which is `reapDead`'s own
+    // slot, the one S3B-MAP calls load-bearing and the one the deletion had
+    // quietly moved by handing production a synchronous door.
+    //
+    // IT IS ARMED UNCONDITIONALLY AND FLUSHED UNCONDITIONALLY, on a page with
+    // a host and a page without: the facade answers false/0 when it is not
+    // installed, so the pair costs an un-hosted tick two function calls and no
+    // branch of its own here. A conditional arm would be a second predicate
+    // beside `flipped` that could disagree with it.
+    const KH = typeof window !== "undefined" && window.EncounterHost;
+    if (KH) EncounterHost.armKernelDeaths();
     resolvePvpRams();
+    resolveCometBodyRams(); // FIX 2 — the comet's BODY ram, beside its ship twin
+                            // and inside the window: a ram kill lands before
+                            // the bullet pass, which is the keeps-half order
     applyRebateHits(); // the drain's queued rebate winners pay HERE — the
                        // slot live bullet damage occupies, so a rebated kill
                        // and a live kill share one timing (corrective pass 2)
     resolveBulletHits();
-    resolveWallBlasts(); // after the sweep, before the reap: a wall blast's kill
-                         // counts and pays its orbs on the tick it happened
-    reapDead();
+    resolveWallBlasts(); // after the sweep, and its comment's second half — "before
+                         // the reap" — went with the reap. A wall blast still reaches
+                         // the successor plane's bodies through blastAt's own arm.
+    // ...AND THE REAP, restored to its own slot. Every marked body's kill cue,
+    // its bounty and its death CHILDREN land here — after the shot that killed
+    // it emitted `hit` and resolved its blast, so a minelayer's three mines are
+    // born into a field the killing blast has already left.
+    //   THE CREDIT RIDES THE FLUSH UNCHANGED. `lastAtk` was stamped by the
+    // damage itself, through the R5 funnel, at the moment the blow landed; the
+    // kill cue reads that same field here and the wallet is paid once, by the
+    // one `killEnemy` this body will ever get.
+    if (KH) EncounterHost.flushKernelDeaths();
+    reapRamClaims(); // ...and the rammed body's claim dies WITH it (FIX 14) —
+                     // the retired `contactEvent` kept its window on the body,
+                     // so a reap took the window too. Called here, after the
+                     // flush, so that is true in the same tick.
+    // ---- D26'S STAGED CHILDREN LAND HERE (PORT-S S5, commit D) -----------
+    // The aura kills inside the KERNEL's own tick, which runs before this
+    // combat window opens. A child materialized there would be born inside the
+    // halo that killed its parent and would carry a degenerate previous
+    // position through every swept test in the same tick. So the kernel STAGES
+    // the aura's own births and this line materializes them — after the rams,
+    // the rebates, the rounds, the wall blasts and the death flush, with the
+    // window closed behind them. First eligibility is the NEXT tick.
+    //
+    // IT IS NARROW ON PURPOSE: only the aura's children are ever queued, so
+    // this call is a no-op on every tick with no comet and the whole
+    // no-comet path stays byte-identical.
+    if (KH) EncounterHost.flushKernelChildren();
     stepOrbs();
     for (const S of E.seats) { // every seat's grace and flash tick down together
       if (S.invuln > 0) S.invuln--;
@@ -3161,8 +3318,11 @@
     // still armed) — both server sweeps skip that shape, and the room ticks
     // all-absent until the grace expires. The fixtures reach the state
     // directly through the test seam. Do not delete this as dead code.
-    const emptyDealAsk = () =>
-      !E.groups.length && !players.some((_, i) => seatAlive(i));
+    // (`emptyDealAsk`'s `E.groups` half is deleted at commit D5 with the
+    //  schedule. Its whole reader — the all-absent re-deal — is deleted below,
+    //  so the derivation goes with it and `reclaimedIntoEmptyDeal` is left as
+    //  the loop's own record of a reclaim into a starved room, unread.)
+    const emptyDealAsk = () => !players.some((_, i) => seatAlive(i));
     let reclaimedIntoEmptyDeal = false;
     for (let s = 0; s < E.seats.length; s++) {
       const S = E.seats[s];
@@ -3172,7 +3332,17 @@
         // the RECLAIM. A press on a parked seat takes it back — and it can only
         // reach here from a client the server has bound to this seat, which is
         // what keeps a seat nobody is behind from dealing itself in
-        if (press) {
+        // ...and it is REFUSED while the seat is PARKED (S4-CX-1, the fix
+        // round). D17 parks a mid-setpiece grant so that no joiner lands
+        // inside a telegraph it did not see begin — and this door read only
+        // `S.absent`, which a parked seat is, so a grantee who clicked before
+        // the clear flew straight into the ongoing telegraph. The press is
+        // REFUSED, not queued: `releaseParkedJoiners` opens a full claim
+        // window at the clear, and the card that invites the click is the one
+        // that appears then, so a press from before the invitation says
+        // nothing about it. The same edge, arriving one tick after the
+        // release, is read here as the ordinary reclaim it now is.
+        if (press && !joinParked[s]) {
           if (emptyDealAsk()) reclaimedIntoEmptyDeal = true;
           S.absent = false;
           respawnSeat(s);
@@ -3257,10 +3427,41 @@
     //     the owner's call above, and the per-seat loop says which fields it
     //     leaves alone and why.
     if (wipeNow) {
-      E.enemies = [];  // a ceremony-free mass despawn: this bypasses reapDead, so no
-      E.missiles = []; // kill cue, no orbs, no FX — the field simply empties, and the
-      E.orbs = [];     // loose bounty goes with it, because an orb banked after the cut
+      // the ceremony-free mass despawn is one line now: production's own body
+      // and ordnance lists are deleted (commit D5) and the successor plane's
+      // arc restart below empties its field the same way.
+      E.orbs = [];     // loose bounty goes, because an orb banked after the cut
       E.pvpCd = {};    // would pay a wallet this same block has just emptied
+      // ---- ...AND THE SUCCESSOR PLANE'S ARC (S3b lane 3, commit D4) -------
+      // D15: THE WIPE IS A FULL ARC RESTART TO SETPIECE 1. The rule already
+      // said so — "the run lasts until the ROOM dies, and the wipe is the
+      // scoring moment" (D16) — and before the flip it was satisfied by
+      // emptying production's own arrays and re-dealing wave 1. After the flip
+      // the arc is the successor plane's, and a wipe that reset production's
+      // wave number while leaving the director mid-setpiece would deal the new
+      // run the old run's boss.
+      //
+      // IT IS THE KERNEL'S OWN `reset`, on the SAME SEED the wave-1 re-deal
+      // just reseeded from — one seed, both planes, exactly as `restart` does.
+      // Not the host's composed reset: this is already INSIDE production's
+      // tick, production has already taken its own cut in the lines above, and
+      // running its restart again from here would be a second discontinuity.
+      // through the host, for FIX 10's reason — and this is the site the finding
+      // was measured at: the wipe runs INSIDE `Encounter.step`, after the pose.
+      if (kernelDriving() && window.EncounterHost) {
+        EncounterHost.resetKernel(ECFG.seed >>> 0);
+      // ...AND PRODUCTION RE-POSES IN THE SAME STATEMENT (FIX 10 / S3BR-10).
+      // `resetRun` rebuilds native live pilots at hull 100, and this call can
+      // land AFTER the tick's only pose push — so without these two lines a
+      // phantom kernel pilot stands behind the dead seat until the next tick.
+      // `poseKernelSeats` is js/game.js's own per-tick push, called here rather
+      // than copied, so the mirror is re-established from PRODUCTION'S state as
+      // it is NOW — after the reset, not from the pose that preceded it.
+      // `applyPosesNow` lands them on the records: the bridge BANKS for the
+      // next step and there is no next step before this function returns.
+      if (typeof poseKernelSeats === "function") poseKernelSeats();
+      EncounterHost.applyPosesNow();
+      }
       G.bullets.length = 0;   // ...and rounds already in the air, which otherwise outlive
                               // the run that fired them and land on a wave nobody shot at
       rebateQueue.length = 0; // provably empty at this phase — applyRebateHits ran above
@@ -3279,6 +3480,12 @@
         // energyFill below sizes the pool off the seat's ENERGY CELL rank, so a
         // fill above the reset would deal the new run the old run's cap
         resetSeatUpgrades(s);
+        S.hand = [];    // ...AND THE MARKET HAND GOES WITH THE RUN (D37, S7). A wipe
+        S.bought = [];  // returns the room to NEVER DEALT, which is what the identity
+                        // zeroed beside E.loop below says. It is NOT in
+                        // resetSeatUpgrades: a DEATH runs that primitive too, and a
+                        // death must KEEP the ids (the ranks are gone, so the cards
+                        // are buyable again) while a wipe must take the shelf away.
         S.hullMax = ECFG.player.hull; // MAX HULL is a stored `+=` on the seat, not a
                                       // derived term — resetSeatUpgrades cannot undo it
         if (S.hull > S.hullMax) S.hull = S.hullMax; // ...and the ONE seat that can be
@@ -3360,6 +3567,17 @@
       E.hitsDealt = 0;
       E.hitsTaken = 0;
       E.contactsDealt = 0;
+      E.marketWave = 0;  // ...and the room is NEVER DEALT again. Zero is a wave
+      E.marketLoop = 0;  // no clear can ever produce (they start at 1), so a wiped room
+                         // and a booted one read identically — which is what a wipe means.
+      E.loop++;          // ...AND THE WIPE COUNTS A LOOP, explicitly, HERE. A wipe is a
+                         // new run in everything but name, and the startWave(1) on the
+                         // next line writes E.wave before the next tick's kernel mirror
+                         // can see it fall — so the mirror's own turn counter never
+                         // observes this one. Two writers, two disjoint events, and this
+                         // is the second. What it buys is stated at the declaration: a
+                         // market key carries the loop, so no hand a wipe took away can
+                         // ever be dealt back on the same wave number.
       startWave(1);
       E.state = "warning"; // restart() parks at "idle" because it runs BETWEEN ticks and
                            // encStep's opening line promotes it; this runs INSIDE one,
@@ -3405,7 +3623,17 @@
     // landing on a wipe's own tick leaves nothing for this line to do. No
     // flag rides E.* for any of this: "the deal was empty" is derived, so
     // the state hash and every committed fixture stand untouched.
-    if (reclaimedIntoEmptyDeal && !E.groups.length) startWave(1);
+    // ...and NOT after the flip. The all-absent re-deal exists to hand a
+    // reclaiming seat a wave when the deal it walked into was empty, and after
+    // the flip EVERY deal is empty by design — so this line would fire on every
+    // reclaim, re-seeding production's one `rand` stream each time for a wave
+    // that is not production's to deal any more.
+    // (the ALL-ABSENT RE-DEAL is deleted at commit D5. Commit C had already
+    //  ruled it dormant with the reason written above — after the flip every
+    //  production deal is empty by design, so the line would fire on every
+    //  reclaim and re-seed production's one `rand` stream for a wave that is
+    //  not production's to deal. A dormant call to a deleted dealer is not a
+    //  line to keep.)
     // A wave clears only when the queue is empty AND the field is empty AND no
     // ordnance is still in the air — still an explicit simplification of Nova
     // Drift's timer-driven overlapping scheduler. The missile term is what
@@ -3413,12 +3641,16 @@
     // dead harrier's last missile is still the wave. The break runs clearHold
     // ticks while the sweep banks the orbs — the CLEAR card retires earlier,
     // on bannerHold() = min(210, clearHold) — then the elevator deals.
-    if (E.state === "active" && E.enemies.length === 0 && E.missiles.length === 0 &&
-        E.groups.every((g) => g.spawned)) {
-      E.state = "cleared";
-      E.clearTick = E.waveTick;
-      emit("clear", null, undefined, 0); // the run's one victory phrase — positionless: it is a ROOM fact, and att() measured from a far seat's own ship would silence it
-    }
+    // ---- THE CLEAR GATE IS DELETED (S3b lane 3, commit D5) ---------------
+    // It read "the queue is empty AND the field is empty AND no ordnance is in
+    // the air" off three lists that are all deleted, and it wrote `E.state`
+    // and `E.clearTick` — both of which `applyKernelHud` writes from the
+    // kernel's director on every tick. Its `clear` cue goes with it: the
+    // successor plane raises its own through the host's CUE ROUTE (commit D4),
+    // which is the channel production's event queue now hears arrivals on.
+    //   THE 10 s INTER-WAVE BREAK AND D21's CLEAR-TO-ADVANCE ARE S4's, and the
+    // owner's ruling on the break (S-bpzbzy, clearHold 480) is PARKED, not
+    // reproduced here. `ECFG.clearHold` survives unread for that round.
     // every seat's settled position, one record per seat — see E.shipPrev
     E.shipPrev = players.map((pl) => ({ x: pl.ship.x, y: pl.ship.y }));
     recordPoseRow(); // ...and the phase-15 ring's row, from the same settled
@@ -3426,339 +3658,18 @@
   }
 
   // ---- drawing: world pass (under the camera transform) ------------------
-  // the charger silhouette, in local body space facing +x: a flat ram face,
-  // wide shoulders, a notched tail — reads heavier than a dart at a glance
-  function chargerPath() {
-    ctx.beginPath();
-    ctx.moveTo(9, -4.5);
-    ctx.lineTo(9, 4.5); // the blunt ram face
-    ctx.lineTo(-1, 8);
-    ctx.lineTo(-8, 0);
-    ctx.lineTo(-1, -8);
-    ctx.closePath();
-  }
-
-  // Which way a silhouette points: a planted attack shows the LOCKED angle, so
-  // the body and its telegraph can never disagree about where the threat goes.
-  const bodyAngle = (e) => (e.mode === "seek" || e.mode === "tired" ? e.face : e.lockA);
-
-  // One draw function per type, dispatched off a table instead of a chain of
-  // type tests. Every silhouette is Canvas primitives in the palette the whole
-  // game already speaks — no assets. SILHOUETTE says archetype, COLOUR says
-  // tier (the shard excepted — one tier): the plate below is the ONE lookup
-  // every body block reads, steel 1 / radar cyan 2 / gold 3, and the light
-  // layer picks its halo off the same tier field, so ink and light can never
-  // disagree. The clay centre dot stays clay on every tier — clay is the
-  // attack channel, never a tier. Draw only: nothing here
-  // mutates sim state and nothing here draws randomness.
-  const TIER_INK = { 1: C.steel, 2: C.radar, 3: C.gold };
-  const tierInk = (e) => TIER_INK[e.stats && e.stats.tier] || C.steel;
-  function drawDart(e) {
-    const L = ECFG.lance;
-    if (e.mode === "tele") {
-      const p = 1 - e.t / L.telegraph; // the warning brightens as it charges
-      ctx.strokeStyle = C.clay;
-      ctx.globalAlpha = 0.25 + 0.55 * p;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(e.x, e.y);
-      ctx.lineTo(e.x + Math.cos(e.lockA) * L.len, e.y + Math.sin(e.lockA) * L.len);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(e.x + Math.cos(e.lockA) * (e.r + 3), e.y + Math.sin(e.lockA) * (e.r + 3), 1 + 2.5 * p, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-    } else if (e.mode === "pulse") {
-      const bx = e.x + Math.cos(e.lockA) * L.len;
-      const by = e.y + Math.sin(e.lockA) * L.len;
-      ctx.strokeStyle = C.clay;
-      ctx.globalAlpha = 0.5;
-      ctx.lineWidth = L.halfWidth * 2 + 2;
-      ctx.beginPath();
-      ctx.moveTo(e.x, e.y);
-      ctx.lineTo(bx, by);
-      ctx.stroke();
-      ctx.strokeStyle = C.bright;
-      ctx.globalAlpha = 0.9;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(e.x, e.y);
-      ctx.lineTo(bx, by);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
-    ctx.save();
-    ctx.translate(e.x, e.y);
-    ctx.rotate(bodyAngle(e));
-    ctx.fillStyle = e.flash > 0 ? C.bright : tierInk(e);
-    ctx.beginPath(); // the dart: nose toward the player, notched tail
-    ctx.moveTo(8, 0);
-    ctx.lineTo(-6, 5.5);
-    ctx.lineTo(-3, 0);
-    ctx.lineTo(-6, -5.5);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = C.clay;
-    ctx.beginPath();
-    ctx.arc(0, 0, 1.6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  function drawCharger(e) {
-    const CH = ECFG.charger;
-    if (e.mode === "windup") {
-      // honest telegraph: the intent line shows the REAL dash lane and
-      // brightens as the windup completes
-      const p = 1 - e.t / CH.windup;
-      const reach = CH.dashSpeed * CH.dashTicks;
-      ctx.strokeStyle = C.clay;
-      ctx.globalAlpha = 0.2 + 0.6 * p;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(e.x, e.y);
-      ctx.lineTo(e.x + Math.cos(e.lockA) * reach, e.y + Math.sin(e.lockA) * reach);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-    } else if (e.mode === "dash") {
-      for (let g = 1; g <= 3; g++) { // a short motion trail behind the lunge
-        ctx.save();
-        ctx.translate(e.x - Math.cos(e.lockA) * g * CH.dashSpeed, e.y - Math.sin(e.lockA) * g * CH.dashSpeed);
-        ctx.rotate(e.lockA);
-        ctx.globalAlpha = 0.28 - g * 0.07;
-        ctx.fillStyle = tierInk(e);
-        chargerPath();
-        ctx.fill();
-        ctx.restore();
-      }
-      ctx.globalAlpha = 1;
-    }
-    ctx.save();
-    ctx.translate(e.x, e.y);
-    ctx.rotate(bodyAngle(e));
-    // the windup body flash quickens as the dash nears — with the
-    // brightening line, two independent tells for one attack
-    const per = e.mode === "windup" ? Math.max(2, 10 - Math.floor((1 - e.t / CH.windup) * 8)) : 0;
-    ctx.fillStyle = e.flash > 0 || (per > 0 && e.t % per < per / 2) ? C.bright : tierInk(e);
-    chargerPath();
-    ctx.fill();
-    ctx.fillStyle = C.clay;
-    ctx.beginPath();
-    ctx.arc(0, 0, 2, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  // the standoff hull: a narrow spine with swept rails, and — while it locks —
-  // a lane line down the missile's real bearing under a reticle that CLOSES
-  // onto the muzzle as the launch nears. Two tells for one attack, same as the
-  // charger: the lane says where, the reticle says when.
-  function drawHarrier(e) {
-    const H = ECFG.harrier;
-    if (e.mode === "lockon") {
-      const p = 1 - e.t / H.lockon;
-      const reach = ECFG.missile.speed * ECFG.missile.life * 0.35; // a slice of the
-      // 260 px reach — the whole flight drawn as a line would read as a beam
-      ctx.strokeStyle = C.clay;
-      ctx.globalAlpha = 0.15 + 0.5 * p;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(e.x, e.y);
-      ctx.lineTo(e.x + Math.cos(e.lockA) * reach, e.y + Math.sin(e.lockA) * reach);
-      ctx.stroke();
-      ctx.globalAlpha = 0.3 + 0.6 * p;
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.arc(e.x + Math.cos(e.lockA) * (e.r + 12), e.y + Math.sin(e.lockA) * (e.r + 12), 8 - 5.5 * p, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
-    ctx.save();
-    ctx.translate(e.x, e.y);
-    ctx.rotate(bodyAngle(e));
-    ctx.fillStyle = e.flash > 0 ? C.bright : tierInk(e);
-    ctx.beginPath(); // a long nose over a deeply notched tail — nothing like a dart
-    ctx.moveTo(10, 0);
-    ctx.lineTo(1, 3.5);
-    ctx.lineTo(-7, 6.5);
-    ctx.lineTo(-4, 0);
-    ctx.lineTo(-7, -6.5);
-    ctx.lineTo(1, -3.5);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = C.clay; // the rails the missile leaves from
-    ctx.fillRect(-2, -5.6, 6, 1.3);
-    ctx.fillRect(-2, 4.3, 6, 1.3);
-    ctx.restore();
-  }
-
-  // the wedge, drawn with its shield ARC on: the covered 140° is painted in the
-  // danger accent so the answer to this body — walk around it — is visible
-  // rather than discovered by wasting a magazine on the front
-  function drawAnvil(e) {
-    const P = e.stats;
-    ctx.save();
-    ctx.translate(e.x, e.y);
-    ctx.rotate(bodyAngle(e));
-    ctx.fillStyle = e.flash > 0 ? C.bright : tierInk(e);
-    ctx.beginPath();
-    ctx.moveTo(11, 0);   // the armored prow
-    ctx.lineTo(3, 9);
-    ctx.lineTo(-9, 10);
-    ctx.lineTo(-6, 0);
-    ctx.lineTo(-9, -10);
-    ctx.lineTo(3, -9);
-    ctx.closePath();
-    ctx.fill();
-    ctx.strokeStyle = C.clay;
-    ctx.globalAlpha = 0.6;
-    ctx.lineWidth = 2;
-    ctx.beginPath(); // the shield itself, on exactly the arc the sim tests
-    ctx.arc(0, 0, e.r + 3, -P.arc, P.arc);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-    ctx.restore();
-  }
-
-  // the bloated drifter: a swollen hull with three seams already showing where
-  // it will come apart, so the death burst is telegraphed by the body itself
-  function drawHusk(e) {
-    ctx.save();
-    ctx.translate(e.x, e.y);
-    ctx.rotate(bodyAngle(e));
-    ctx.fillStyle = e.flash > 0 ? C.bright : tierInk(e);
-    ctx.beginPath();
-    ctx.arc(0, 0, e.r - 1, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = C.clay;
-    for (let k = 0; k < 3; k++) { // the three shards, visible under the skin
-      const a = (k * 2 * Math.PI) / 3;
-      ctx.beginPath();
-      ctx.arc(Math.cos(a) * 5.5, Math.sin(a) * 5.5, 2.2, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.strokeStyle = C.dim; // the strained outer skin
-    ctx.globalAlpha = 0.8;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(0, 0, e.r + 1.5, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-    ctx.restore();
-  }
-
-  // the payload: a dart's shape at half scale, so a burst reads instantly as
-  // "three small fast things" without a new vocabulary
-  function drawShard(e) {
-    ctx.save();
-    ctx.translate(e.x, e.y);
-    ctx.rotate(bodyAngle(e));
-    ctx.fillStyle = e.flash > 0 ? C.bright : tierInk(e);
-    ctx.beginPath();
-    ctx.moveTo(6, 0);
-    ctx.lineTo(-4, 3.6);
-    ctx.lineTo(-2, 0);
-    ctx.lineTo(-4, -3.6);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-  }
-
-  // The radar identity, painted OVER the parent silhouette: a cyan core dot, a
-  // slow sweep ring (the "sensor" read), and — for predT ticks after a latch —
-  // an expanding ping at the predicted point, the "this is where it thinks you
-  // will be" mark. The sweep rotates off E.waveTick: drawing only, determinism
-  // intact, and it freezes with the sim like every other pulse in this file.
-  function drawRadarAccent(e) {
-    ctx.save();
-    ctx.translate(e.x, e.y);
-    ctx.fillStyle = C.radar; // the cyan core over the parent's clay dot — on a
-    // gold elite this dot still says "this one leads your aim". The rim SWEEP
-    // that used to walk here is DELETED (owner, the tier pass): the tier
-    // colour now carries what the sweep said.
-    ctx.beginPath();
-    ctx.arc(0, 0, 2, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-    if (e.predT > 0) {
-      const p = 1 - e.predT / 20; // expands and fades over the 20-tick ping
-      ctx.strokeStyle = C.radar;
-      ctx.globalAlpha = 0.85 * (1 - p);
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.arc(e.predX, e.predY, 3 + 10 * p, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(e.predX, e.predY, 1.2, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
-  }
-
-  // the radar variants route through the PARENT draw — modes, lockA and
-  // telegraph all render unchanged, so the leading line comes for free — and
-  // the accent overlays the shared cyan identity on top
-  const drawRadarDart = (e) => { drawDart(e); drawRadarAccent(e); };
-  const drawRadarCharger = (e) => { drawCharger(e); drawRadarAccent(e); };
-  const drawRadarHarrier = (e) => { drawHarrier(e); drawRadarAccent(e); };
-
-  const DRAW_BODY = { dart: drawDart, charger: drawCharger, harrier: drawHarrier,
-                      anvil: drawAnvil, husk: drawHusk, shard: drawShard,
-                      radarDart: drawRadarDart, radarCharger: drawRadarCharger,
-                      radarHarrier: drawRadarHarrier,
-                      // the tier rows draw as their parents — the elite aimed
-                      // rows keep the radar accent they carry, the husk and
-                      // anvil tiers keep the parent silhouette; COLOUR is what
-                      // says tier (tierInk), never a new shape
-                      eliteDart: drawRadarDart, eliteCharger: drawRadarCharger,
-                      eliteHarrier: drawRadarHarrier,
-                      packHusk: drawHusk, eliteHusk: drawHusk,
-                      wardAnvil: drawAnvil, eliteAnvil: drawAnvil };
-
-  // the missile, and the trail that is the actual UI for it: a bare dot moving
-  // 4 px/tick reads as a teleport, while a tapering 14-sample tail shows the
-  // turn radius the player has to beat. Newest sample is brightest and widest,
-  // and the live position closes the tail so there is never a gap at the tip.
-  function drawMissiles(list) {
-    for (const m of list || E.missiles) {
-      // a radar round wears the sensor cyan nose to tail, so which turn budget
-      // is chasing you is readable from the trail alone
-      const col = m.radar ? C.radar : C.clay;
-      for (let i = 1; i <= m.trail.length; i++) {
-        const a0 = m.trail[i - 1];
-        const a1 = i < m.trail.length ? m.trail[i] : m;
-        const p = i / m.trail.length;
-        ctx.strokeStyle = col;
-        ctx.globalAlpha = 0.05 + 0.35 * p;
-        ctx.lineWidth = 0.6 + 2 * p;
-        ctx.beginPath();
-        ctx.moveTo(a0.x, a0.y);
-        ctx.lineTo(a1.x, a1.y);
-        ctx.stroke();
-      }
-      ctx.globalAlpha = 1;
-      ctx.save();
-      ctx.translate(m.x, m.y);
-      // the nose heading: a FRAME copy carries headR — the interpolated
-      // heading rolled in game.js's capture (the enemies' pf/cf idiom) — so
-      // the nose turns smoothly between ticks; a live object (no copy, or a
-      // headless caller) keeps the raw velocity heading, byte-identical
-      ctx.rotate(typeof m.headR === "number" ? m.headR : Math.atan2(m.vy, m.vx));
-      ctx.fillStyle = col;
-      ctx.beginPath();
-      ctx.moveTo(5.5, 0);
-      ctx.lineTo(-3, 2.6);
-      ctx.lineTo(-1.5, 0);
-      ctx.lineTo(-3, -2.6);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = C.bright; // the hot tip — the one bright pixel that says
-      ctx.beginPath();          // this is live ordnance and not a spark
-      ctx.arc(3, 0, 1.3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-  }
+  // ---- THE SEVEN BODY DRAWS AND THE SEEKER DRAW ARE RETIRED --------------
+  // PORT-S S3b lane 3, commit D2. `chargerPath`, `drawDart`, `drawCharger`,
+  // `drawHarrier`, `drawAnvil`, `drawHusk`, `drawShard`, `drawRadarAccent`,
+  // the `DRAW_BODY` dispatch table and `drawMissiles` — 334 lines — went with
+  // the roster they drew. D9 replaced that roster; the successor plane has
+  // twenty-one silhouettes of its own in js/demo-render.js, and js/game.js's
+  // render() draws them in this file's own slot under production's camera.
+  //
+  // NOTHING REPLACES THEM HERE. A dispatch table with no types to dispatch on
+  // is not a smaller table, it is a table, and the fallback that used to guard
+  // an unknown type ("an invisible body is the worst possible bug here") has
+  // no body to guard.
 
   // The light list: every body this file DREW, as position, radius and kind,
   // for the render-only glow layer in js/fx.js. One accessor rather than a
@@ -3771,18 +3682,52 @@
   // halo pinned to the tick pose of a body drawn at the interpolated pose
   // detaches from it by up to a full tick of flight. A caller with no view (a
   // headless page, a direct probe, the alpha-1 branch) falls back to the LIVE
-  // arrays, because restart() replaces E.enemies/E.missiles/E.orbs whole.
+  // arrays, because restart() replaces E.orbs whole.
   // LIGHTS is module-level and cleared per call — the same reused-buffer idiom
   // the arrow tracker uses.
   const LIGHTS = [];
   function lights(view) {
     LIGHTS.length = 0;
     if (E.state === "idle") return LIGHTS;
-    // enemy records carry `tier` so the halo reads the SAME table the plate
-    // ink reads; missile records stay tier-LESS — the fx pick must keep its
-    // name test for them or every radar missile's halo goes clay
-    for (const e of (view && view.enemies) || E.enemies) LIGHTS.push({ x: e.x, y: e.y, r: e.r, t: e.type, tier: e.stats && e.stats.tier });
-    for (const m of (view && view.missiles) || E.missiles) LIGHTS.push({ x: m.x, y: m.y, r: m.r, t: m.radar ? "radarMissile" : "missile" });
+    // ---- THE SUCCESSOR PLANE'S GLOW (S3b lane 3, commit C) ---------------
+    // S3B-MAP's risk-2 symptom in its exact shape: "the client draws a dark,
+    // empty field ... `lights()` pushes nothing, so the bloom pass iterates an
+    // empty list and the whole field goes dark". This is the line that stops
+    // it. The kernel's bodies, its ORDNANCE (which production never had — the
+    // enemy round is the successor plane's own contribution to the light) and
+    // its orbs all reach js/fx.js's one consumer through the accessor that was
+    // always the seam for this.
+    //
+    // TIERLESS ON PURPOSE. The `tier` field is the OLD roster's steel/radar/gold
+    // plate table, and a kernel body has no tier — so the halo falls through to
+    // the fx layer's NAME test, exactly as a missile's always has. A tier
+    // invented here would be a second colour authority for a plate this file no
+    // longer draws.
+    //
+    // IT IS A LIVE READ, never a cached one, on this function's own rule: the
+    // kernel REPLACES nothing but its arrays are re-read every frame anyway,
+    // and the buffer below is refilled per call and never retained.
+    if (typeof window !== "undefined" && window.EncounterHost && window.EncounterHost.installed()) {
+      const K = window.DemoKernel;
+      for (const e of window.EncounterHost.bodies()) {
+        if (e.dead || e.hp <= 0) continue;
+        LIGHTS.push({ x: e.x, y: e.y, r: e.r, t: e.type });
+      }
+      if (K && K.S) {
+        for (const b of K.S.bullets) if (!b.dead) LIGHTS.push({ x: b.x, y: b.y, r: b.r, t: b.kind || "bolt" });
+        for (const o of K.S.orbs) LIGHTS.push({ x: o.x, y: o.y, r: ECFG.orb.r, t: "orb" });
+      }
+    }
+    // ---- PRODUCTION'S OWN BODY AND ORDNANCE LIGHTS ARE DELETED (D5) ------
+    // Two walks, over `E.enemies` and `E.missiles`, both deleted with the
+    // arrays. THE `view` ARM GOES WITH THEM AND IT IS THE HALF WORTH NAMING:
+    // `view.enemies` is a NET CLIENT'S decoded body list, so a client still
+    // has bodies to light — but it decodes them into the same `E.enemies` the
+    // sim no longer keeps, and the whole of that decode is R7's to re-cut
+    // against wire v11. Lighting a `ty:-1` body here would be inventing a
+    // colour for a type the wire cannot yet name.
+    //   THE ORB WALK BELOW IS UNTOUCHED and still reads the view — orbs cross
+    // the wire honestly and a client's own bounty must glow.
     for (const o of (view && view.orbs) || E.orbs) LIGHTS.push({ x: o.x, y: o.y, r: ECFG.orb.r, t: "orb" });
     return LIGHTS;
   }
@@ -3798,22 +3743,15 @@
     if (E.state === "idle") return;
     ctx.save();
     const wt = E.waveTick;
-    // spawn portals while a group is announced but not landed
-    for (const g of E.groups) {
-      if (!g.points || g.spawned) continue;
-      const a = g.points.anchor;
-      const pulse = 0.35 + 0.4 * Math.abs(Math.sin(wt * 0.15));
-      ctx.strokeStyle = C.clay;
-      ctx.lineWidth = 1.5;
-      ctx.globalAlpha = pulse;
-      ctx.beginPath();
-      ctx.arc(a.x, a.y, 10 + 6 * Math.abs(Math.sin(wt * 0.1)), 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(a.x, a.y, 3, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
+    // ---- THE SPAWN PORTAL DRAW IS DELETED (S3b lane 3, commit D5) --------
+    // Fifteen lines of pulsing ring over `E.groups[].points.anchor` — the
+    // announcement of an arrival production's dealer had scheduled. The dealer
+    // went at commit D4 and the schedule goes at this one, so the anchor it
+    // drew has no producer.
+    //   THE CUE IS NOT LOST: the successor plane announces its own arrivals
+    // with a PORTAL of its own, drawn in js/demo-render.js's world pass under
+    // production's camera — which commit D2 already recorded when it declined
+    // to rebuild the off-screen tracker for the same reason.
     // XP orbs
     for (const o of (view && view.orbs) || E.orbs) {
       ctx.fillStyle = C.clay;
@@ -3825,13 +3763,12 @@
       ctx.arc(o.x, o.y, 1.2, 0, Math.PI * 2);
       ctx.fill();
     }
-    // enemy bodies, telegraphs, beams and trails — one function per type off
-    // the dispatch table; an unknown type falls back to the dart rather than
-    // vanishing, because an invisible body is the worst possible bug here
-    for (const e of (view && view.enemies) || E.enemies) (DRAW_BODY[e.type] || drawDart)(e);
-    // ordnance paints OVER the bodies: a missile crossing a pack is the thing
-    // the player has to answer first, so it must never be hidden behind one
-    drawMissiles(view && view.missiles);
+    // (the body walk and the ordnance walk are RETIRED — commit D2. The
+    // successor plane's twenty-one silhouettes are js/demo-render.js's and
+    // js/game.js's render() draws them in THIS FUNCTION'S OWN SLOT, under
+    // production's camera, immediately after this call. The ordering the two
+    // comments here defended — ordnance paints OVER the bodies — is that
+    // renderer's own pass order now, and it keeps it.)
     // post-hit grace — a blinking ring around each graced ship. The ring
     // centres on the FRAME pose for its seat — the same pose drawShip gets —
     // so it never orbits a hull the frame drew somewhere else.
@@ -3852,161 +3789,23 @@
     ctx.restore();
   }
 
-  // ---- drawing: HUD and overlays (screen space, no camera) ---------------
-  function drawIncomingMarker(a, wt, vc) {
-    // vc is the PRESENTED camera (view.cam) — the marker's world → screen
-    // conversion must use the same camera the world pass drew with, or the
-    // chevron steps against a smooth field. Callers without a view fall back
-    // to the tick camera.
-    const c = vc || cam;
-    const sx = a.x - c.x;
-    const sy = a.y - c.y;
-    const cx = Math.max(14, Math.min(FW - 14, sx));
-    const cy = Math.max(14, Math.min(FH - 14, sy));
-    const off = Math.abs(sx - cx) > 0.5 || Math.abs(sy - cy) > 0.5;
-    const ang = off ? Math.atan2(sy - cy, sx - cx) : -Math.PI / 2;
-    const pulse = 0.45 + 0.45 * Math.abs(Math.sin(wt * 0.15));
-    ctx.save();
-    ctx.globalAlpha = pulse;
-    ctx.translate(cx, cy);
-    ctx.rotate(ang);
-    ctx.fillStyle = C.clay;
-    ctx.beginPath(); // chevron pointing at the arrival point
-    ctx.moveTo(7, 0);
-    ctx.lineTo(-4, 5);
-    ctx.lineTo(-1, 0);
-    ctx.lineTo(-4, -5);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-    ctx.globalAlpha = pulse;
-    ctx.fillStyle = C.clay;
-    ctx.font = "400 8px " + FONT;
-    ctx.textAlign = "center";
-    const tx = Math.max(30, Math.min(FW - 30, cx));
-    const ty = cy < FH / 2 ? cy + 16 : cy - 10;
-    ctx.fillText("INCOMING", tx, ty);
-    ctx.globalAlpha = 1;
-  }
-
-  // ---- screen-edge arrows -------------------------------------------------
-  // Quiet chevrons on an inset rect, one per direction to an enemy the
-  // viewport has lost. Pure functions of live state (E.enemies, E.missiles,
-  // cam, FW/FH, and E.waveTick for the halo's pulse clock): no rand(), no
-  // Math.random(), no Date.now() — the draw path can never desync a replay.
-  // Directions closer than a bucket apart merge into one arrow (the nearest
-  // body of the bucket represents it) and a nearest-first cap bounds the
-  // worst case, so a swarm behind you stays readable. HOT is the escalation:
-  // a body whose telegraph is running right now — a harrier mid-lock, a
-  // charger mid-windup — outranks proximity for its bucket's claim and
-  // survives the cap first, because the marker's job in that moment is the
-  // shooter, not the nearest walker standing in front of it.
-  const ARROWS = { inset: 14, cap: 16, buckets: 48, far: 1200 };
-  function computeEdgeArrows(view) {
-    // view is game.js's presentation FRAME: the camera AND the bodies read
-    // the presented instant together, so an arrow's visibility cut and its
-    // bearing agree with the world pass. A caller without a view (the __test
-    // export, a headless page) keeps the live state — same geometry, tick
-    // camera.
-    const c = (view && view.cam) || cam;
-    const foes = (view && view.enemies) || E.enemies;
-    const miss = (view && view.missiles) || E.missiles;
-    const vx = c.x + FW / 2; // the view centre — position and heading share
-    const vy = c.y + FH / 2; // this ray, so an arrow points where it sits
-    const slots = new Array(ARROWS.buckets).fill(null); // fixed slot order — deterministic
-    // one bucket claim, shared by the bodies and the ordnance so both fold into
-    // the SAME merge and the same nearest-wins rule
-    const track = (o, type, hot) => {
-      const sx = o.x - c.x;
-      const sy = o.y - c.y;
-      if (sx >= -o.r && sx <= FW + o.r && sy >= -o.r && sy <= FH + o.r) return; // any part visible — no arrow
-      const dx = o.x - vx;
-      const dy = o.y - vy;
-      const dist = Math.hypot(dx, dy);
-      const step = (2 * Math.PI) / ARROWS.buckets;
-      const bi = ((Math.round(Math.atan2(dy, dx) / step) % ARROWS.buckets) + ARROWS.buckets) % ARROWS.buckets;
-      const s = slots[bi];
-      if (!s) slots[bi] = { dx, dy, dist, n: 1, type, bi, hot: !!hot };
-      else {
-        s.n++;
-        // hot wins the bucket outright; among peers the nearest wins, as ever
-        if ((hot && !s.hot) || (!!hot === !!s.hot && dist < s.dist)) {
-          s.dx = dx; s.dy = dy; s.dist = dist; s.type = type; s.hot = !!hot;
-        }
-      }
-    };
-    for (const e of foes) {
-      if (e.hp <= 0) continue;
-      // a radar variant resolves through its base archetype, so its telegraph
-      // buys the same hot flag, scale and danger accent as the parent's —
-      // never a silently quiet-steel chevron
-      const kin = e.stats.base || e.type;
-      track(e, kin, (kin === "harrier" && e.mode === "lockon") ||
-                    (kin === "charger" && e.mode === "windup"));
-    }
-    // missiles earn arrows too: a 512×342 window on a 3072×3762 world makes an
-    // unheralded off-screen seeker unfair, and a harrier that fires from
-    // outside the view is exactly the case this layer was built for
-    for (const m of miss) track(m, "missile");
-    const hw = FW / 2 - ARROWS.inset;
-    const hh = FH / 2 - ARROWS.inset;
-    return slots.filter(Boolean)
-      .sort((a, b) => (b.hot ? 1 : 0) - (a.hot ? 1 : 0) || a.dist - b.dist || a.bi - b.bi) // hot first,
-      .slice(0, ARROWS.cap)                     // then nearest; explicit tie-break — deterministic order
-      .map((s) => {
-        // an off-screen body always overshoots one half-extent, so k < 1 and
-        // the arrow lands exactly ON the inset rect — inside the field clip,
-        // never in the letterbox bars
-        const k = Math.min(hw / Math.max(Math.abs(s.dx), 1e-9), hh / Math.max(Math.abs(s.dy), 1e-9));
-        return { x: FW / 2 + s.dx * k, y: FH / 2 + s.dy * k,
-          ang: Math.atan2(s.dy, s.dx), dist: s.dist, n: s.n, type: s.type, hot: s.hot };
-      });
-  }
-  // per-type chevron size and colour, as two small lookups rather than a
-  // growing ternary. Size is mass — the heavies read bigger, ordnance smaller.
-  // The danger accent has two grades. The standing accent (colour) goes to the
-  // three things that can reach you from where they are: the charger (as it
-  // always did), the harrier that shoots across the field, and the missile
-  // already on its way. The bodies that have to walk to you keep the quiet
-  // steel. HOT is the second grade — the telegraph is running RIGHT NOW —
-  // and it buys full strength and a pulsing halo, so the one chevron that is
-  // about to cost a hull reads over every quiet one on the rect.
-  const ARROW_SCALE = { charger: 1.25, anvil: 1.25, husk: 1.15, missile: 0.7 };
-  const ARROW_ACCENT = { charger: true, harrier: true, missile: true };
-  function drawEdgeArrows(view) {
-    for (const a of computeEdgeArrows(view)) {
-      const sc = (ARROW_SCALE[a.type] || 1) * (1 + Math.min(a.n - 1, 3) * 0.15);
-      ctx.save();
-      ctx.globalAlpha = a.hot ? 0.9
-        : 0.3 + 0.45 * Math.max(0, Math.min(1, 1 - a.dist / ARROWS.far));
-      ctx.translate(a.x, a.y);
-      ctx.rotate(a.ang);
-      ctx.scale(sc, sc);
-      ctx.fillStyle = ARROW_ACCENT[a.type] ? C.clay : "#9aa3b2";
-      ctx.beginPath(); // the incoming-marker chevron, same proportions
-      ctx.moveTo(7, 0);
-      ctx.lineTo(-4, 5);
-      ctx.lineTo(-1, 0);
-      ctx.lineTo(-4, -5);
-      ctx.closePath();
-      ctx.fill();
-      if (a.hot) {
-        // the telegraph halo: an expanding, fading ring, pulsed off the SIM
-        // tick — the same determinism contract as the geometry above, and it
-        // freezes with the sim, which is honest: a paused lock is not
-        // advancing on you. One pulse per half second, comfortably inside
-        // the 45-tick lock, so even the first lock of a wave pulses.
-        const ph = (E.waveTick % 30) / 30;
-        ctx.globalAlpha = 0.7 * (1 - ph);
-        ctx.strokeStyle = C.clay;
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(0, 0, 6 + ph * 8, 0, 2 * Math.PI);
-        ctx.stroke();
-      }
-      ctx.restore(); // restore() puts globalAlpha back — nothing leaks
-    }
-  }
+  // ---- THE ENEMY HUD IS RETIRED (PORT-S S3b lane 3, commit D2) -----------
+  // `drawIncomingMarker`, `computeEdgeArrows`, `drawEdgeArrows` and their two
+  // tables — 155 lines — drew the OLD roster's off-screen chevrons and its
+  // spawn-announcement markers. Both read a body's `type` off that roster and
+  // its `mode` off the seven-value vocabulary D9 replaced, so neither survives
+  // the roster it was written against.
+  //
+  // WHAT IT WAS FOR IS NOT SETTLED HERE. An off-screen threat indicator for
+  // twenty-one successor types is a real HUD question — which types earn one,
+  // what "hot" means without a `lockon` mode — and it is a DESIGN question
+  // rather than a port. It belongs with the rest of the HUD work at S4, and
+  // saying so is more honest than shipping a chevron table that answers it by
+  // accident.
+  //
+  // `EDGEARROWS` (the tunable) and its call site go with them; the spawn
+  // marker's call site in encDrawHud goes with `E.groups`, which is empty from
+  // commit C and deleted at D4.
 
   // ---- the shop panel's geometry ------------------------------------------
   // ONE table, one derivation, one SPACE. The hit test and the draw both read
@@ -4036,6 +3835,11 @@
                      // one — a floor-grown header slides up instead of hanging
                      // its ink off a literal that no longer fits
     cardW: 154, cardH: 104, gapY: 6, pad: 8,
+    flatGap: 14,     // ...and the EXTRA gap above the LAST card, which is always
+                     // HULL PATCH (D37, PORT-S S7). The consumable is not one of
+                     // the four dealt offers, and a column that ran it flush with
+                     // them would say it was. A gap rather than a rule because it
+                     // is the smallest thing that says it; S8 restyles.
     icon: 76,        // the PNG's drawn CEILING — the card gives the icon whatever
                      // the planned type leaves it, never more than this (see
                      // shopTextPlan); the 192 px asset downscales into whatever it gets
@@ -4050,13 +3854,81 @@
     // plan's own legibility floor, so shopLayout() derives it — see HINTPX.
   };
 
-  function shopLayout() {
+  // ---- THE LOADOUT RAIL'S TABLE (PORT-S S8) -------------------------------
+  // The third geometry table in this file, and deliberately the same shape as
+  // SHOPUI: numbers here, rects out of shopLayout(), and the draw reads only
+  // the rects. The band sits BELOW the hint line, inside the LEFT panel's own
+  // logical space, so it costs no new pointer route — game.js's panelAt
+  // already answers `panel: "shop"` for the whole left bar, whatever the
+  // panel's height.
+  //
+  // THE HEIGHT IS THE SUM OF ITS PARTS, and the arithmetic is here so a row
+  // added at R8a cannot silently overflow the band: pad 6 + capH 8 +
+  // 3 * rowH 12 + pad 6 = 56. THREE rows because the bench is three abilities
+  // (js/abilities.js — FIRE, COMET, RAILSHOT); a fourth ability re-derives
+  // railH from this table rather than nudging the literal.
+  //
+  // WHAT IT COSTS THE CARDS, measured rather than reasoned: the panel is
+  // HEIGHT-limited at the suites' 780x493 viewport, so h 612.7436 -> 668.7436
+  // moves panelPlace's fit from 0.7784659 to 0.7132779 and the icon from
+  // 63.74 to 61.16 logical px. Every type tier still clears its floor there
+  // (11/11/11/11 CSS px on their 10.9, 9 on its 8.9) — the live-fit leg
+  // (tests/wave1-checks.js) is the oracle and its budget is railH <= 251.26.
+  // At 1280x720 and every taller window the panel is WIDTH-limited and the
+  // band costs the cards nothing at all.
+  const LOADOUTUI = {
+    railH: 56,       // the whole band, added to the panel's own height
+    pad: 6,          // air inside the band, all four sides
+    capH: 8,         // the LOADOUT caption's row
+    rowH: 12,        // ...and one ability row
+    markW: 3,        // the SELECTED row's square, the hull pips' own idiom
+    dotW: 4,         // ...and the STATE DOT at the row's right edge
+    priceW: 14,      // the budget a two-digit energy price takes at 9 px on
+                     // the 0.65-em advance this file measures type with
+  };
+
+  // The band's own lever, the PANELS/MINIMAP idiom (js/game.js) for a layer
+  // only this leg answers to: a both-sides pixel probe needs something the
+  // suppressed layer alone obeys, or "no ink either way" reads as a pass. It
+  // gates the DRAW and never the GEOMETRY — a lever that moved the panel's
+  // height would re-fit every card and the probe would be measuring the fit
+  // instead of the band.
+  let LOADOUT = true;
+
+  // ---- THE COLUMN IS THE HAND, PLUS THE FLAT ROW (PORT-S S7, D37) --------
+  // It used to be the whole catalog, one card per row, slot index === catalog
+  // index. It is now the SEAT'S OWN HAND in the order it was dealt, followed by
+  // HULL PATCH as the LAST card, pinned to the bottom of the column and set off
+  // by a wider gap — the consumable is not one of the four offers and must not
+  // read as one. (The minimum draw; S8 restyles it.)
+  //
+  // EVERY CARD CARRIES BOTH NUMBERS. `k` is its SLOT — that is what sets `y` —
+  // and `i` is its CATALOG ROW. The hover, the wire's `item` and `buy()` all
+  // speak CATALOG indices, so `shopHover` still reads `c.i` and nothing on the
+  // wire changes; the slot is the panel's private business.
+  //
+  // THE SEAT PARAMETER defaults to the local seat, so every argument-free
+  // caller keeps its exact old meaning; a check that staged seat 1's hand
+  // passes 1 and gets seat 1's column.
+  //
+  // IN A NEVER-DEALT ROOM THE COLUMN IS HULL PATCH ALONE. That is the product
+  // under the first-clear ruling — wave 1 is flown, and the shelf fills at the
+  // clear.
+  function shopLayout(seat = localSeat()) {
     const S = SHOPUI;
-    const cards = SHOP.map((row, i) => ({
-      i,
+    const rec = E.seats[seat];
+    const rows = rec ? rec.hand.slice() : [];
+    rows.push(FLAT_ROW); // ...and the consumable, always, last
+    const cards = rows.map((i, k) => ({
+      i, k,
+      // the flat card takes an extra gap above it: the separation IS the
+      // statement that it is not one of the offers
       x: S.pad,
-      y: S.headerH + i * (S.cardH + S.gapY),
+      y: S.headerH + k * (S.cardH + S.gapY) + (k === rows.length - 1 ? S.flatGap : 0),
       w: S.cardW, h: S.cardH,
+      // the card's own spent bit, resolved here so the draw and a check read
+      // one answer. The flat row is never spent — it is a consumable.
+      bought: k < rows.length - 1 && !!(rec && rec.bought[k]),
     }));
     const last = cards[cards.length - 1];
     const detailTop = last.y + last.h + S.gapY; // where the card column's gap
@@ -4064,10 +3936,31 @@
                                                 // INK may not cross
     const detailH = HINTPX + HINTAIR; // exactly one line of hint at the widest
                                       // that line can ever be set, plus its air
+    // ...and BELOW the hint, the LOADOUT band (PORT-S S8). railTop is exactly
+    // where the panel used to end, so the growth is `railH` and nothing else,
+    // and every reader that wants the hint's floor asks for railTop rather
+    // than for `h` — which is why the two identities the suite pins are
+    // `railTop === detailTop + detailH` and `h === railTop + railH` instead of
+    // one identity on `h` that a band would have to be subtracted back out of.
+    const R = LOADOUTUI;
+    const railTop = detailTop + detailH;
+    const railX = S.pad, railW = S.w - 2 * S.pad;
+    const markX = railX + R.pad;                     // the selection square's column
+    const nameX = markX + R.markW + 2;               // ...and the name's, past it
+    const dotX = railX + railW - R.pad - R.dotW;     // the state dot's, at the far edge
+    const priceRight = dotX - 3;                     // the price hangs off the dot
+    const railRect = {
+      x: railX, y: railTop + R.pad,
+      w: railW, h: R.railH - 2 * R.pad,
+      capH: R.capH, rowH: R.rowH,
+      markX, markW: R.markW, nameX,
+      dotX, dotW: R.dotW, priceRight,
+      trackW: priceRight - R.priceW - nameX,
+    };
     return {
       cards,
       w: S.w,
-      h: detailTop + detailH,
+      h: railTop + R.railH,
       // the header's DESIGN baseline. It is a baseline, not a rect, so the draw
       // is allowed to push it DOWN when a floor-grown font's ascenders would
       // otherwise climb out of the space the rects leave — see drawShopPanel.
@@ -4075,6 +3968,12 @@
       // sizes the draw lands on this exact number.
       headerY: S.headerY,
       detailTop, detailH,
+      railTop, railH: R.railH,
+      // the band's INK rect and EVERY column inside it. The draw reads these
+      // and a check reads these; neither re-adds a pad to railTop, re-spells a
+      // row height or re-picks a dot's x. One table, one derivation, one space
+      // — the SHOPUI/shopLayout idiom one band lower.
+      rail: railRect,
     };
   }
 
@@ -4230,9 +4129,13 @@
     //
     // A 1306x1030 window at dpr 1.25 — the report this rule was written from —
     // fits at ratio 0.4822 and lands the name at 9.52 CSS px, so it draws its
-    // prose; the suites' own 780x493 fits at 0.3549 and lands it at 7.01, so
-    // they do not, and every expectation those suites already carry is
-    // unchanged. A degenerate ratio means "the design sizes" everywhere else
+    // prose. (This paragraph used to add that "the suites' own 780x493 fits at
+    // 0.3549 and lands it at 7.01, so they do not". PRE-EXISTING and FALSE —
+    // byte-identical at `667b70b`, and wrong there too: the suite viewport has
+    // fitted over the cut since the panel height last moved, and since S7 made
+    // the column the HAND it fits at 0.7784659 with a full shelf and 0.9647059
+    // with none. The suites reach the wordless branch by handing this function
+    // a ratio of their own, never by their window. S7-CX-04.) A degenerate ratio means "the design sizes" everywhere else
     // in this function, and the design picture has always had prose in it — an
     // unknown fit is not evidence that the name is illegible — so the fallback
     // says yes rather than silently stripping the panel's words.
@@ -4357,9 +4260,78 @@
   // two 9 px readouts. Counted on the same 0.65 em budget the rest of this file
   // counts with, which over-reads every monospace face FONT resolves to (real
   // ink at 1306x1030 measured 7.2 px inside the WAVE term). No measureText.
+  // ---- THE FOE COUNT, ONE DERIVATION (S3b lane 3, commit D5) --------------
+  // The HUD's FOES readout counted `E.enemies.length + queuedCount()` — the
+  // bodies on the field plus the shares the schedule still owed. Both are
+  // deleted, and a readout that answered 0 under a full field would be worse
+  // than no readout: it is the one number that tells a pilot whether the room
+  // is nearly clear.
+  //
+  // SO IT READS THE PLANE THAT HAS BODIES, and it counts what a pilot can shoot
+  // — live, undead.
+  //
+  // ---- D21 ANSWERED "NEARLY CLEAR", AND THE ANSWER IS THIS NUMBER ---------
+  // The note here said the QUEUED half had no counterpart and was not invented,
+  // because "the successor plane's director does not publish an owed count, and
+  // D21's clear-to-advance is the round that decides what 'nearly clear' means
+  // there." PORT-S S4 commit E decided it: a setpiece ends when NO LIVE BODY
+  // REMAINS AND NOTHING IS STILL COMING, and the LIVE half of that gate is this
+  // exact census. So the FOES readout is not merely a number beside the gate —
+  // it is the gate's own first term, and the pilot watching it counting down is
+  // watching the condition that will end the setpiece.
+  //
+  // ONE DERIVATION, IN THE KERNEL. This file walked the body list here and
+  // again in `applyKernelHud`, and the gate would have been a third copy;
+  // `kernelFoes()` reads the kernel's own `liveBodies()` through the host, so a
+  // room that is empty to the gate cannot be non-empty to the HUD. The OWED
+  // count is still not invented — `pendingArrivals()` is the gate's second term
+  // and it is deliberately not on the HUD, because "three more are coming" is a
+  // spoiler about a portal the player can already see.
+  // WITH NO HOST INSTALLED IT IS 0, which is the truth on a page with no
+  // encounter at all.
+  const foeCount = () => kernelFoes();
+
+  // ---- THE DIRECTOR LINE, ONE DERIVATION (PORT-S S8) ---------------------
+  // The status column's y = 16 header, and the ONLY caption on it. Every term
+  // is printed exactly when it EXISTS and never as a placeholder — a caption
+  // that reads "1 / 1" forever teaches nothing, and one that reads a dash
+  // teaches less:
+  //   WAVE n                       always
+  //   · ENCOUNTER k / m            only while ENCPERREWARD > 1, S7's own dial
+  //   · LOOP L                     only once the arc has turned at least once
+  //   · CLEAR                      the existing suffix, and it keeps its place
+  //                                LAST because that is where it has always been
+  // NO PHASE WORD. The `· CLEAR` suffix and the y = 30 slot's three mutually
+  // exclusive tenants already carry the phase between them; a fourth spelling
+  // of it would be a second authority on the same fact.
+  //
+  // TWO CALLERS, AND THAT IS THE WHOLE REASON THIS FUNCTION EXISTS. The draw
+  // in encDrawHud printed the string, and statusStackRight() BUILT IT AGAIN,
+  // character for character, to measure the column's right edge with. Two
+  // copies of a string that was never going to grow are harmless; the moment
+  // the caption grows a suffix they part, the width under-measures by exactly
+  // that suffix, and the field hover panel's left edge slides back into the
+  // caption's ink. So the derivation is here and both read it.
+  //
+  // IT IS THE y = 16 HEADER AND NOTHING ELSE. The centre card's "WAVE n CLEAR"
+  // (a different string, pinned by exact .includes() in three break legs) and
+  // the stall banner keep their own words.
+  //
+  // A FACT ABOUT THE ROOM, so it is NOT under seatless() — the same
+  // distinction the break countdown already draws for itself.
+  function waveHeader() {
+    let s = "WAVE " + E.wave;
+    if (ENCPERREWARD > 1) {
+      s += " · ENCOUNTER " + (((E.wave - 1) % ENCPERREWARD) + 1) + " / " + ENCPERREWARD;
+    }
+    if (E.loop > 0) s += " · LOOP " + E.loop;
+    if (E.state === "cleared") s += " · CLEAR";
+    return s;
+  }
+
   function statusStackRight() {
-    const wave = E.state === "cleared" ? "WAVE " + E.wave + " · CLEAR" : "WAVE " + E.wave;
-    const foes = "FOES " + (E.enemies.length + queuedCount());
+    const wave = waveHeader(); // the DRAW's own string, not a second spelling
+    const foes = "FOES " + foeCount();
     return Math.max(
       8 + EMW * 10 * wave.length,
       8 + (localSeatRec().hullMax * 10 - 3) + 1, // the energy bar's outer stroke edge
@@ -4640,13 +4612,23 @@
     const down = !seatAlive(localSeat()); // a downed local seat browses; nothing sells
     const warm = E.state === "cleared";
     let anyBuyable = false; // feeds the hint's warm colour after the loop
-    SHOP.forEach((row, i) => {
-      const c = L.cards[i];
+    // THE COLUMN IS THE LAYOUT'S, not the catalog's (D37, PORT-S S7). It used
+    // to be `SHOP.forEach` with slot index === catalog index; it walks the
+    // cards now, and each one carries its own catalog row in `c.i`. Everything
+    // inside the loop still addresses the catalog, so the icons, pips, prices
+    // and the hover all read exactly as they did.
+    L.cards.forEach((c) => {
+      const i = c.i;
+      const row = SHOP[i];
       const maxed = shopMaxed(i);
       const offered = !row.can || row.can(localSeat()); // rows never hide — a card that
                                               // leaves the shelf stays, greyed
       const cost = shopCost(i);
-      const buyable = !down && !maxed && offered && localSeatRec().xp >= cost;
+      // ...and a SPENT card is unbuyable too, and draws dimmed like every other
+      // unbuyable state. It stays on the shelf: a card that vanished when it
+      // was bought would look like a reroll, and D37's rule is the opposite —
+      // a purchase marks its card and never rerolls its siblings.
+      const buyable = !down && !maxed && offered && !c.bought && localSeatRec().xp >= cost;
       if (buyable) anyBuyable = true;
       const hot = E.shopHover === i;
       ctx.fillStyle = hot ? "#161b28" : C.fieldBg; // the card lifts under the pointer
@@ -4699,7 +4681,119 @@
       ctx.fillStyle = (warm && anyBuyable) ? C.clay : C.dim;
       ctx.fillText(B.text, L.w / 2, B.base);
     }
+    drawLoadoutRail(L);
     ctx.restore();
+  }
+
+  // ---- THE LOADOUT RAIL (PORT-S S8) ---------------------------------------
+  // A READOUT band under the market column, in the same panel and the same
+  // logical space: what am I flying, is it armable, what does it cost. The
+  // board in the right gutter answers "who is winning"; this answers "what am
+  // I flying", and the two read as one pair of columns.
+  //
+  // IT IS THE READER'S OWN SHIP, so it asks `seatless()` itself. The card
+  // chain in encDrawHud is an `else if` ladder under one scope guard and a
+  // rail is not mutually exclusive with SHIP DOWN, so it cannot inherit that
+  // guard by position — it takes its own. The panel's OTHER "is this reader a
+  // pilot" test, `seatAlive(localSeat())` above, is the wrong one to copy: a
+  // downed pilot still owns a loadout, and still wants to see it.
+  //
+  // NO KEY LABELS. LMB, Shift and Space are the pause screen's business; a
+  // binding printed here would be a second copy of a fact that moves — D30
+  // unbound the right button this month — and the copy that goes stale is
+  // always the decorative one.
+  function drawLoadoutRail(L) {
+    if (!LOADOUT || seatless()) return;
+    const R = L.rail;
+    ctx.fillStyle = C.fieldBg;
+    ctx.fillRect(R.x, R.y, R.w, R.h);
+    ctx.strokeStyle = C.wall;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(R.x + 0.5, R.y + 0.5, R.w - 1, R.h - 1);
+    const A = window.Abilities;
+    if (!A) return; // the catalog is the row list; without it there are no rows
+    const s = localSeat();
+    const LS = localSeatRec();
+    const EB = presentedPool(s);   // the SAME presented record the energy bar
+                                   // reads — predicted for the local seat in
+                                   // net mode, straight off the struct otherwise
+    const PL = players[s];
+    ctx.textAlign = "left";
+    ctx.font = "700 7px " + FONT; // the SHOP header's idiom, one tier quieter:
+                                  // this is a caption over a readout, not a
+                                  // heading over a thing you click
+    ctx.fillStyle = C.dim;
+    ctx.fillText("LOADOUT", R.markX, R.y + 7);
+    for (let id = 0; id < A.COUNT; id++) {
+      const d = A.def(id);
+      if (!d) continue;
+      const top = R.y + R.capH + id * R.rowH;
+      const base = top + 8;
+      // ---- THE THREE COOLDOWN SHAPES ARE NOT UNIFORM, DELIBERATELY --------
+      // js/abilities.js:66-72 records why: FIRE and COMET carry `cd: 0` and a
+      // null spawn, because re-encoding either into the slot record would move
+      // committed traces to change no behaviour. So this rail asks THREE
+      // different questions and shares no answer with itself. A rail written
+      // as one loop over slots[] would show FIRE permanently ready — that is
+      // the falsification the suite stages.
+      //   Each branch is the arm rule's own consumer, never a private copy:
+      // sabotage Flight.cometOn or Flight.abilityOn and the sim AND this dot
+      // both flip.
+      let armed;
+      if (id === A.ABILITY.FIRE) {
+        // the autofire gun's own pulse IS its truth. There is no published
+        // maximum for P.cool — one writer, no denominator anywhere — so the
+        // row is BINARY, ready or cooling, and never a fraction.
+        armed = EB.cool === 0;
+      } else if (id === A.ABILITY.COMET) {
+        // the energy bar's twin, character for character. The `press`
+        // argument is true because that is the question: not whether the seat
+        // is arming, but whether it COULD.
+        armed = Flight.cometOn(cometView(s, EB).phase === CP_LIVE,
+                               EB.en, EB.enMax, true);
+      } else {
+        // ...and THE arm rule's third consumer, which js/game.js predicted in
+        // writing and did not have until now. The slot record is the PLAYER
+        // STRUCT's, on every seat and in both modes: js/net.js decodes the
+        // wire's cd[] into P.slots[i].cd precisely so the HUD's availability
+        // dim reads presented truth. The predictor publishes no slots, so
+        // RAILSHOT's cooldown is wire truth while the pool and FIRE's cool are
+        // predicted — two clocks on the local seat, and the honest read.
+        armed = Flight.abilityOn(id, PL && PL.slots ? PL.slots[id] : null,
+                                 LS.owned, true, EB.en);
+      }
+      if (id === SELECTED_ABILITY) {
+        // the hull pips' own idiom: a small filled square, and the row it sits
+        // on is the one Space arms. No key label — bindings are the pause
+        // screen's, and a printed binding is a copy that goes stale.
+        ctx.fillStyle = C.clay;
+        ctx.fillRect(R.markX, base - 3, R.markW, R.markW);
+      }
+      ctx.textAlign = "left";
+      ctx.font = "400 9px " + FONT;
+      ctx.fillStyle = C.bright;
+      ctx.fillText(d.name, R.nameX, base);
+      if (d.cd > 0) {
+        // ...and a row whose whole state lives in the slot draws the slot: a
+        // one-px track under the name, filled to what has already elapsed.
+        const cd = PL && PL.slots && PL.slots[id] ? PL.slots[id].cd : 0;
+        ctx.fillStyle = C.dim;
+        ctx.fillRect(R.nameX, base + 2, R.trackW, 1);
+        ctx.fillStyle = C.clay;
+        ctx.fillRect(R.nameX, base + 2,
+                     Math.max(0, R.trackW * (1 - Math.min(1, cd / d.cd))), 1);
+      }
+      if (d.en > 0) {
+        // the price, dimmed through the arm rule's OWN energy clause rather
+        // than through a second affordability test beside it
+        ctx.textAlign = "right";
+        ctx.font = "400 9px " + FONT;
+        ctx.fillStyle = armed ? C.clay : C.dim;
+        ctx.fillText(String(d.en), R.priceRight, base);
+      }
+      ctx.fillStyle = armed ? C.clay : C.dim;
+      ctx.fillRect(R.dotX, top + (R.rowH - R.dotW) / 2, R.dotW, R.dotW);
+    }
   }
 
   // The leaderboard's fixed logical space, right gutter. It ranks and crowns
@@ -5265,10 +5359,10 @@
     if (E.state === "idle") return;
     ctx.save();
     const wt = E.waveTick;
-    // --- off-screen trackers, first so everything else paints over them ---
-    // a chevron parked on the inset rect's left column would otherwise sit on
-    // top of the hull pips, the XP bar and the readouts below
-    if (EDGEARROWS) drawEdgeArrows(view);
+    // (the off-screen tracker pass is RETIRED — commit D2. See the block where
+    // the three functions stood: an off-screen threat indicator for the
+    // successor plane's twenty-one types is a HUD design question and belongs
+    // at S4, not a chevron table that answers it by accident.)
     // --- viewport HUD, top left ---
     // (No suppression gate any more. This column used to stand down whenever a
     // row's big opaque explainer bitmap was up, because that art's rect sliced
@@ -5281,7 +5375,7 @@
     ctx.fillStyle = C.bright;
     // the CLEAR header holds through the cleared beat, so it reads
     // continuous with the banner the player just watched fade
-    ctx.fillText(E.state === "cleared" ? "WAVE " + E.wave + " · CLEAR" : "WAVE " + E.wave, 8, 16);
+    ctx.fillText(waveHeader(), 8, 16); // ...and statusStackRight() measures THIS
     const LS = localSeatRec(); // the LOCAL seat — every readout in this column is ITS state
     for (let i = 0; i < LS.hullMax; i++) { // hull pips — the LIVE max, MAX HULL grows the row
       if (i < LS.hull) {
@@ -5336,13 +5430,13 @@
     // the band directly under the pips, which is the only place it can read as
     // part of the same instrument
     ctx.fillText("XP " + LS.xp, 8, 46);
-    ctx.fillText("FOES " + (E.enemies.length + queuedCount()), 8, 57);
+    ctx.fillText("FOES " + foeCount(), 8, 57);
     // (the THRUST LOCKED — SHOP notice died with the lock: key thrust is
     // stock now, so the line it defended against cannot occur)
-    // --- spawn warnings ---
-    for (const g of E.groups) {
-      if (g.points && !g.spawned) drawIncomingMarker(g.points.anchor, wt, view && view.cam);
-    }
+    // (the spawn-warning markers are RETIRED with `E.groups` — commit D2. The
+    // successor plane announces an arrival with a PORTAL, drawn by
+    // js/demo-render.js in the world pass, which is a stronger cue than a
+    // screen-space chevron and is already on the field.)
     if (E.state === "warning") {
       ctx.textAlign = "center";
       ctx.font = "700 11px " + FONT;
@@ -5358,12 +5452,66 @@
     // the room, so it neither hides a seat's card nor is hidden by one, and a
     // spectator sees it too. The wt >= E.clearTick term kills the one net
     // straddle frame per deal where a lerped waveTick would read over the hold.
+    // ...and the numeral covers the WHOLE break exactly (S4-CX-3, the fix
+    // round). `wt - E.clearTick` is the break's own 0-based tick index, so this
+    // condition draws on indices 0..clearHold-1 — 480 frames. The kernel used
+    // to hold for 481 ticks (float residue on `gateTimer`; see its terminal
+    // condition), which left the last one BLANK. The two are equal now, and
+    // `test/tools/demo-director.mjs` LEG 5 counts both sides.
     if (E.state === "cleared" && wt >= E.clearTick && wt - E.clearTick < ECFG.clearHold) {
       const left = ECFG.clearHold - (wt - E.clearTick);
       ctx.textAlign = "center";
       ctx.font = "700 11px " + FONT;
       ctx.fillStyle = left <= 180 ? C.clay : C.dim; // the last three seconds warm up
       ctx.fillText("NEXT WAVE IN " + Math.ceil(left / 60), FW / 2, 30);
+    }
+    // ---- D21(a)'s STALL SURFACE (PORT-S S4, commit E) ---------------------
+    // *"a room that cannot clear must SURFACE, never silently auto-advance, or
+    // the clock returns by the back door."* Commit E throws the clock out, so
+    // this is the line that keeps the ruling honest — and it lands in the SAME
+    // commit as the gate deliberately, because a gate without its surface ships
+    // a silent deadlock for the length of a commit.
+    //
+    // IT IS THE THIRD TENANT OF ONE SLOT, and the three are mutually exclusive
+    // by state: HOSTILES INBOUND while `warning`, NEXT WAVE IN n while
+    // `cleared`, and this while `active`. A room is `active` exactly when a
+    // live body is on the field, which is exactly when a setpiece is unfinished.
+    //
+    // THE SURFACE IS ALL THIS ROUND BUILDS. What a stuck room DOES next — offer
+    // an advance, escalate, time out, or nothing — is the owner's and is NOT
+    // built. See `ECFG.stallTicks`.
+    //
+    // NO WIRE FIELD. The count comes from the bodies a client already has and
+    // the clock from `E.waveTick`, which already crosses; a spectator and a
+    // pilot compute the same line from the same snapshot. `hud.state` grows its
+    // vocabulary at R7, not here.
+    // FOES > 0 IS PART OF THE CONDITION, not an optimisation. `active` MEANS a
+    // live body is on the field — `applyKernelHud` writes it from the same
+    // census this line reads — so the two agree in play and the guard costs
+    // nothing there. What it buys is the OTHER caller: a check (and the pause
+    // screen) can stage `E.state` directly with no host installed, where the
+    // census answers 0 honestly and "0 HOSTILES REMAIN" is a sentence about
+    // nothing. Measured: without it, `tests/wave1-checks.js`'s shop-panel
+    // collision leg read this line's centred ink as part of the STATUS STACK
+    // and reported a 228 px overlap with the hovered panel.
+    if (E.state === "active" && foeCount() > 0) {
+      const foes = foeCount();
+      // ---- THE DRAW ONLY READS THE DETECTOR (the HOLD round, fix 12) -----
+      // The advance moved into `encStep` — see `advanceStall`. This block draws
+      // the surfaced state and decides nothing: `stallActive` is a fact the SIM
+      // established on this tick, so a spectator, a paused screen and a
+      // headless server all agree about whether the room is stuck.
+      const stalled = stallActive;
+      const source = stalled ? stallSourceLabel() : "";
+      ctx.textAlign = "center";
+      ctx.font = "700 11px " + FONT;
+      ctx.fillStyle = stalled ? C.clay : C.dim;
+      // A stalled room with no SOURCE alive is an ordinary body nobody can
+      // reach; there is no type to name, so the count stands and the colour
+      // carries the alarm.
+      ctx.fillText(source ? source + " STILL HOLDS THE ROOM"
+                          : foes + (foes === 1 ? " HOSTILE REMAINS" : " HOSTILES REMAIN"),
+                   FW / 2, 30);
     }
     // --- hit feedback: a border flash while the hit registers ---
     if (LS.hitFlash > 0) {
@@ -5555,210 +5703,25 @@
   // statsFor is a CONSTANT table now — no wave curve and no cadence floor
   // stands between a slider's baseline and the resolved stat: the value a
   // row writes is the value every wave deals.
-  const TUNING = {
-    groups: [ // display order; one titled section per group in the enemies tab
-      { key: "dart", label: "DART + LANCE", rows: [
-        { id: "dart-hp", label: "hp", min: 1, max: 12, step: 1,
-          get: () => ECFG.enemy.hp, set: (v) => { ECFG.enemy.hp = v; },
-          fmt: (v) => v + " base · " + (E.stats ? E.stats.dart.hp + " live @ w" + E.wave : "no wave") + " · flat at every wave" },
-        { id: "dart-max-speed", label: "max speed", min: 1.2, max: 6, step: 0.05,
-          get: () => ECFG.enemy.maxSpeed, set: (v) => { ECFG.enemy.maxSpeed = v; },
-          fmt: (v) => v.toFixed(2) + " px/tick base · " + (E.stats ? E.stats.dart.maxSpeed.toFixed(2) + " live @ w" + E.wave : "no wave") },
-        { id: "dart-steer", label: "steer", min: 0.02, max: 0.2, step: 0.001,
-          get: () => ECFG.enemy.steer, set: (v) => { ECFG.enemy.steer = v; },
-          fmt: (v) => v.toFixed(3) + " of (target − velocity) per tick" },
-        { id: "dart-prefer", label: "prefer ring", min: 40, max: 240, step: 1,
-          get: () => ECFG.enemy.prefer, set: (v) => { ECFG.enemy.prefer = v; },
-          fmt: (v) => v + " px ring around the player" },
-        { id: "dart-band", label: "band", min: 4, max: 48, step: 1,
-          get: () => ECFG.enemy.band, set: (v) => { ECFG.enemy.band = v; },
-          fmt: (v) => v + " px hold tolerance" },
-        { id: "dart-back-speed", label: "back speed", min: 0.4, max: 3, step: 0.05,
-          get: () => ECFG.enemy.backSpeed, set: (v) => { ECFG.enemy.backSpeed = v; },
-          fmt: (v) => v.toFixed(2) + " px/tick retreat" },
-        { id: "dart-sep-r", label: "separation", min: 12, max: 90, step: 1,
-          get: () => ECFG.enemy.sepR, set: (v) => { ECFG.enemy.sepR = v; },
-          fmt: (v) => v + " px between pack members" },
-        { id: "dart-lance-engage", label: "lance engage", min: 55, max: 300, step: 1,
-          get: () => ECFG.lance.engage, set: (v) => { ECFG.lance.engage = v; },
-          fmt: (v) => v + " px — telegraph starts inside this" },
-        { id: "dart-lance-len", label: "lance length", min: 60, max: 300, step: 1,
-          get: () => ECFG.lance.len, set: (v) => { ECFG.lance.len = v; },
-          fmt: (v) => v + " px beam" },
-        { id: "dart-lance-half-width", label: "lance half-width", min: 1, max: 8, step: 0.05,
-          get: () => ECFG.lance.halfWidth, set: (v) => { ECFG.lance.halfWidth = v; },
-          fmt: (v) => v.toFixed(2) + " px half-width" },
-        { id: "dart-lance-telegraph", label: "telegraph", min: 15, max: 120, step: 1,
-          get: () => ECFG.lance.telegraph, set: (v) => { ECFG.lance.telegraph = v; },
-          fmt: (v) => v + " ticks · " + (v / 60).toFixed(2) + " s of warning" },
-        { id: "dart-lance-pulse", label: "pulse", min: 4, max: 40, step: 1,
-          get: () => ECFG.lance.pulse, set: (v) => { ECFG.lance.pulse = v; },
-          fmt: (v) => v + " ticks beam live" },
-        { id: "dart-lance-cooldown", label: "lance cooldown", min: 60, max: 360, step: 1,
-          get: () => ECFG.lance.cooldown, set: (v) => { ECFG.lance.cooldown = v; },
-          fmt: (v) => v + " ticks base · " + (E.stats ? E.stats.dart.cooldown + " live @ w" + E.wave : "no wave") + " · flat at every wave" },
-      ]},
-      { key: "charger", label: "CHARGER", rows: [
-        { id: "charger-hp", label: "hp", min: 1, max: 20, step: 1,
-          get: () => ECFG.charger.hp, set: (v) => { ECFG.charger.hp = v; },
-          fmt: (v) => v + " base · " + (E.stats ? E.stats.charger.hp + " live @ w" + E.wave : "no wave") },
-        { id: "charger-max-speed", label: "max speed", min: 0.8, max: 4, step: 0.05,
-          get: () => ECFG.charger.maxSpeed, set: (v) => { ECFG.charger.maxSpeed = v; },
-          fmt: (v) => v.toFixed(2) + " px/tick base · " + (E.stats ? E.stats.charger.maxSpeed.toFixed(2) + " live @ w" + E.wave : "no wave") },
-        { id: "charger-prefer", label: "prefer ring", min: 75, max: 400, step: 1,
-          get: () => ECFG.charger.prefer, set: (v) => { ECFG.charger.prefer = v; },
-          fmt: (v) => v + " px ring around the player" },
-        { id: "charger-engage", label: "engage", min: 130, max: 600, step: 1,
-          get: () => ECFG.charger.engage, set: (v) => { ECFG.charger.engage = v; },
-          fmt: (v) => v + " px — a rested charger plants inside this" },
-        { id: "charger-windup", label: "windup", min: 15, max: 150, step: 1,
-          get: () => ECFG.charger.windup, set: (v) => { ECFG.charger.windup = v; },
-          fmt: (v) => v + " ticks planted · " + (v / 60).toFixed(2) + " s · dash line locks at start" },
-        { id: "charger-dash-speed", label: "dash speed", min: 3, max: 16, step: 0.05,
-          get: () => ECFG.charger.dashSpeed, set: (v) => { ECFG.charger.dashSpeed = v; },
-          fmt: (v) => v.toFixed(2) + " px/tick along the locked line — never wave-scaled" },
-        { id: "charger-dash-ticks", label: "dash ticks", min: 10, max: 80, step: 1,
-          get: () => ECFG.charger.dashTicks, set: (v) => { ECFG.charger.dashTicks = v; },
-          fmt: (v) => v + " ticks · " + Math.round(v * ECFG.charger.dashSpeed) + " px of travel" },
-        { id: "charger-rest", label: "rest", min: 45, max: 300, step: 1,
-          get: () => ECFG.charger.rest, set: (v) => { ECFG.charger.rest = v; },
-          fmt: (v) => v + " ticks base · " + (E.stats ? E.stats.charger.rest + " live @ w" + E.wave : "no wave") + " · flat at every wave" },
-        { id: "charger-cooldown", label: "cooldown", min: 10, max: 120, step: 1,
-          get: () => ECFG.charger.cooldown, set: (v) => { ECFG.charger.cooldown = v; },
-          fmt: (v) => v + " seek ticks before the next lunge" },
-      ]},
-      { key: "harrier", label: "HARRIER", rows: [
-        { id: "harrier-hp", label: "hp", min: 1, max: 16, step: 1,
-          get: () => ECFG.harrier.hp, set: (v) => { ECFG.harrier.hp = v; },
-          fmt: (v) => v + " base · " + (E.stats ? E.stats.harrier.hp + " live @ w" + E.wave : "no wave") },
-        { id: "harrier-max-speed", label: "max speed", min: 0.6, max: 3, step: 0.05,
-          get: () => ECFG.harrier.maxSpeed, set: (v) => { ECFG.harrier.maxSpeed = v; },
-          fmt: (v) => v.toFixed(2) + " px/tick approach — never wave-scaled" },
-        { id: "harrier-back-speed", label: "back speed", min: 0.8, max: 4, step: 0.05,
-          get: () => ECFG.harrier.backSpeed, set: (v) => { ECFG.harrier.backSpeed = v; },
-          fmt: (v) => v.toFixed(2) + " px/tick retreat — the kite needs this above approach" },
-        { id: "harrier-prefer", label: "prefer ring", min: 120, max: 480, step: 1,
-          get: () => ECFG.harrier.prefer, set: (v) => { ECFG.harrier.prefer = v; },
-          fmt: (v) => v + " px standoff ring" },
-        { id: "harrier-band", label: "band", min: 10, max: 90, step: 1,
-          get: () => ECFG.harrier.band, set: (v) => { ECFG.harrier.band = v; },
-          fmt: (v) => v + " px hold tolerance" },
-        { id: "harrier-engage", label: "engage", min: 135, max: 540, step: 1,
-          get: () => ECFG.harrier.engage, set: (v) => { ECFG.harrier.engage = v; },
-          fmt: (v) => v + " px — lock-on opens inside this" },
-        { id: "harrier-lockon", label: "lock-on", min: 25, max: 150, step: 1,
-          get: () => ECFG.harrier.lockon, set: (v) => { ECFG.harrier.lockon = v; },
-          fmt: (v) => v + " ticks planted · " + (v / 60).toFixed(2) + " s" },
-        { id: "harrier-cooldown", label: "cooldown", min: 75, max: 480, step: 1,
-          get: () => ECFG.harrier.cooldown, set: (v) => { ECFG.harrier.cooldown = v; },
-          fmt: (v) => v + " ticks base · " + (E.stats ? E.stats.harrier.cooldown + " live @ w" + E.wave : "no wave") + " · flat at every wave" },
-      ]},
-      { key: "missile", label: "SEEKER MISSILE", rows: [
-        { id: "missile-speed", label: "speed", min: 3, max: 12, step: 0.05,
-          get: () => ECFG.missile.speed, set: (v) => { ECFG.missile.speed = v; },
-          fmt: (v) => v.toFixed(2) + " px/tick · " + Math.round(v * 60) + " px/s" },
-        { id: "missile-life", label: "life", min: 45, max: 240, step: 1,
-          get: () => ECFG.missile.life, set: (v) => { ECFG.missile.life = v; },
-          fmt: (v) => v + " ticks · " + (v / 60).toFixed(2) + " s · " + Math.round(v * ECFG.missile.speed) + " px of reach" },
-        { id: "missile-turn", label: "turn", min: 0.008, max: 0.06, step: 0.001,
-          get: () => ECFG.missile.turn, set: (v) => { ECFG.missile.turn = v; },
-          fmt: (v) => v.toFixed(3) + " rad/tick · " + Math.round((ECFG.missile.life - ECFG.missile.arm - ECFG.missile.decay / 2) * v * 180 / Math.PI) + "° of heading authority" },
-        { id: "missile-arm", label: "arm", min: 0, max: 45, step: 1,
-          get: () => ECFG.missile.arm, set: (v) => { ECFG.missile.arm = v; },
-          fmt: (v) => v + " ticks ballistic at launch" },
-        { id: "missile-decay", label: "decay", min: 0, max: 90, step: 1,
-          get: () => ECFG.missile.decay, set: (v) => { ECFG.missile.decay = v; },
-          fmt: (v) => v + " final ticks of fading steering" },
-        { id: "missile-max", label: "max in flight", min: 1, max: 24, step: 1,
-          get: () => ECFG.missile.max, set: (v) => { ECFG.missile.max = v; },
-          fmt: (v) => v + " live missiles — a guard, not a mechanic" },
-      ]},
-      { key: "anvil", label: "ANVIL", rows: [
-        { id: "anvil-hp", label: "hp", min: 3, max: 30, step: 1,
-          get: () => ECFG.anvil.hp, set: (v) => { ECFG.anvil.hp = v; },
-          fmt: (v) => v + " base · " + (E.stats ? E.stats.anvil.hp + " live @ w" + E.wave : "no wave") },
-        { id: "anvil-max-speed", label: "max speed", min: 0.5, max: 2.4, step: 0.05,
-          get: () => ECFG.anvil.maxSpeed, set: (v) => { ECFG.anvil.maxSpeed = v; },
-          fmt: (v) => v.toFixed(2) + " px/tick — must stay under the ship's 2.0 to keep the escape promise" },
-        { id: "anvil-turn-rate", label: "turn rate", min: 0.005, max: 0.06, step: 0.001,
-          get: () => ECFG.anvil.turnRate, set: (v) => { ECFG.anvil.turnRate = v; },
-          fmt: (v) => v.toFixed(3) + " rad/tick · out-turned inside " + Math.round(2.0 / v) + " px" },
-        { id: "anvil-flee", label: "flee", min: 80, max: 480, step: 1,
-          get: () => ECFG.anvil.flee, set: (v) => { ECFG.anvil.flee = v; },
-          fmt: (v) => v + " px — flanked inside this, it runs along its own facing" },
-        // the stored value is the radian half-angle; convert only at this
-        // boundary so the exact radians round-trip without drift
-        { id: "anvil-arc", label: "shield arc", min: 20, max: 170, step: 1,
-          get: () => ECFG.anvil.arc * 180 / Math.PI,
-          set: (v) => { ECFG.anvil.arc = v * Math.PI / 180; },
-          fmt: (v) => "±" + Math.round(v) + "° half-angle · " + Math.round(v * 2) + "° of cover" },
-      ]},
-      { key: "husk", label: "HUSK + SHARD", rows: [
-        { id: "husk-hp", label: "hp", min: 2, max: 24, step: 1,
-          get: () => ECFG.husk.hp, set: (v) => { ECFG.husk.hp = v; },
-          fmt: (v) => v + " base · " + (E.stats ? E.stats.husk.hp + " live @ w" + E.wave : "no wave") },
-        { id: "husk-max-speed", label: "max speed", min: 0.4, max: 2, step: 0.05,
-          get: () => ECFG.husk.maxSpeed, set: (v) => { ECFG.husk.maxSpeed = v; },
-          fmt: (v) => v.toFixed(2) + " px/tick drift" },
-        { id: "husk-split", label: "split", min: 1, max: 8, step: 1,
-          get: () => ECFG.husk.split, set: (v) => { ECFG.husk.split = v; },
-          fmt: (v) => v + " shards on the death fan" },
-        { id: "husk-kick", label: "kick", min: 1, max: 6, step: 0.05,
-          get: () => ECFG.husk.kick, set: (v) => { ECFG.husk.kick = v; },
-          fmt: (v) => v.toFixed(2) + " px/tick outward on each shard" },
-        { id: "husk-shard-hp", label: "shard hp", min: 1, max: 8, step: 1,
-          get: () => ECFG.shard.hp, set: (v) => { ECFG.shard.hp = v; },
-          fmt: (v) => v + " base · " + (E.stats ? E.stats.shard.hp + " live @ w" + E.wave : "no wave") },
-        { id: "husk-shard-max-speed", label: "shard max speed", min: 1.4, max: 6, step: 0.05,
-          get: () => ECFG.shard.maxSpeed, set: (v) => { ECFG.shard.maxSpeed = v; },
-          fmt: (v) => v.toFixed(2) + " px/tick — above the ship's 2.0 so it must be shot" },
-        { id: "husk-shard-steer", label: "shard steer", min: 0.03, max: 0.25, step: 0.001,
-          get: () => ECFG.shard.steer, set: (v) => { ECFG.shard.steer = v; },
-          fmt: (v) => v.toFixed(3) + " of (target − velocity) per tick" },
-      ]},
-      { key: "radar", label: "RADAR VARIANTS", rows: [
-        { id: "radar-lead-scale", label: "lead scale", min: 0, max: 1.5, step: 0.05,
-          get: () => ECFG.radar.leadScale, set: (v) => { ECFG.radar.leadScale = v; },
-          fmt: (v) => v.toFixed(2) + "× of full lead · 0 = aims like the base type" },
-        { id: "radar-deadband", label: "vel deadband", min: 0, max: 1, step: 0.05,
-          get: () => ECFG.radar.deadband, set: (v) => { ECFG.radar.deadband = v; },
-          fmt: (v) => v.toFixed(2) + " px/tick · below it a ship reads as still" },
-        { id: "radar-missile-turn", label: "missile turn", min: 0, max: 0.03, step: 0.001,
-          get: () => ECFG.radar.missileTurn, set: (v) => { ECFG.radar.missileTurn = v; },
-          fmt: (v) => v.toFixed(3) + " rad/tick · 0 = ballistic predictor (base seeker: " + ECFG.missile.turn.toFixed(3) + ")" },
-      ]},
-      { key: "player", label: "PLAYER + CONTACT", rows: [
-        { id: "player-hull", label: "hull", min: 1, max: 10, step: 1,
-          get: () => ECFG.player.hull, set: (v) => { ECFG.player.hull = v; },
-          fmt: (v) => v + " hull — applies on the next restart, not the live run" },
-        { id: "player-invuln", label: "invuln", min: 20, max: 240, step: 1,
-          get: () => ECFG.player.invuln, set: (v) => { ECFG.player.invuln = v; },
-          fmt: (v) => v + " ticks · " + (v / 60).toFixed(2) + " s of post-hit grace" },
-        { id: "player-respawn", label: "respawn", min: 60, max: 600, step: 1,
-          get: () => ECFG.player.respawn, set: (v) => { ECFG.player.respawn = v; },
-          fmt: (v) => v + " ticks · " + (v / 60).toFixed(2) + " s a downed seat waits" },
-        { id: "player-claim", label: "claim window", min: 60, max: 3600, step: 60,
-          get: () => ECFG.player.claim, set: (v) => { ECFG.player.claim = v; },
-          fmt: (v) => v + " ticks · " + (v / 60).toFixed(2) + " s to click before the seat is released" },
-        { id: "player-contact-dmg", label: "contact dmg", min: 0, max: 4, step: 1,
-          get: () => ECFG.contact.dmgToPlayer, set: (v) => { ECFG.contact.dmgToPlayer = v; },
-          fmt: (v) => v + " hull per body contact" },
-      ]},
-    ],
-    // Re-resolve the live wave's stats IN PLACE. Object.assign into the
-    // existing objects preserves the identity every body's e.stats references,
-    // so live bodies see new values on their next tick; hp/r are per-body
-    // copies and apply from the next spawn.
-    refresh() {
-      if (!E.stats) return; // no wave dealt yet — the next startWave resolves fresh
-      const ns = statsFor(E.wave);
-      for (const k of ROSTER) Object.assign(E.stats[k], ns[k]);
-    },
-  };
+  // ---- THE ENEMY TUNING SURFACE IS RETIRED (S3b lane 3, commit D4) --------
+  // `TUNING` was 203 lines of slider rows over `ECFG`'s nine archetype blocks —
+  // the dart's hull, the lance's telegraph, the harrier's seeker turn, the
+  // anvil's arc, the husk's split. Every row's `get`/`set` closed over a field
+  // that no longer exists, so the surface went with the table it drove.
+  //
+  // THE PANEL IT FED goes with it: `js/game.js`'s enemies tab is generated at
+  // first open from `Encounter.tuning`, and a generator with no rows to
+  // generate is a tab with nothing in it. The successor plane's own tuning is
+  // js/demo-kernel.js's STATS, and giving it a live slider surface is S4's
+  // question rather than a table this lane can transcribe.
 
-  // ---- publish — one namespace, one assignment ---------------------------
-  restart(ECFG.seed);
   window.Encounter = { step: encStep, draw: encDraw, drawHud: encDrawHud, frozen, mods, reset: restart,
+    // D37's encounters-per-reward-wave dial, published for ONE caller: the
+    // sim seam's `setPvpTune`, which the server's TUNABLES row reaches. It is
+    // on window.Encounter rather than the `__test` seam because the dev tune
+    // route is a shipped path, not an instrument — the same reason `addXp`
+    // was published when the kernel's orb pickups started reaching it.
+    setEncPerReward,
     // the FIRST-RUN identity block — the name box and the ship strip on the
     // screen the game starts on. Published beside drawHud because it is the
     // second draw entry point into this file, and for the same reason: the
@@ -5777,6 +5740,56 @@
     // the leader's own ship and must never disagree with the board's crowned
     // row. The board reads the same call; there is one derivation and no copy.
     kingSeat,
+    // ---- THE SEAM SCALE'S DENOMINATOR (PORT-S S5, commit A) ---------------
+    // `ECFG.player.hull` is production's BASE hull, and js/encounter-host.js
+    // divides every kernel-dealt amount by the kernel's own 100 and multiplies
+    // by this. It is published rather than copied for the reason every number
+    // in this program is published rather than copied: a host holding its own
+    // `3` would be a second authority on the ship's hull, and an owner retune
+    // of `ECFG.player.hull` would then move production and NOT move the scale.
+    //
+    // IT IS THE BASE, NOT `S.hullMax`. A MAX HULL purchase raises the seat's
+    // own `hullMax` (`:3159`) and a death drops it back; a scale that read the
+    // live number would make the same kernel round cost a different fraction
+    // of the same pilot depending on what they had bought, which is a second
+    // damage rule hiding inside a unit conversion.
+    playerHullBase: () => ECFG.player.hull,
+    // ---- THE ONE CREDIT SITE, NOW PUBLISHED (PORT-S S3b lane 2, commit D) --
+    // `addXp(n, seat)` was reachable only through `window.__test.enc`, which was
+    // right while its only outside callers were the suites. It has a real one
+    // now: js/encounter-host.js routes the demo kernel's orb pickups into this
+    // economy, and the kernel is a SIMULATION rather than a test — reaching
+    // through a `__test` seam to move a wallet would put a shipped code path
+    // through a door named for instruments.
+    //
+    // IT IS THE SAME FUNCTION, published, and that is the point: one credit
+    // site moving the wallet, the scoreboard and the high-water mark together,
+    // with `termsFor`, `boardRanking` and `kingSeat` deriving off it. A second
+    // entry point for the kernel would be a second credit site.
+    //
+    // ADDITIVE AND BEHAVIOUR-FREE. Nothing in this file calls it differently and
+    // no simulation state moves; tests/fixtures/golden.json is unmoved across
+    // the commit that published it.
+    addXp,
+    // ---- THE ONE SHIP-DAMAGE SITE, NOW PUBLISHED (S3b lane 3, commit A) ---
+    // `hitPlayer(seat, dmg, src)` was reachable from outside only through
+    // `window.__test.enc.damagePlayer`, which was right while every outside
+    // caller was a suite. It has a real one now, and for `addXp`'s exact
+    // reason: js/encounter-host.js routes damage the demo kernel deals to a
+    // POSE-DRIVEN seat back into this economy, and the kernel is a SIMULATION.
+    // A shipped damage path through a door named for instruments would be the
+    // wrong seam twice over — that door also STEPS (`drainStep()`), which no
+    // caller inside a tick may do.
+    //
+    // IT IS THE SAME FUNCTION, published, and that is the whole point. One ship
+    // damage site means one set of gates — the dead-seat refusal, D28's
+    // source-scoped comet refusal, the i-frames — one matrix consultation and
+    // one death toll, for every path that can hurt a pilot. A second entry
+    // point for the kernel would be a second set of gates to keep in step.
+    //
+    // ADDITIVE AND BEHAVIOUR-FREE: nothing in this file calls it differently
+    // and no simulation state moves.
+    hitPlayer,
     // termsFor(seat) — the ONE upgrade-term derivation. game.js's sim reads
     // it here (fire cooldown, the per-seat vcap, the pool's cap/regen), and
     // the phase-11 predictor calls the SAME formula through termsFromOwned:
@@ -5805,6 +5818,9 @@
     // right after it restarts the sim), so the wire carries the marker on the
     // tick the sim actually took the cut and no fixture moves.
     markRestart: () => emit("restart"),
+    // D38's build total (S4 fix 10) — published for `poseKernelSeats`, which is
+    // the ONE pusher, and for the legs that assert the presence rule.
+    presentPurchases,
     // Entity identity — the monotonic counter every constructor stamps from.
     // Published so game.js's bullets draw from the SAME id space as the
     // bodies: a replication layer keys by id alone.
@@ -5818,7 +5834,55 @@
     // render-path only, so the one tiny wrapper object per call is free and
     // the seeded stream is untouched. restart() REPLACES E.enemies/E.orbs, so
     // callers read through this accessor every frame instead of caching it.
-    mapState: () => ({ enemies: E.enemies, orbs: E.orbs, missiles: E.missiles }),
+    // ---- RE-POINTED AT THE SUCCESSOR PLANE (S3b lane 3, commit D4) -------
+    // The corner map's contact dots read this, and `E.enemies` is permanently
+    // empty from the flip — so without this the minimap goes blank in exactly
+    // the way `lights()` made the field go dark, and for exactly the same
+    // reason. Commit C closed that one; this closes its twin.
+    //
+    // BOTH ORB PLANES CROSS, because both are real: production still pays a
+    // PvP death out in orbs and the successor plane drops the enemy plane's.
+    // A caller drawing dots does not care which produced them.
+    //
+    // A FRESH WRAPPER PER CALL is this accessor's own contract and it is kept —
+    // the arrays inside are LIVE and callers read them without mutating, which
+    // is why `restart()` replacing them is safe. The concat is one allocation
+    // per frame on the render path, which is where this accessor already lived.
+    mapState: () => {
+      // the LOCAL host's own list, which is what decides whether the kernel's
+      // orb plane is there to concatenate. It is `presentedBodies()`'s local
+      // answer, asked separately because the ORB question is about this page's
+      // kernel and not about which plane the screen presents.
+      const kb = typeof window !== "undefined" && window.EncounterHost
+        && window.EncounterHost.installed() ? window.EncounterHost.bodies() : null;
+      const ko = kb && window.DemoKernel ? window.DemoKernel.S.orbs : null;
+      // ---- ONE PLANE PER FAMILY NOW (S3b lane 3, commit D5) -------------
+      // The BODY half no longer concatenates: production's own list is
+      // deleted, so the kernel's is the whole answer and the fresh array is
+      // the filter's own. The ORB half still concatenates because BOTH planes
+      // really do produce orbs — production pays a PvP death out in them.
+      // `missiles` is an EMPTY LITERAL, not a dropped key: js/game.js builds a
+      // `FRAME.missiles` shadow from it every frame and a missing key is a
+      // `TypeError` on the render path, which is the one place a retirement
+      // must not surface.
+      // ---- A NET CLIENT READS ITS OWN DECODE (commit D5) ----------------
+      // It steps no simulation, so `EncounterHost.bodies()` is empty on it and
+      // the branch below would hand the renderer nothing. js/net.js decodes the
+      // wire's body and ordnance rows into its own store and publishes it; this
+      // is the ONE reader. The orbs still concatenate: the client decodes
+      // production's own orb row into `E.orbs`, exactly as it always has.
+      // ...and the BODY half is `presentedBodies()` on both branches now
+      // (S4-CX-2, the fix round) — the same provider the FOES count and the
+      // stall surface read, so no reader can be one plane behind another.
+      if (typeof window !== "undefined" && window.Net && Net.active() && Net.view) {
+        const nv = Net.view();
+        return { enemies: presentedBodies(), orbs: E.orbs, missiles: nv.missiles };
+      }
+      const pb = presentedBodies();
+      return { enemies: pb ? pb.filter(bodyIsLive) : [],
+               orbs: ko && ko.length ? E.orbs.concat(ko) : E.orbs,
+               missiles: [] };
+    },
     lights, // ...and, on the same read-only footing, every body's position,
             // radius and kind for the glow layer — see lights() above. It takes
             // the same presentation view Encounter.draw does.
@@ -5865,15 +5929,17 @@
     // the per-seat liveness answer game.js's drain, fire gate and draw ask —
     // a seat is alive while its hull holds; respawnSeat is what revives it
     seatAlive,
-    // the enemy tuning surface — inert until a set() is called; the panel in
-    // game.js owns the controls, this file owns the fields and the refresh
-    tuning: TUNING };
+    // (the enemy tuning surface RETIRED at commit D4, with the nine archetype
+    // blocks its rows drove)
+  };
 
   // ---- test hook extension — deterministic checks drive the slice --------
   function snapState() {
     return {
       state: E.state,
       wave: E.wave,
+      loop: E.loop,   // the arc loop counter — hashed sim state, published so a
+                      // check can read a turn or a wipe without reaching into E
       waveTick: E.waveTick,
       hull: E.hull,
       hullMax: E.hullMax,
@@ -5881,7 +5947,17 @@
       score: E.score, // seat 0's scoreboard — per-seat, hashed, zeroed by
                       // exactly one event in the sim: DYING (any death now,
                       // not the PvP kill this line used to name)
-      seats: E.seats.map(({ termSeq, ...S }) => ({ ...S, owned: S.owned.slice() })),
+      seats: E.seats.map(({ termSeq, ...S }) => ({ ...S, owned: S.owned.slice(),
+                                                  hand: S.hand.slice(), bought: S.bought.slice() })),
+                              // the market hand is DEEP-copied for `owned`'s own
+                              // reason, and it is the reason that matters more
+                              // here: a deal REPLACES the arrays, but a purchase
+                              // writes ONE cell of `bought` in place, so a hand
+                              // riding the spread by reference would let a sale
+                              // rewrite a "before" snapshot a check is holding
+      marketWave: E.marketWave, // which deal the hands above belong to: the
+      marketLoop: E.marketLoop, // PHYSICAL cleared wave and its loop. 0 is
+                              // NEVER DEALT, and a wipe puts it back there
                               // `best` rides this spread — it is unhashed but
                               // it IS seat state, and a check that reads a
                               // standing reads it here
@@ -5898,18 +5974,21 @@
       owned: E.owned.slice(), // seat 0's vector, a copy — a TEST view, not the local seat's —
                               // checks compare before/after freely
       invuln: E.invuln,
-      enemies: E.enemies.length,
-      // darts and chargers stay as their own fields — the suite reads them —
-      // and byType is the general answer beside them, every roster key always
-      // present (0 when absent) so a check never distinguishes missing from none
-      darts: E.enemies.reduce((n, e) => n + (e.type === "dart" ? 1 : 0), 0),
-      chargers: E.enemies.reduce((n, e) => n + (e.type === "charger" ? 1 : 0), 0),
-      byType: E.enemies.reduce((m, e) => { m[e.type] = (m[e.type] || 0) + 1; return m; },
-                               ROSTER.reduce((m, t) => { m[t] = 0; return m; }, {})),
-      missiles: E.missiles.length,
+      // `enemies` is KEPT and reads 0 — a counter that vanishes and a counter
+      // that reads zero say different things to a reader of a snapshot. The
+      // three ROSTER-shaped views beside it (`darts`, `chargers`, `byType`)
+      // are RETIRED with the roster: each named types D9 replaced, and a
+      // by-type census keyed on an empty vocabulary is a census of nothing.
+      // ...and `missiles`, `queued` and `groups` join it at commit D5 under the
+      // same rule, now that the three arrays themselves are deleted. THIS IS A
+      // VIEW OF PRODUCTION'S OWN STATE and 0 is the honest answer for it: the
+      // bodies on the field are the successor plane's and are read through
+      // `mapState`, which is the accessor that crosses to that plane.
+      enemies: 0,
+      missiles: 0,
       missilesShot: E.missilesShot,
       orbs: E.orbs.length,
-      queued: queuedCount(),
+      queued: 0,
       kills: E.kills,
       hitsDealt: E.hitsDealt,
       hitsTaken: E.hitsTaken,
@@ -5920,7 +5999,7 @@
       shopHover: E.shopHover, // the card under the pointer, or -1 — the shop's whole input state
       stats: E.stats, // replaced each wave; tuning.refresh() retunes its members in
                       // place — handed out by reference so callers see live retunes
-      groups: E.groups.map((g) => ({ spawned: g.spawned, warned: !!g.points })),
+      groups: [],
     };
   }
   // The encounter's contribution to the harness state hash. The allow-list
@@ -6035,6 +6114,53 @@
     // different futures would hash the same. Folded UNCONDITIONALLY, the extra
     // four bytes would move every hash and the boot self-check would exit(1).
     if (E.wipePending) h.u32(1);
+    // THE ARC LOOP COUNTER, on the same guarded footing and for the same reason
+    // (PORT-S S7). It is hashed because it is a decision input — it is a part of
+    // the market's deal key, so two rooms on the same wave with different loop
+    // counts deal different hands and must not hash alike. Folded ONLY while it
+    // is non-zero: a run that has neither turned its arc nor wiped folds ZERO
+    // BYTES, which is what lets every fixture captured before this field existed
+    // reproduce unchanged, and what keeps the server's boot self-check at its
+    // committed hash. MEASURED: with the guard, byte-identical.
+    if (E.loop) h.u32(E.loop);
+    // ---- D37'S MARKET HAND, THE FIFTH GUARDED FOLD (PORT-S S7) -----------
+    // The hands and their bought bits, folded ONLY once SOME seat has been
+    // dealt one — the pvpCd idiom the three blocks above already keep, and for
+    // the identical reason: every committed fixture and the server's boot
+    // self-check were captured before a hand existed, and an UNCONDITIONAL fold
+    // would move all 46 checkpoints of 12 of the 13 traces. That is not an
+    // argument, it is a measurement: the same fold dealt at run start was run
+    // and it did exactly that.
+    //
+    // THE IDENTITY PAIR SITS INSIDE THE GUARD. It has to: an empty room must
+    // fold nothing whether or not the pair exists, and once ANY hand stands the
+    // pair is what distinguishes "this hand, dealt for reward wave 3 of loop 0"
+    // from the same four cards dealt for reward wave 3 of loop 1 — two rooms
+    // that must never hash alike, because a wipe is supposed to take a hand
+    // away for good.
+    //
+    // ENTERED ONCE FOR THE WHOLE ROOM, like the rank block: every seat's hand
+    // then folds, each behind its OWN length prefix, so "seat 0 was dealt these
+    // four" and "seat 1 was dealt these four" can never fold the same bytes and
+    // a two-card hand beside a four-card one can never run together into one
+    // ambiguous stream. The bought bit rides beside its own card rather than in
+    // a second pass, so a card and its state cannot be separated by a length.
+    //
+    // BOTH BELONG IN THE HASH under the charter's own rule — they decide what
+    // the sim does next. A hand decides what a seat may buy; a bought bit
+    // decides whether it may buy it twice.
+    {
+      let dealt = false;
+      for (const S of E.seats) if (S.hand.length) { dealt = true; break; }
+      if (dealt) {
+        h.u32(E.marketWave);
+        h.u32(E.marketLoop);
+        for (const S of E.seats) {
+          h.u32(S.hand.length);
+          for (let i = 0; i < S.hand.length; i++) { h.num(S.hand[i]); h.u32(S.bought[i] ? 1 : 0); }
+        }
+      }
+    }
     // shipPrev folds as the array encStep writes; a suite's staged single
     // {x, y} folds as a one-entry walk so the hash never throws mid-suite
     const sp = Array.isArray(E.shipPrev) ? E.shipPrev : E.shipPrev ? [E.shipPrev] : null;
@@ -6046,31 +6172,41 @@
                             // stock gear, still a sim decision input (the key
                             // thrust gate), so it stays in — the old per-mod
                             // walk is gone with the shared mods object itself
-    h.u32(E.groups.length);
-    for (const g of E.groups) {
-      for (const f of GROUP_HASH) h.val(g[f]);
-      h.u32(g.points ? 1 : 0);
-      if (g.points) {
-        h.num(g.points.anchor.x); h.num(g.points.anchor.y);
-        for (const p of g.points.pts) { h.num(p.x); h.num(p.y); }
-      }
-    }
-    // enemies walk grouped in ROSTER order, so a new archetype cannot escape
-    // the hash without being admitted here — and a type with zero live members
-    // contributes NOTHING (no name, no zero count), so roster growth alone can
-    // never move a committed hash. The live index folds with each body because
-    // array order is itself simulation state: the separation pass and the
-    // bullet arbitration both walk it.
-    for (const type of ROSTER) {
-      for (let i = 0; i < E.enemies.length; i++) {
-        const e = E.enemies[i];
-        if (e.type !== type) continue;
-        h.u32(i);
-        for (const f of ENEMY_HASH) h.val(e[f]);
-      }
-    }
-    h.u32(E.missiles.length);
-    for (const m of E.missiles) for (const f of MISSILE_HASH) h.val(m[f]);
+    // ---- THE THREE RETIRED FOLDS, AND THE MERGE HAZARDS THEY WERE ------
+    // PORT-S S3b lane 3, commit D4. The GROUP fold, the ROSTER-ordered ENEMY
+    // walk and the MISSILE fold are deleted. All 25 committed traces re-key at
+    // this lane's freeze, which is what licenses touching this block at all —
+    // S3B-MAP §5c's fold-order conditionals were about surviving the deletion
+    // WITHOUT a recapture, and the recapture is already bought.
+    //
+    // AND TWO OF js/engine.js's THREE MERGE HAZARDS ARE ANSWERED HERE, IN
+    // WRITING, because this is the block they were about:
+    //
+    //   HAZARD 1 — `h.u32(i)`, THE ENEMIES-ONLY ARRAY INDEX. "A merged list
+    //   must still answer 'what is this body's dense index among enemies only,
+    //   in enemies-only insertion order', and deriving it from a merged
+    //   position is simply wrong." IT NO LONGER HAS TO ANSWER: the fold that
+    //   asked the question is gone, because production has no enemies-only
+    //   array to index. Nothing else in this codebase folds a container index,
+    //   and nothing does now.
+    //
+    //   HAZARD 2 — ENEMIES WERE NOT LENGTH-PREFIXED while missiles and orbs
+    //   were, "and the asymmetry is load-bearing: a type with zero live members
+    //   folds NOTHING, which is what lets ROSTER grow without moving a
+    //   committed hash." THE ASYMMETRY IS GONE WITH THE ASYMMETRIC PARTY. What
+    //   is left is ORBS, length-prefixed, which is the shape the other two
+    //   already had — so a merged registry walk that adds a per-KIND header has
+    //   nothing left to break here.
+    //
+    //   HAZARD 3 is the 45 id-less synthetic bullet pushes across tests/ and
+    //   test/, and it is NOT this block's: it belongs to js/game.js's bullet
+    //   fold and is answered at commit D5, with the merge itself.
+    //
+    // `E.groups`, `E.enemies` and `E.missiles` REMAIN as permanently empty
+    // arrays and are NOT deleted here. Their storage is the merge's question
+    // (commit D5) and every one of the twenty wire, presentation and decode
+    // crossings S3B-MAP counted still reads them; emptying a list and deleting
+    // it are different changes and they get different commits.
     h.u32(E.orbs.length);
     for (const o of E.orbs) for (const f of ORB_HASH) h.val(o[f]);
   }
@@ -6105,7 +6241,8 @@
       E,
       hashInto: hashEncounter, // folds encounter state into a game.js fnv hasher
       rngState: () => rand.state(), // reads the stream's position without advancing it
-      roster: ROSTER, // the live array — the golden suite's phantom-type check mutates and restores it
+      // (`roster` RETIRED at commit D4 — the golden suite's phantom-type check
+      // mutated and restored it, and both the roster and that check are gone.)
       mods, // the seat-0 compatibility VIEW (getter-backed on termsFor) —
             // kept only for the standing test surface; sim code never reads it
       termsFor,
@@ -6130,16 +6267,16 @@
       recordEvents, // start recording the (tick, kind, gain) stream the drain forwards
       stopEvents,   // ...and stop, returning the recorded list
       state: snapState,
-      spawnEnemy,
-      spawnMissile, // the real constructor, cap included — checks drive production
-                    // code and never build a fixture the sim would not have made
-      waveGroups,
-      countsFor,
-      statsFor,
-      TIER_LADDER,
-      TIER_TYPES,
-      tierRow,
-      tierInk,
+      // ---- THE ENEMY PLANE'S TEST SEAM IS RETIRED (commit D4) -----------
+      // `spawnEnemy`, `spawnMissile`, `waveGroups`, `countsFor`, `statsFor`,
+      // `TIER_LADDER`, `TIER_TYPES`, `tierRow` and `tierInk` (D2). Every one
+      // was a door onto the roster D9 replaced, and a door onto a room that
+      // has been demolished is not a door.
+      //
+      // WHAT REPLACES THEM AS A STAGING SEAM: the successor plane's own
+      // `bodies()` and `damageBody()` (commit B), published on js/demo-kernel.js
+      // and wrapped by js/encounter-host.js — which is where a check now goes
+      // to put a body on the field and hurt it.
       // the direct hooks that can emit outside a step: each drains after the
       // call, so a suite's log assertions see the cue on the same call — and
       // each keeps its exact return value
@@ -6160,7 +6297,52 @@
       // the suites' wave elevator: the old flow rode continueFromShop, and
       // the panel shop has no wave button — encStep deals waves itself, and
       // a check that needs wave n NOW stages it exactly as encStep would
-      dealWave: (n) => { startWave(n); E.state = "warning"; },
+      // ---- IT REFUSES LOUDLY NOW (FIX ROUND, S3BR-09) ------------------
+      // `startWave` deals nothing since commit D4 — the dealer, the roster and
+      // the schedule are deleted — and `applyKernelHud` overwrites both fields
+      // this used to set on the very next tick. So the seam RAN and CHANGED
+      // NOTHING while its caller logged success, and the live latency rig used
+      // it as a condition selector: a run requested as wave 10 was journaled
+      // and scored as wave 10 while the field stayed at wave 1.
+      //
+      // ---- RE-AIMED AT THE KERNEL'S DIRECTOR (PORT-S S4, commit G) --------
+      // The refusal's own note routed the work: *"THE DIRECTOR IS THE KERNEL'S,
+      // and pointing this lever at it means deciding what 'deal wave N' means to
+      // a curated arc — which setpiece, which entries, what happens to the one
+      // in flight. That is S4's."* The answers, in order: setpiece N of the
+      // kernel's own WAVES table; that setpiece's entries and no others; and the
+      // one in flight is WIPED — board, arrivals and enemy ordnance together.
+      //
+      // THAT WIPE IS THE SHAPE D21 FORBIDS, and it is why this is an INSTRUMENT
+      // rather than a rule. A latency run that wants to measure setpiece 10
+      // cannot fly to it, so the rig needs a jump; a PLAYER must never get one,
+      // because "the next arc wipes the board and starts" is the exact sentence
+      // the owner ruled out. The two are reconciled by the CALLER, not by the
+      // mechanism: the only non-test caller in the tree is
+      // `server/server.js`'s `applyLabFlags()`, behind `devTuneOn()`, and
+      // `test/node-golden.mjs` holds that census as a source shape in both
+      // directions so a second caller cannot arrive quietly.
+      //
+      // IT STILL REFUSES WITHOUT A KERNEL, loudly and for the original reason:
+      // production has had no dealer since commit D4, so with no host installed
+      // there is nothing to point the lever at. The rig's own
+      // `assertDealWaveHonest` tripwire stays live for exactly that case.
+      //
+      // IT RETURNS THE WAVE IT LANDED ON — a number, not `true` — so a caller
+      // journals what HAPPENED. FIX 9's lesson was never about the lever; it was
+      // about a caller logging a success it had not had.
+      dealWave: (n) => {
+        if (!kernelDriving() || !window.EncounterHost
+            || typeof window.EncounterHost.devDealSetpiece !== "function") {
+          if (typeof console !== "undefined" && console.warn) {
+            console.warn("[scmelee] dealWave(" + n + ") REFUSED — production deals no waves since "
+              + "PORT-S S3b commit D4, and no successor-plane host is installed to deal one. "
+              + "The wave is UNCHANGED at " + E.wave + ".");
+          }
+          return false;
+        }
+        return window.EncounterHost.devDealSetpiece(n);
+      },
       respawnSeat, // the direct deal — a check can stage a re-entry without
                    // waiting the timer out
       unseatSeat,  // ...and its opposite, published for the SERVER: a socket
@@ -6170,6 +6352,11 @@
       reseatSeat,  // ...and the way BACK for the server: a parked seat that has
                    // been granted to a socket again is waiting on a click, not
                    // empty — see reseatSeat's own block
+      seatParked,  // ...and the PARK AS A STATE THE SERVER CAN SEE (S4-CX-1):
+                   // `reapAbsentSeats` revokes every socket whose sim seat is
+                   // absent, and a parked seat is absent — so the sweep tore
+                   // down the grant D17 had just parked. The park cannot be
+                   // inferred from `absent`; it is asked for by name.
       parkSeat,    // parking, for startRound and restartRound's restart cut:
                    // absent with no wipe arm, no toll and no cue — see
                    // parkSeat's own block
@@ -6203,6 +6390,9 @@
       shopHoverPlan,  // ...and the panel itself: its box, its header strings, the
                       // lines under them and the reason-first order they keep
       shopPriceLabel, // the ONE price string the card and the panel both print
+      waveHeader,     // the ONE director line the draw prints and the width
+                      // contract measures — wave, encounter index, arc loop,
+                      // and the CLEAR suffix last
       statusStackRight, // the left edge of that channel, derived from the same
                         // numbers encDrawHud sets the status stack with
       shopHover,      // the hit test, in panel coordinates
@@ -6227,6 +6417,64 @@
         desc: row.desc, // the sentence the FIELD panel sets — published so a
                         // check can wrap the real string instead of a copy
       })),
+      // ---- D37'S HAND, BESIDE THE CATALOG AND NEVER INSTEAD OF IT ---------
+      // `shopInfo()` STAYS THE CATALOG. Its `.length` is a load-bearing WIRE
+      // contract in three other places — `server/snapshot.test.mjs:21` reads it
+      // as the rank-vector width, `tests/net-checks.js:1545` pads a trimmed `ow`
+      // back to it, and `js/net.js:1353` resolves BLAST CHARGE's catalog index
+      // through it and then indexes `S.owned` with the answer. Narrowing it to
+      // four cards would make the predictor read a rank at the wrong index on
+      // every net client, SILENTLY, because `S.owned[i] | 0` answers 0 past the
+      // end. So the hand gets its OWN reader.
+      //
+      // Same record shape as a catalog row, plus `bought`: a card the seat has
+      // already spent this reward wave. The card's `i` is its CATALOG index —
+      // the hover, the wire's `item` and `buy()` all speak catalog indices, and
+      // the hand is a MEMBERSHIP test over them, not a second address space.
+      handInfo: (seat = localSeat()) => {
+        const S = E.seats[seat];
+        if (!S) return [];
+        return S.hand.map((i, k) => ({
+          i, name: SHOP[i].name, cost: shopCost(i, seat), owned: rankAt(i, seat),
+          maxed: shopMaxed(i, seat), bought: !!S.bought[k],
+          icon: SHOP[i].icon || null, iconReady: !!(ICONS[i] && ICONS[i].ok),
+          desc: SHOP[i].desc,
+        }));
+      },
+      // WHICH deal the standing hands belong to: the PHYSICAL cleared wave and
+      // its loop. `{wave: 0, loop: 0}` is NEVER DEALT — waves start at 1 — and
+      // a wipe puts a room back there.
+      market: () => ({ wave: E.marketWave, loop: E.marketLoop }),
+      // ---- THE EXPLICIT STAGING SEAM (PORT-S S7) --------------------------
+      // The ONE way a check stages a hand short of driving a real clear. It
+      // writes the ids and zeroes the bits and TOUCHES NOTHING ELSE — not the
+      // identity pair, not `E.loop` — so a production deal at a later clear
+      // replaces a staged hand exactly as it would replace any other.
+      //
+      // IT VALIDATES AND THROWS. A silent coercion here is how a re-staged leg
+      // goes VACUOUS instead of red: a hand containing -1, or a repeat, or the
+      // flat row, would let a later `buy()` refuse for the wrong reason and a
+      // contract about nothing would report green.
+      dealHand: (seat, ids) => {
+        const S = E.seats[seat];
+        if (!S) throw new Error("dealHand: no seat " + seat);
+        if (!Array.isArray(ids)) throw new Error("dealHand: ids must be an array");
+        if (ids.length > 4) throw new Error("dealHand: a hand is at most four cards, got " + ids.length);
+        const seen = new Set();
+        for (const i of ids) {
+          if (!Number.isInteger(i) || !SHOP[i]) throw new Error("dealHand: not a catalog row: " + i);
+          if (SHOP[i].curve !== "double") throw new Error("dealHand: " + SHOP[i].name + " is not a market row — the flat row is exempt, outside the hand");
+          if (seen.has(i)) throw new Error("dealHand: repeated card " + i + " — a hand is drawn WITHOUT replacement");
+          seen.add(i);
+        }
+        S.hand = ids.slice();
+        S.bought = ids.map(() => 0);
+        return true;
+      },
+      // ...and the production dealer itself, published so a check can drive the
+      // REAL deal by key without a clear. Named apart from the staging seam
+      // above on purpose: one deals, the other stages.
+      dealSeatHand,
       segCircleHit,
       segCircleEntryT,
       downCardLine, // the SHIP DOWN card's copy — a rules CLAIM, so it is pinned
@@ -6275,35 +6523,43 @@
                // passes above: D1's PvP row is a question about ONE application at ONE
                // point, and threading a bullet through a sweep to ask it would put the
                // sweep's own arbitration inside the answer
-      pvpCd: () => ({ ...E.pvpCd }), // a COPY of the pair windows: the pacing is unhashed
-                                     // while empty and never on the wire, so a check reads
-                                     // it here rather than inventing its own bookkeeping
-      predictAim, // the radar latch's aim solver, on the live target player's
-                  // ship/vel — checks recompute the closed form and compare
-                  // against production
-
+      pvpCd: () => ({ ...E.pvpCd }), // a COPY of the windows: the pacing folds ZERO
+                                     // BYTES while empty and never reaches the wire, so a
+                                     // check reads it here rather than inventing its own
+                                     // bookkeeping. It holds TWO key shapes since FIX 14 —
+                                     // `a:v` seat pairs (resolvePvpRams) and `b<id>` BODY
+                                     // windows (resolveCometBodyRams) — and a body key dies
+                                     // with its body, which is the retired contract.
       frozen,
       fireOnce: () => { fire(); drainStep(); }, // the real firing gate, without the autofire path
       setBounce: (v) => { BOUNCE = !!v; },
-      edgeArrows: computeEdgeArrows, // the resolved arrow list, straight off live state
-      arrowCfg: ARROWS,              // inset/cap/buckets — checks read these, never copy them
-      // ENEMY is the fixture oracle's window onto the enemy constants: the
-      // golden fixtures' section M compares this whole record, and without it
-      // an ECFG hull retune would red every hash while the diagnosis line
-      // stayed green — "hashes failing alone means the code moved" would be a
-      // lie. A compact per-type serialization (hp, split, arc, tier), plus
-      // the shard's speed — the constants this pass made load-bearing.
-      tunables: () => ({ BCOOL, BLIFE, AUTOFIRE, BSPEED, BMAX, VMAX, TICK, BDMG, CONTACTCD, BLASTR, BLASTGAIN, COMETDMG, COMETCD, PVPORBS, PVPREWIND,
-        ENEMY: (() => {
-          const S = statsFor(1);
-          const m = { shardSpeed: ECFG.shard.maxSpeed };
-          for (const t of ROSTER) {
-            m[t] = { hp: S[t].hp, tier: S[t].tier };
-            if (S[t].split !== undefined) m[t].split = S[t].split;
-            if (S[t].arc !== undefined) m[t].arc = S[t].arc;
-          }
-          return m;
-        })() }),
+      setLoadout: (v) => { LOADOUT = !!v; }, // the rail band's isolating lever —
+                     // the PANELS idiom, for a layer only this leg answers to.
+                     // It moves the DRAW and never shopLayout(), so card 0's
+                     // own ink is identical on both sides of the toggle and a
+                     // probe on the band is measuring the band
+      // ---- THE `ENEMY` WINDOW IS RETIRED (S3b lane 3, commit D4) --------
+      // It was the fixture oracle's view of the enemy constants — a per-type
+      // (hp, split, arc, tier) serialization over `statsFor(1)` and `ROSTER`,
+      // so a diagnosis line could say "an ECFG hull retune moved the hashes"
+      // instead of leaving a reader with bare hash failures. Every one of
+      // those constants went with the roster.
+      //
+      // THE JOB IT DID IS NOT LOST, and it is worth saying where it went: the
+      // successor plane's own constants are pinned by
+      // tests/fixtures/demo-bounded-reference, which compares 23,000 ticks of
+      // SERIALIZED STATE rather than a hand-picked window onto a table — a
+      // strictly stronger oracle, and one that already exists and already runs
+      // in this gate. What the flight tunables below still buy is production's
+      // own half, which no kernel fixture covers.
+      tunables: () => ({ BCOOL, BLIFE, AUTOFIRE, BSPEED, BMAX, VMAX, TICK, BDMG, CONTACTCD, BLASTR, BLASTGAIN, COMETDMG, COMETCD, PVPORBS, PVPREWIND, ENCPERREWARD }),
+                       // ENCPERREWARD rides here for PVPORBS's exact reason: the
+                       // ENCOUNTER reads it, it decides which clears deal a market
+                       // hand, and a hand is HASHED — so a capture taken at a
+                       // non-default dial has to be detectable, by name, in the
+                       // diagnosis line rather than as a bare hash mismatch
+      rewardWave: () => rewardWaveOf(E.wave),
+      dueForReward: () => dueForReward(E.wave),
                        // PVPORBS rides here too, and for the same reason COMETCD does:
                        // the ENCOUNTER is what reads it (deathToll deals the orbs — on
                        // EVERY death now, which is why the name still says PvP and the
@@ -6313,7 +6569,6 @@
                        // COMETCD rides HERE and not in flightTunables: the encounter is
                        // what stamps it, beside the CONTACTCD it was split off from
       blastRadius, // the live effective radius, exactly as blastAt() reads it
-      tuning: TUNING, // the same object window.Encounter.tuning publishes
     },
   });
 })();

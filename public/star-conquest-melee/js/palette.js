@@ -35,9 +35,13 @@
 //
 // LOAD ORDER, and why this file is not a sim file. index.html loads this
 // FIRST, ahead of js/abilities.js, so every consumer sees it. The headless sim
-// host (server/sim-host.mjs) loads only the four SIM_FILES and NOT this one:
-// the sim never draws, colour never reaches a hashed field, and adding a fifth
-// file to that list would ship a render script to the VPS. js/game.js
+// host (server/sim-host.mjs) loads the SIM_FILES and NOT this one: the sim never
+// draws, colour never reaches a hashed field, and adding a RENDER script to that
+// list would ship one to the VPS. THE COUNT IS DELIBERATELY NOT WRITTEN HERE —
+// this comment said "the four SIM_FILES" and "a fifth file", and the list has
+// been SIX since R5 and is SEVEN since PORT-S S3b. The claim that matters is
+// membership, not arity, and the one authority on membership is that literal.
+// js/game.js
 // therefore reads this table through a `typeof PALETTE` guard and falls back
 // to an empty object under the vm — see the `C` declaration there.
 const PALETTE = {

@@ -54,10 +54,6 @@
      invisible sliders and the arrow keys retune the game */
   #devpanel .tabsec[hidden] { display: none; }
   #devpanel .col { display: flex; flex-direction: column; gap: 6px; }
-  /* the enemies tab builds its .col groups inside a shell div the builder can
-     find by id — display:contents hands them straight to the tabsec's flex,
-     so the generated columns lay out exactly like the hand-authored ones */
-  #devpanel #enemies-body { display: contents; }
   #devpanel .grouphead { color: #9aa3b2; letter-spacing: 0.14em; }
   #devpanel .row { display: flex; align-items: center; gap: 10px; }
   #devpanel label { width: 84px; text-align: right; }
@@ -74,7 +70,7 @@
 </style>
 </head>
 <body>
-<canvas id="field" aria-label="Ship playground — the cursor aims; W A S D flies and Q E Z C add diagonals; left fires; hold right for energy-powered comet mode: fast, invulnerable, and able to ram enemies; Escape pauses"></canvas>
+<canvas id="field" aria-label="Ship playground — the cursor aims; W A S D thrust and Q E Z C add diagonals, along the ship nose by default with T to flip to screen-relative; left fires; hold Shift for energy-powered comet mode: fast, and able to ram enemies; Escape pauses"></canvas>
 <div id="pausemenu">
   <!-- the first-run wording: syncMenuWords() swaps both to paused / resume
        the moment G.started flips, and the ids never move -->
@@ -101,7 +97,6 @@
       <button class="tab" type="button" data-tab="comet" aria-pressed="false">comet</button>
       <button class="tab" type="button" data-tab="energy" aria-pressed="false">energy</button>
       <button class="tab" type="button" data-tab="audio" aria-pressed="false">audio</button>
-      <button class="tab" type="button" data-tab="enemies" aria-pressed="false">enemies</button>
     </div>
     <button id="devback" class="back" type="button">back</button>
   </div>
@@ -110,17 +105,17 @@
       <div class="col">
         <div class="row">
           <label for="vmax">max speed</label>
-          <input id="vmax" type="range" min="2" max="50" step="0.5">
+          <input id="vmax" type="range" min="5" max="125" step="1.25">
           <output id="vmax-out" for="vmax"></output>
         </div>
         <div class="row">
           <label for="accel">accel</label>
-          <input id="accel" type="range" min="0.001" max="0.03" step="0.001">
+          <input id="accel" type="range" min="0.0025" max="0.075" step="0.0025">
           <output id="accel-out" for="accel"></output>
         </div>
         <div class="row">
           <label for="turn">turn</label>
-          <input id="turn" type="range" min="0.001" max="0.03" step="0.001">
+          <input id="turn" type="range" min="0.0025" max="0.075" step="0.0025">
           <output id="turn-out" for="turn"></output>
         </div>
         <div class="row">
@@ -129,9 +124,22 @@
           <output id="keythrust-out" for="keythrust"></output>
         </div>
         <div class="row">
+          <label for="thrustframe">thrust frame</label>
+          <select id="thrustframe">
+            <option value="ship">ship (W is forward)</option>
+            <option value="screen">screen (W is up)</option>
+          </select>
+          <output id="thrustframe-out" for="thrustframe"></output>
+        </div>
+        <div class="row">
           <label for="wallloss">wall loss</label>
           <input id="wallloss" type="range" min="0" max="1" step="0.05">
           <output id="wallloss-out" for="wallloss"></output>
+        </div>
+        <div class="row">
+          <label for="damp">drift damp</label>
+          <input id="damp" type="range" min="0.9" max="1" step="0.005">
+          <output id="damp-out" for="damp"></output>
         </div>
         <div class="row">
           <label for="inputmode">input</label>
@@ -160,13 +168,8 @@
         </div>
         <div class="row">
           <label for="aimdist">cursor dist</label>
-          <input id="aimdist" type="range" min="15" max="100" step="1">
+          <input id="aimdist" type="range" min="37.5" max="250" step="2.5">
           <output id="aimdist-out" for="aimdist"></output>
-        </div>
-        <div class="row">
-          <label for="invert">invert right</label>
-          <span class="slot"><input id="invert" type="checkbox"></span>
-          <output id="invert-out" for="invert"></output>
         </div>
       </div>
     </section>
@@ -184,7 +187,7 @@
         </div>
         <div class="row">
           <label for="bspeed">bullet speed</label>
-          <input id="bspeed" type="range" min="2" max="40" step="0.5">
+          <input id="bspeed" type="range" min="5" max="100" step="1.25">
           <output id="bspeed-out" for="bspeed"></output>
         </div>
         <div class="row">
@@ -221,12 +224,12 @@
         </div>
         <div class="row">
           <label for="blastr">blast radius</label>
-          <input id="blastr" type="range" min="6" max="60" step="1">
+          <input id="blastr" type="range" min="15" max="150" step="2.5">
           <output id="blastr-out" for="blastr"></output>
         </div>
         <div class="row">
           <label for="blastgain">blast gain</label>
-          <input id="blastgain" type="range" min="0" max="24" step="1">
+          <input id="blastgain" type="range" min="0" max="60" step="2.5">
           <output id="blastgain-out" for="blastgain"></output>
         </div>
       </div>
@@ -255,33 +258,26 @@
           <output id="cambox-out" for="cambox"></output>
         </div>
         <div class="row">
+          <!-- the rail ran to 60 and the owner chose 60, so his number was the
+               END of it and not a measurement. 150 is the width the PORT-W lab
+               gave the same dial, carried here so the feel gate can go past his
+               floor instead of re-confirming it. -->
           <label for="camlead">lookahead</label>
-          <input id="camlead" type="range" min="0" max="60" step="1">
+          <input id="camlead" type="range" min="0" max="150" step="1">
           <output id="camlead-out" for="camlead"></output>
         </div>
         <div class="row">
-          <label for="leadsrc">lead source</label>
-          <select id="leadsrc">
-            <option value="vel">vel</option>
-            <option value="aim">aim</option>
-            <option value="blend">blend</option>
-            <option value="add">add</option>
-            <option value="swap">swap</option>
-          </select>
-          <output id="leadsrc-out" for="leadsrc"></output>
+          <!-- D11. The rail runs to 3, as the lab's did: this is a GAIN and not
+               a 0..1 mix, so 1 is the middle of what it means rather than the
+               top of it. The `lead source` selector, `aim lead` and `lead blend`
+               used to sit here and around the column break; they left with the
+               mechanism they steered — see leadVec() in js/game.js. -->
+          <label for="cursorpull">cursor pull</label>
+          <input id="cursorpull" type="range" min="0" max="3" step="0.05">
+          <output id="cursorpull-out" for="cursorpull"></output>
         </div>
       </div>
       <div class="col">
-        <div class="row">
-          <label for="aimlead">aim lead</label>
-          <input id="aimlead" type="range" min="0" max="250" step="1">
-          <output id="aimlead-out" for="aimlead"></output>
-        </div>
-        <div class="row">
-          <label for="leadblend">lead blend</label>
-          <input id="leadblend" type="range" min="0" max="1" step="0.05">
-          <output id="leadblend-out" for="leadblend"></output>
-        </div>
         <div class="row">
           <label for="leaddz">lead deadzone</label>
           <input id="leaddz" type="range" min="0" max="600" step="10">
@@ -320,11 +316,6 @@
           <label for="minimap">minimap</label>
           <span class="slot"><input id="minimap" type="checkbox"></span>
           <output for="minimap">world map, top right</output>
-        </div>
-        <div class="row">
-          <label for="edgearrows">foe arrows</label>
-          <span class="slot"><input id="edgearrows" type="checkbox"></span>
-          <output for="edgearrows">edge arrows point to off-screen foes</output>
         </div>
       </div>
     </section>
@@ -383,13 +374,18 @@
         </div>
         <div class="row">
           <label for="comet-aoe">halo px</label>
-          <input id="comet-aoe" type="range" min="0" max="40" step="1">
+          <input id="comet-aoe" type="range" min="0" max="100" step="2.5">
           <output id="comet-aoe-out" for="comet-aoe"></output>
         </div>
         <div class="row">
           <label for="comet-aoedmg">reach px</label>
-          <input id="comet-aoedmg" type="range" min="0" max="40" step="1">
+          <input id="comet-aoedmg" type="range" min="0" max="100" step="2.5">
           <output id="comet-aoedmg-out" for="comet-aoedmg"></output>
+        </div>
+        <div class="row">
+          <label for="comet-aura">aura dmg/tick</label>
+          <input id="comet-aura" type="range" min="0" max="3" step="0.1">
+          <output id="comet-aura-out" for="comet-aura"></output>
         </div>
         <div class="row">
           <label for="comet-fury">overload/rank</label>
@@ -498,20 +494,17 @@
         </div>
       </div>
     </section>
-    <!-- generated at first open from Encounter.tuning — encounter.js loads
-         after game.js, so the rows cannot be authored or bound at parse time -->
-    <section class="tabsec" data-tab="enemies" hidden><div id="enemies-body"></div></section>
   </div>
 </div>
-<script>window.BUILD="6788bc0";</script>
-<script src="js/palette.js?v=6788bc0"></script>
-<script src="js/abilities.js?v=6788bc0"></script>
-<script src="js/engine.js?v=6788bc0"></script>
-<script src="js/game.js?v=6788bc0"></script>
-<script src="js/encounter.js?v=6788bc0"></script>
-<script src="js/audio.js?v=6788bc0"></script>
-<script src="js/net.js?v=6788bc0"></script>
-<script src="js/fx.js?v=6788bc0"></script>
+<script>window.BUILD="720b250";</script>
+<script src="js/palette.js?v=720b250"></script>
+<script src="js/abilities.js?v=720b250"></script>
+<script src="js/engine.js?v=720b250"></script>
+<script src="js/game.js?v=720b250"></script>
+<script src="js/encounter.js?v=720b250"></script>
+<script src="js/audio.js?v=720b250"></script>
+<script src="js/net.js?v=720b250"></script>
+<script src="js/fx.js?v=720b250"></script>
 <script>
 // THE FLIP (PORT-W, 2026-08-25). The demo pair below is DORMANT here — hosted by
 // PORT-R's reproduction gate, stepped by nothing this page runs. But the kernel
@@ -520,12 +513,75 @@
 // trap laid for PORT-S. Bounded is the shipped topology from this commit.
 //
 // NOT the kernel literal: js/demo-kernel.js still declares `: false`, which the
-// OFF parity suite, demo-bounded.mjs's text-flip and the VPS sim vm all depend on
-// (server/sim-host.mjs loads the kernel as one of SIM_FILES and must keep booting
-// OFF-dormant). Flipping the literal is PORT-S's business.
+// OFF parity suite and demo-bounded.mjs's text-flip both depend on.
+//   THE VPS SIM VM CAME OFF THAT LIST at PORT-S S3b commit H (corrected
+// 2026-08-26): server/sim-host.mjs now sets DEMO_WORLD_BOUNDED = true on its
+// sandbox before the vm scripts run, so the server kernel boots BOUNDED by an
+// explicit decision rather than unbounded by omission. Same rule, not an
+// exception to it — a host is one of the surfaces that decides. Flipping the
+// LITERAL is still nobody's business short of the instrument rework it forces.
 globalThis.DEMO_WORLD_BOUNDED = true;
 </script>
-<script src="js/demo-kernel.js?v=6788bc0"></script>
-<script src="js/demo-render.js?v=6788bc0"></script>
+<script src="js/demo-kernel.js?v=720b250"></script>
+<!-- S3b lane 1: the adapter facade, SIM_FILES member 7. -->
+<script src="js/encounter-host.js?v=720b250"></script>
+<script src="js/demo-render.js?v=720b250"></script>
+<script>
+// ---- THE FLIP (PORT-S S3b lane 3, commit C) --------------------------------
+// THE KERNEL IS THE ENCOUNTER ON THIS PAGE FROM THIS COMMIT. It was hosted
+// dormant here since PORT-R's reproduction gate — the tags were there and the
+// drive was not — and this block is the drive.
+//
+// THE PAGE DECIDES, NEVER THE KERNEL, which is the same rule the topology flip
+// above follows. js/game.js's step() poses every seat production owns onto the
+// kernel and drives one kernel step per production tick; js/encounter.js's old
+// wave machine goes dormant against the same predicate, an INSTALLED host. The
+// server vm decides for itself, in server/sim-host.mjs.
+//   ...AND THE DORMANT HALF IS GONE SINCE PHASE D. Commits D4 and D5 deleted
+// the old wave machine outright — the dealer, the roster, the schedule, the
+// bodies, the ordnance and the clear gate — so there is no second encounter
+// left for the predicate to stand down. What the predicate still decides is
+// whether the kernel is STEPPED and whether the HUD's four fields are written
+// from its director; with no host installed those fields simply stand still,
+// which is the honest end state of a retirement and not a fallback.
+//
+// AND IT REFUSES RATHER THAN HALF-INSTALLING. install() returns false for a
+// kernel it cannot drive. A page that silently ran with no encounter at all
+// would draw a lit ship on a black, self-clearing world with FOES 0 and every
+// check still green — S3B-MAP's risk 2, measured. So a refusal is LOUD here.
+//
+// THE RENDERER IS BOUND TO THE SAME KERNEL, once, at load. js/game.js's
+// render() hands it the hosted view and production's own camera origin every
+// frame; nothing on this page calls DemoRender's own camera, and
+// test/tools/demo-flip.mjs asserts that its step counter stays at zero.
+(function () {
+  if (!window.EncounterHost || !window.DemoKernel || !window.DemoRender) {
+    throw new Error("index.html: the successor plane is incomplete — " +
+      JSON.stringify({ host: !!window.EncounterHost, kernel: !!window.DemoKernel,
+                       render: !!window.DemoRender }));
+  }
+  if (EncounterHost.install({}) !== true) {
+    throw new Error("index.html: the demo kernel refused to install — this page " +
+      "would draw a dark, self-clearing field with every check green");
+  }
+  DemoRender.setKernel(DemoKernel);
+  // ...AND THE ROOM IS RE-DEALT UNDER THE FLIP. js/encounter.js takes its
+  // load-time `restart()` at the tail of its own file, which is BEFORE this
+  // block runs — so that deal was taken while the host was still uninstalled
+  // and it left the OLD plane's groups on the field. One restart here re-takes
+  // it under the flip: production's deal goes dormant, and the same call
+  // carries the kernel's own reset with it (js/encounter.js's restart ends by
+  // resetting the kernel whenever a host is installed).
+  //
+  // IT IS HERE RATHER THAN BY MOVING THE TAG. The script order is load-bearing
+  // in the other direction — js/encounter-host.js resolves nothing at load
+  // precisely so its tag can sit anywhere, but js/encounter.js's own restart
+  // needs js/game.js's seats to exist first. One re-deal is cheaper than a
+  // reordering whose reasons are spread across three files.
+  // `reset` is `restart` under its PUBLISHED name (js/encounter.js's publish
+  // block) — the same function the host's composed reset calls.
+  if (window.Encounter) Encounter.reset();
+})();
+</script>
 </body>
 </html>

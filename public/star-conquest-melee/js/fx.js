@@ -96,7 +96,9 @@
   // — has its trail cut and the phosphor dropped rather than smeared across
   // the world. This layer no longer decides that for itself: it used to carry
   // a TELEPORT of 80 px measured per ADVANCE, against the presentation frame's
-  // own 28 px measured per TICK, and a hop between the two was cut by the
+  // own 28 px measured per TICK (70 since the PORT-S arena rescale — prose, not
+  // a live number: this file has carried neither since the merge), and a hop
+  // between the two was cut by the
   // frame and bridged by the wake. game.js owns the one predicate now and
   // hands the verdict over per seat; see PRES_CUT there for why the verdict
   // travels and not the number.
@@ -177,6 +179,21 @@
     wall:       { hue: "dim",    big: false, flash: 0.2,  ring: 0,   parts: 0.15 },
     thud:       { hue: "dim",    big: false, flash: 0.2,  ring: 0,   parts: 0 },
     fire:       { hue: "clay",   big: false, flash: 0.3,  ring: 0,   parts: 0 },
+    // THE CAP REJECTION (PORT-S S8). js/engine.js's cap contract says it in
+    // writing: "IT EMITS A capDenied CUE. A refusal a player cannot perceive
+    // is indistinguishable from a bug." The event has crossed this whole
+    // channel since R6 — kernel sink, host route, the wire's events[], both
+    // client drains — and stopped HERE, at the unmapped-kind return, because
+    // nothing in this table named it. It is ink, not a channel, that was
+    // missing.
+    //   The wall/thud register, and for their reason: a refusal is the
+    // quietest lit thing on the field. Both shipped caps belong to ENEMY
+    // spawners (the shared round pool and the minelayer's census), so this
+    // marks where the room said no — not where the pilot did. The player's own
+    // BMAX cap stays silent by ruling (js/engine.js:1242-1249, a FEEL decision
+    // R6 declined to make), and nothing here changes that: the player's cap
+    // raises no cue to map.
+    capDenied:  { hue: "dim",    big: false, flash: 0.25, ring: 0.2, parts: 0 },
   };
 
   // ---- state ---------------------------------------------------------------
@@ -566,13 +583,19 @@
       // the flat halo reads (game.js's cometView), so the light and the hull
       // can never disagree about how big the burn is or whether the authority
       // has confirmed it. The radius used to be a hard-coded 25 here against
-      // the flat layer's COMETAOE — a stale copy of that constant, which is 11
-      // today. Only the x1.5 survives, and it is not a second copy of the
+      // the flat layer's COMETAOE — a stale copy of that constant, which is
+      // 27.5 today. Only the x1.5 survives, and it is not a second copy of the
       // halo's size: it is this layer's own stated law that light exceeds the
       // ink it surrounds.
       const cv = cometView(P.id);
+      // THE LIGHT READS THE SAME AUTHORITATIVE RADIUS THE INK DOES (PORT-S S5,
+      // commit C). `cometView` samples the POST-SPEND pool; `presentedAuraR`
+      // answers the cache production wrote before the drain, which is also the
+      // number the kernel collides on. A light one drain smaller than the ink
+      // it surrounds is a halo with a rim.
+      const cr = presentedAuraR(P.id);
       if (cv.phase === CP_LIVE) {
-        blob(vp.x, vp.y, cv.r * 1.5, PAL.clay, 0.5 * g1);
+        blob(vp.x, vp.y, cr * 1.5, PAL.clay, 0.5 * g1);
         blob(vp.x, vp.y, SHIP_R + 4, PAL.bright, (0.22 + 0.5 * cv.flash) * g1);
       }
       // there was a CP_WIND branch here — a faint core swelling with the flare.

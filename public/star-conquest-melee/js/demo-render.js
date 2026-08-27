@@ -13,41 +13,52 @@
   // The camera lives in the render plane and nowhere else: written once per
   // render() call, read only by draw code. The kernel never sees it — the sim
   // derives its encounter frame from the player's own position. That is
-  // production's FRAME.cam contract (js/game.js:4033). The BASE ORDERING below
+  // production's FRAME.cam contract (js/game.js:4356). The BASE ORDERING below
   // is production's too — lead into the ease target, then the leash, then the
-  // world clamp — but the file no longer stops there: the SCALE (camWide,
-  // zoomFor, camScale and every / z that follows from them) and the CURSOR PULL
-  // have no production counterpart whatever. Production's camera has no scale
-  // term anywhere, and its lead uses a UNIT cursor direction, so it has no
-  // cursor-DISTANCE term either. Read the marked sites before assuming a line
-  // here can be found in js/game.js. With WORLD_BOUNDED off the camera stays
+  // world clamp — and the file no longer diverges from it in kind. THE SCALE IS
+  // GONE (camWide, zoomFor, camScale and every / z that followed from them,
+  // deleted on the owner's ruling), and THE CURSOR PULL IS NO LONGER A
+  // DIVERGENCE EITHER: D11 gave js/game.js the same rule. What is left that a
+  // reader should not go looking for in js/game.js is the two RE-EXPRESSIONS
+  // named at the lookahead block — the seconds clock and the px/s velocity.
+  // With WORLD_BOUNDED off the camera stays
   // pinned at the origin and no draw pass translates, so the wrapping build's
   // pixels do not move.
   const CAM_EASE_HZ = 60;   // the tick rate that constant was tuned at
   const CAM_DT_MAX = 0.1;   // a slept tab hands back one huge frame; the ease ignores the excess
-  // The THIRTEEN the lab exposes, in three kinds — the count and the kinds both
+  // The EIGHT the lab exposes, in two kinds — the count and the kinds both
   // matter, because a reader who takes the whole set for "production's numbers,
-  // retuned" mis-reads seven of the rows entirely:
-  //   2 OWNER-RULED RETUNINGS of a production number — ease 0.08 -> 0.05,
-  //     camLead 25 -> 60 (owner feel gate, 2026-08-24);
-  //   2 UNCHANGED, production-equal — edgeMargin 60, leadDz 200;
-  //   9 NEW SEAT-SELECTED MECHANISMS with NO production counterpart at all —
-  //     cursorPull, which is the owner's OWN camera rule of 2026-08-24 and which
-  //     production cannot express at all, the four zoom dials (zoomWide /
-  //     zoomRef / zoomDead / zoomEase), which production's updateCamera() has
-  //     nothing whatever to correspond to (it has no scale at all), and starLit,
-  //     starSize, zoomLW and streak, which are not camera numbers at all.
-  // Production's own number stays cited on every row
-  // that has one beside the lab final, because both are load-bearing: production's is what
-  // PORT-S restores when it deletes this block, the lab final is what the owner
-  // asked to fly. See the PORT-S DEBT note at the head of the lookahead block.
+  // retuned" mis-reads three of the rows entirely:
+  //   5 PRODUCTION-EQUAL, all five since D11 — ease 0.05 and camLead 60, which
+  //     production shipped as 0.08 and 25 until the owner's feel gate of
+  //     2026-08-24 moved both; edgeMargin 60 and leadDz 200, which never moved;
+  //     and cursorPull 1.0, which was the largest item on the PORT-S debt and
+  //     which production expresses now;
+  //   3 SEAT-SELECTED, and not camera numbers at all — starLit, starSize and
+  //     streak, which belong to the star pass and ride this panel only because
+  //     this panel is where the owner is flying.
+  // THE COUNT WAS THIRTEEN AND THE MISSING FIVE ARE THE ZOOM: zoomWide, zoomRef,
+  // zoomDead, zoomEase and zoomLW, deleted on the owner's own ruling — see the
+  // block where they used to sit, below.
+  // Production's own number stays cited on every row that has one, because both
+  // are load-bearing: production's is what a reader would otherwise take this
+  // file to have invented, the lab final is what the owner asked to fly.
+  //
+  // AND SINCE D11, PRODUCTION IS THE AUTHORITY FOR THE FIVE THAT HAVE ONE.
+  // js/game.js holds the owner's ease, camLead, cursorPull, edgeMargin and leadDz
+  // as its shipped defaults, with a `cursor pull` row on the pause screen, and
+  // that is the build he flies at the feel gate. THESE FIVE ROWS ARE A DUPLICATE
+  // WITH A DEATH DATE — S3b, per the ruling at the head of the lookahead block —
+  // so if the two files ever disagree about one of them, production is right and
+  // this file is stale. Change production first, always.
   // They are presentation-plane state: the kernel never reads one, and nothing
   // persists them, so a reload is these numbers again.
   const CAM_DIAL_DEFAULTS = {
-    ease: 0.05,             // owner 2026-08-24; production js/game.js:1614 CAMEASE = 0.08 — the gap closed per 60 Hz tick
-    edgeMargin: 60,         // js/game.js:1621 EDGEMARGIN — min px between ship and view edge (owner: unchanged)
-    camLead: 60,            // owner 2026-08-24; production js/game.js:1616 CAMLEAD = 25 — ticks of velocity the target leads by
-    // THE OWNER'S OWN RULE, 2026-08-24. NO production counterpart. 1.0 is his
+    ease: 0.05,             // owner 2026-08-24; production js/game.js:1699 CAMEASE — the same 0.05 since D11, over the 0.08 it shipped
+    edgeMargin: 60,         // js/game.js:1713 EDGEMARGIN — min px between ship and view edge (owner: unchanged)
+    camLead: 60,            // owner 2026-08-24; production js/game.js:1702 CAMLEAD — the same 60 since D11, over the 25 it shipped
+    // THE OWNER'S OWN RULE, 2026-08-24 — and production's too since D11, where
+    // it is CURSORPULL at js/game.js:1707. 1.0 is his
     // Blend 0.5 — the camera exactly halfway between the cursor and the ship
     // PLUS ITS VELOCITY LEAD. The plain ship-to-cursor midpoint holds only at
     // rest: at vx 245 with camLead 60 the centre sits 122.5 px past it, because
@@ -57,24 +68,18 @@
     // The whole derivation is at cursorOffset() and leadVec(); read it before
     // changing this number or its meaning.
     cursorPull: 1.0,
-    leadDz: 200,            // js/game.js:1620 LEADDZ — ms a conflicting lead must persist to commit (owner: unchanged)
-    // ---- the zoom, hop 3P. NO production counterpart: production's camera has
-    // no scale term anywhere. Asked for by the owner at the 2026-08-24 gate:
-    // "not being able to dynamically control how far I see (by measuring
-    // distance between cursor and ship) makes it feel like I'm always choosing
-    // between seeing in front or behind depending on which angle I put my
-    // mouse." The aim lead PANS — it buys forward reach by selling rearward
-    // reach. Zoom does not trade.
-    // OFF, BY THE OWNER'S RULING, 2026-08-24: "zoom / widen is something we can
-    // play with but we dont need at all and i never asked for". 1.0 is the
-    // byte-exact OFF and it is now the shipped default. The dial stays on the
-    // panel as a toy, and PORT-S-DEBT.md carries it as DROPPABLE rather than as
-    // something to port: if it is still at 1.0 after his next fly it gets
-    // deleted rather than carried.
-    zoomWide: 1.0,          // the widest the view gets, as a MULTIPLE of PLAY_W. 1 = OFF, byte-exact
-    zoomRef: 420,           // stage px of cursor travel past zoomDead over which the full widening is spent
-    zoomDead: 200,          // stage px around the PANE CENTRE that hold 1x — the calm zone
-    zoomEase: 0.04,         // the ease on camWide, per 60 Hz tick. DELIBERATELY under `ease` 0.05 so the zoom never leads the pan
+    leadDz: 200,            // js/game.js:1712 LEADDZ — ms a conflicting lead must persist to commit (owner: unchanged)
+    // ---- THE ZOOM IS GONE, and the five rows that were here went with it
+    // (zoomWide / zoomRef / zoomDead / zoomEase, and zoomLW below them). The
+    // owner ruled it out at the 2026-08-24 gate — "zoom / widen is something we
+    // can play with but we dont need at all and i never asked for" — so hop 3R
+    // put zoomWide to 1.0, the byte-exact OFF, and PORT-S-DEBT.md carried the
+    // rows as DROPPABLE rather than as work to port, under a clause with a
+    // condition on it: if ZoomMax is still at 1.0 after his next fly, the zoom is
+    // DELETED rather than ported. HE FLEW IT (feel gate, 2026-08-25) and never
+    // touched the dial, so the condition is satisfied and this is the deletion.
+    // The camera has no scale term again, which is also what production's has
+    // always had — nothing here to port and nothing there to receive it.
     // Not a camera number at all — it rides this panel because this panel is
     // where the owner is flying. A multiplier on the whole bounded star field's
     // alpha, so the field can be settled by eye without another round.
@@ -99,26 +104,24 @@
     // three rounds. The lever for TOO BRIGHT is starLit, which is already on the
     // panel. Dimmer-but-crisp is correct; smaller-and-smeared is the defect.
     starSize: 1.0,
-    // Stroke-weight compensation under zoom, 0 = none, 1 = full. See lw().
-    zoomLW: 0.5,
     // The star streak, and it SHIPS INERT. 0 draws the field exactly as 03R-C
     // left it, down to the canvas calls; the owner turns it on. That is what
     // keeps 03R-C (the star size) and 03R-D (the sheet placement) judgeable on
     // their own at the same fly. Also not a camera number.
     streak: 0
   };
-  let CAM_EASE = CAM_DIAL_DEFAULTS.ease;
-  let EDGEMARGIN = CAM_DIAL_DEFAULTS.edgeMargin;
-  let CAMLEAD = CAM_DIAL_DEFAULTS.camLead;
-  let CURSORPULL = CAM_DIAL_DEFAULTS.cursorPull;
-  let LEADDZ = CAM_DIAL_DEFAULTS.leadDz;
-  let ZOOMWIDE = CAM_DIAL_DEFAULTS.zoomWide;
-  let ZOOMREF = CAM_DIAL_DEFAULTS.zoomRef;
-  let ZOOMDEAD = CAM_DIAL_DEFAULTS.zoomDead;
-  let ZOOMEASE = CAM_DIAL_DEFAULTS.zoomEase;
+  // ---- THE FIVE CAMERA DIALS LEFT THIS FILE (S3b lane 1, commit F) --------
+  // PORT-S-DEBT.md obligation 3b: the eight rows of this panel are TWO SYSTEMS.
+  // Five are the CAMERA's — ease, edgeMargin, camLead, cursorPull, leadDz — and
+  // they moved to js/encounter-host.js with the rule that reads them. Three are
+  // the STAR PASS's — starLit, starSize, streak — and the star pass does not
+  // move to production at all, so they stay right here. The literals above are
+  // kept as the DOCUMENTED SOURCE of the owner's numbers and as the defaults the
+  // panel restores from; the host holds the live five, and setCamDials/
+  // getCamDials below ROUTE each row to its own system. A wholesale move
+  // misroutes the star three; a wholesale retirement takes the owner's panel.
   let STARLIT = CAM_DIAL_DEFAULTS.starLit;
   let STARSIZE = CAM_DIAL_DEFAULTS.starSize;
-  let ZOOMLW = CAM_DIAL_DEFAULTS.zoomLW;
   let STREAK = CAM_DIAL_DEFAULTS.streak;
   // DEPTH IS CARRIED IN BRIGHTNESS, NOT IN AREA. See the star loop for the whole
   // argument; these are the three layers' alpha multipliers, near to far read
@@ -168,6 +171,54 @@
   const STAR_MIN_PX = 2;
   let camX = 0;
   let camY = 0;
+  // ---- THE SUPPLIED ORIGIN (PORT-S S3b lane 3, commit C) -------------------
+  // PORT-S-DEBT.md obligation 2's END STATE: "host the kernel under production's
+  // camera via FRAME.cam, with getCamOrigin() as the surviving seam". This is
+  // that seam's write half.
+  //
+  // ONE CAMERA PER PAGE, and which one is the PAGE's decision. On index.html
+  // production's own `updateCamera` is the rule that drives — it is where the
+  // owner's D11 dials ship, where he will fly them at the feel gate, and where
+  // demo-aimlead PART 2 measures them — so this renderer is HANDED the origin
+  // and its own camera does not run at all. On the two lab pages, which load no
+  // js/game.js, nothing supplies an origin and the host's declared third copy
+  // drives exactly as it has since lane 1.
+  //
+  // A BLEND OF THE TWO IS THE FAILURE THIS PREVENTS. Two rules easing toward
+  // the same ship at different rates is not a compromise; it is a camera that
+  // fights itself, and it would pass every centre measurement taken after it
+  // settled.
+  let camSupplied = false;
+  // ---- THE HOSTED VIEW (PORT-S S3b lane 3, commit C) ----------------------
+  // This renderer was written for a page it OWNS: two canvases sized to the
+  // play box, its own devicePixelRatio transform, its own background, its own
+  // ship. On index.html it owns none of those. Production letterboxes a single
+  // field canvas with a fitted `scale/ox/oy` transform, fills its own field
+  // ground, draws three HASHED parallax star layers and draws THE SHIP —
+  // production's ship, which stays the ship.
+  //
+  // So a hosted view is four declarations, and each one names the thing
+  // production already owns:
+  //   transform   production's fitted letterbox matrix, used where this file
+  //               would otherwise set its own DPR transform. Without it every
+  //               draw lands outside the letterbox and the field is empty.
+  //   extent      the logical field size a full-surface fill must cover. This
+  //               file derives it from canvas pixels, which is the PANE on a
+  //               page it owns and the whole letterboxed canvas on one it does
+  //               not.
+  //   background  OFF under a host: this file's background fills the extent
+  //               with flat dark and would paint over production's field ground
+  //               and its star layers, which are the ones that ship.
+  //   players     OFF under a host: production draws the ship, with its hull
+  //               damage, its seat hue, its crown and its comet halo. Two ships
+  //               is the failure, and it is one this file cannot detect.
+  // `setHostedView(null)` gives all four back, which is the shape every seam in
+  // this program uses for "stop driving this".
+  let hosted = null;
+  // The census counter. `updateCamera` bumps it, so "the host copy never runs
+  // on index.html" is a NUMBER a page leg can read rather than a claim. It is
+  // not reset by a supplied frame — a single stray step has to stay visible.
+  let camSteps = 0;
   // THE STAR SHEET'S SCREEN OFFSET, INTEGRATED, and it has to be integrated.
   //
   // The sheet used to be placed from an ABSOLUTE world coordinate, `camX * depth
@@ -214,22 +265,21 @@
   // snaps there, and a snap is not travel to be drawn as a smear.
   let camVX = 0;
   let camVY = 0;
-  // The zoom state is the WIDTH, not the scale: camWide === 1 / z. Easing the
-  // width is what makes the VISIBLE WIDTH linear in cursor travel, and the
-  // visible width is the quantity the eye actually reads. Easing z itself would
-  // put the motion in the wrong variable and the widening would crawl at the
-  // near end and lunge at the far end.
-  let camWide = 1;
-  // The lowest scale the arena clamp can survive, computed from the world rather
-  // than written down: below it the view is WIDER than the arena, the clamp's
-  // upper bound `ARENA_W - PLAY_W / z` goes negative and Math.max(0, negative)
-  // pins the camera at 0. Set in setKernel() — 1/6 in today's 6x11 world, where
-  // the horizontal binds first (1/6 against the vertical's 1/11). THE FAILURE IS
-  // COSMETIC, NOT A LOST SHIP: once the view covers the whole arena the kernel's
-  // own wall bounce keeps the ship inside it, so what actually happens is a
-  // pinned view, not a ship off screen. Widen's rail is 3, half of what it takes
-  // to reach this floor, so the panel cannot get there at all.
-  let ZOOM_FLOOR = 1 / 6;
+  // ---- A TRAP FOR S3b, AND IT FAILS SILENTLY -------------------------------
+  // These four are NOT passive state. Their ONLY per-frame writer is inside
+  // updateCamera() below, and the star sheet and the streak read them every
+  // frame in the star pass. S3b retires that updateCamera() — so unless it
+  // brings a replacement step driven from production's FRAME.cam, the camera
+  // comes out correct and THE SKY STOPS MOVING, which every camera-centre
+  // assertion in the world passes straight through.
+  // The debt entry states the obligation and the assertion that refuses it:
+  // .ai-reference/prompts/port-w-20260824/PORT-S-DEBT.md, "What S3b OWES",
+  // items 3c and 4e. (Codex vendor-cross on S2, finding #3.)
+  // THERE IS NO SCALE STATE ANY MORE. `camWide` (the view WIDTH, 1 / z) and
+  // ZOOM_FLOOR (the width at which the arena clamp inverted) were the zoom's
+  // whole state and they went with it. One world px is one stage px, always,
+  // which is what the wrapping build has always drawn at and what production's
+  // camera has always been.
   // The PRESENTED pose the last camera step clamped against. Recorded for the
   // test seam alone and read by nothing that draws: the leash is applied to the
   // presented pose, so any instrument that measures the ship's distance to a view
@@ -243,12 +293,12 @@
   let lastShakeY = 0;
   let camClock = 0;         // the previous presented time, for the ease's dt
   let camTick = -1;         // the previous S.tick — a fall means the kernel reset
-  // The cursor as the page last saw it, in STAGE coordinates. A stage point is
-  // stored and a world point is derived per frame, because the camera the point
-  // rides on moves between the pointermove and the frame that reads it. NaN is
-  // "no cursor" — AUTO, or HUMAN before the first pointermove.
-  let curStageX = NaN;
-  let curStageY = NaN;
+  // (THE CURSOR'S STAGE POINT LEFT THIS FILE at S3b lane 1 commit F. It is held
+  // by js/encounter-host.js, beside the rule that reads it; setCursorStage()
+  // above forwards there under the same name, for demo-play.html's two callers.
+  // A STAGE point is still what crosses, and a world point is still derived per
+  // frame — the camera the point rides on moves between the pointermove and the
+  // frame that reads it, which is 03M-D and D13's law.)
 
   function setKernel(k) {
     kernel = k;
@@ -278,76 +328,40 @@
     lerp = k.lerp;
     starEaterSegments = k.starEaterSegments;
     findEnemy = k.findEnemy;
-    // Read from the world, never written down. See ZOOM_FLOOR's declaration.
-    ZOOM_FLOOR = Math.max(PLAY_W / ARENA_W, PLAY_H / ARENA_H);
     camTick = -1; // a fresh binding is a fresh run — the next render snaps the camera
-    camWide = 1;  // and a fresh run is 1x until the first cursor says otherwise
-  }
-
-  // The live scale. z = 1 means one world px per stage px, which is what the
-  // wrapping build has always drawn at — so this is 1 there by construction and
-  // never by an ease that happens to have settled.
-  function camScale() {
-    return BOUNDED ? 1 / camWide : 1;
   }
 
   // The ONE stage-to-world conversion. Its only caller today is provider() in
   // demo-play.html — the render plane's own caller was aimDir(), which the
   // owner's camera rule deleted (hop 3R), and cursorOffset() deliberately does
   // NOT call it (it needs a camera-independent DISPLACEMENT, not a point; see
-  // the derivation there). TWO COPIES OF `stage / z + cam` IS HOW THE 03M-D AIM
+  // the derivation there). TWO COPIES OF `stage + cam` IS HOW THE 03M-D AIM
   // DRIFT COMES BACK (1f118bb) — the owner has flown that exact signature once
   // and will name it in seconds. If a caller needs a world POINT, it calls this;
   // it does not rebuild it from getCamOrigin().
   //
-  // The inverse of what beginCanvas() applies: a world point (wx, wy) is drawn at
-  // stage (z * (wx - camX), z * (wy - camY)), so wx = sx / z + camX.
+  // The inverse of what beginCanvas() applies: with no scale, a world point
+  // (wx, wy) is drawn at stage (wx - camX, wy - camY), so wx = sx + camX. That
+  // is the arithmetic every caller used before the zoom, restored by deleting
+  // the divide rather than by a scale that happens to sit at 1 — and the ONE
+  // place it lives is still here.
   //
-  // At z === 1 this is `sx + camX`, the arithmetic every caller used before the
-  // zoom, unchanged: division by 1.0 is exact in IEEE-754, it preserves signed
-  // zero, and NaN / 1 === NaN so the "no cursor yet" hold survives untouched.
+  // NaN STILL HOLDS: a non-finite stage point comes back non-finite, so the
+  // kernel's "no cursor yet" hold survives untouched.
   function stageToWorld(sx, sy) {
-    const z = camScale();
     const cam = getCamOrigin();
-    return { x: sx / z + cam.x, y: sy / z + cam.y };
+    return { x: sx + cam.x, y: sy + cam.y };
   }
 
-  // z = 1 / (1 + t * (WIDEN - 1)) makes the VISIBLE WIDTH linear in cursor
-  // travel, which is the quantity the eye reads. Easing z itself would not be.
-  //
-  // D IS MEASURED FROM THE PANE CENTRE, NOT FROM THE SHIP, and that is the one
-  // place this feature deviates from the owner's own words ("by measuring
-  // distance between cursor and ship"). The reason is hard, not a preference:
-  // the ship's SCREEN position is z * (pose.x - camX), so a ship-anchored D makes
-  // z depend on a quantity z moves. camX cannot follow inside a frame (it eases
-  // at 0.05/tick, tau 0.325 s), so the frame-timescale loop gain is
-  // (PLAY_W / 2z) * |dz/dD| = 1.52 at z = 1 — ABOVE UNITY — and the result is a
-  // period-2 limit cycle with z alternating between the rails every frame across
-  // most of the pane. A WORLD-px distance is worse: the law becomes the implicit
-  // equation u * f(u) = D, which is bistable and hysteretic — walking the mouse
-  // out to 160 px and back to 140 px gives z = 0.726 going out and 0.580 coming
-  // back, a camera that depends on where your hand has BEEN.
-  //
-  // The pane centre has loop gain EXACTLY ZERO: curStageX is written only by
-  // trackCursor() from the element rect and is a pure function of the mouse
-  // pixel. The cost is small and honest — with the cursor exactly on the ship, D
-  // is |lead| * z rather than 0, up to 273 px, which pokes 73 px past the dead
-  // zone at full speed and buys about a 6 % widening. Imperceptible.
-  //
-  // DO NOT "FIX" THIS TO THE SHIP. The next editor will read the owner's words
-  // and reintroduce the oscillation.
-  function zoomFor(D) {
-    if (!(ZOOMWIDE > 1)) return 1;   // OFF, and NaN-safe: !(NaN > 0) is true
-    const t = Math.min(1, Math.max(0, (D - ZOOMDEAD) / ZOOMREF));
-    // A SECOND FLOOR UNDER THE BLANK-PANE TRAP. Math.max(0, NaN) is NaN, so a
-    // non-finite D would return NaN and ctx.scale(NaN, NaN) draws nothing at all.
-    // updateCamera()'s !aiming() branch is the real defence and this must never
-    // be the thing that saves it — but a scale is not a number to be casual
-    // about, and !(t >= 0) fires on NaN and on nothing else a finite D produces.
-    if (!(t >= 0)) return 1;
-    return 1 / (1 + t * (ZOOMWIDE - 1));
-  }
-
+  // zoomFor() SAT HERE and it is deleted with the rest of the zoom. What it knew
+  // is worth one paragraph, because the next person asked for a widening will
+  // rediscover it the hard way: D was measured from the PANE CENTRE and never
+  // from the ship, however plainly the owner's words said ship. A ship-anchored
+  // D makes the scale depend on a quantity the scale moves — measured loop gain
+  // 1.52 at z = 1, above unity, so the view alternated between the rails every
+  // frame across most of the pane; a WORLD-px distance is worse still, bistable
+  // and hysteretic, a camera that depends on where your hand has BEEN. The pane
+  // centre has loop gain exactly zero. Anyone rebuilding this starts there.
   // Bounded: there is no seam to cross, so the presented pose is the plain lerp.
   // Wrapping: the step may have crossed the seam, so the move is the SHORT way
   // round and the result comes back inside the field.
@@ -385,233 +399,110 @@
     return offsets;
   }
 
-  // ---- the lookahead, KNOWINGLY TEMPORARY ---------------------------------
-  // Everything from here to gatedLead() is production-DERIVED lead maths
-  // (js/game.js:1644-1657 leadVec, :1671-1703 gatedLead), living here only
-  // because the lab has no camera of its own. PORT-S brings the kernel under
-  // production's own updateCamera() via FRAME.cam and MUST DELETE this block —
-  // two lead maths is not the end state. getCamOrigin() is the
-  // seam that survives the deletion.
+  // ---- THE LOOKAHEAD BLOCK IS DELETED (S3b lane 1, commit F) --------------
+  // PORT-S-DEBT.md obligation 1, and this file's own head comment asked for it:
+  // "PORT-S brings the kernel under production's own updateCamera() via
+  // FRAME.cam and MUST DELETE this block — two lead maths is not the end state."
+  // What stood here was setCursorStage(), aiming(), cursorOffset(), leadVec(),
+  // gatedLead() and the commit gate's state — the production-DERIVED lead maths
+  // this file carried only because the lab had no camera of its own.
   //
-  // DERIVED, not a copy, and since hop 3R it is not even the same RULE. Two of
-  // the differences are re-expressions of the same quantity — the commit timer
-  // counts SECONDS off the render dt instead of ticks, and the velocity half
-  // divides by 60 because the demo stores px/s. The THIRD is not a re-expression
-  // at all: the lead's second term is the owner's CURSOR PULL, which scales with
-  // how far the cursor is from the pane centre. Production has no such term and
-  // cannot get one by assignment — its cursorDir() (js/game.js:2110-2115)
-  // computes that distance and divides it away on the very next line. Do not let
-  // the word "copy" back into this paragraph.
+  // WHERE IT WENT, and it went ONE place: js/encounter-host.js's camera block.
+  // demo-play.html and demo-lab.html load that file (SIM_FILES member 7, script
+  // tags added at S3b commit B) and do NOT load js/game.js, so the host is the
+  // only place on those pages that can hold the rule. Deleting the block without
+  // putting the rule where those pages reach it is exactly the failure
+  // PORT-S-DEBT.md's "hazard" section describes: the camera would ease to the
+  // ship centre with the leash and the arena clamp and NO LEAD AT ALL, and the
+  // owner's ease 0.05, camLead 60 and cursorPull 1.0 would be silently gone from
+  // the build he passed.
   //
-  // PORT-S DEBT — IT GOT BIGGER, AND THIS COMMENT IS NOT THE RECORD OF IT. Until
-  // hop 3R the debt was a set of NUMBERS: PORT-S deletes this block, adopts
-  // production's updateCamera(), and the owner's ease 0.05 and camLead 60 need
-  // carrying over production's 0.08 and 25 (js/game.js:1614, :1616). It is now a
-  // RULE. `ship + vel*CAMLEAD + CursorPull*cursorOffset` is not a retuning of
-  // `ship + [vel*CAMLEAD*(1-B) + unitDir*AIMLEAD*B]`; the two disagree about what
-  // the camera is FOR. So PORT-S can no longer delete this block and use
-  // production's camera without reverting a mechanism the owner asked for by name
-  // — either production gains the rule, or he loses it, and that is his call and
-  // not the port's. The durable record is
-  // .ai-reference/prompts/port-w-20260824/PORT-S-DEBT.md and PLAN.md's PORT-S
-  // paragraph — a comment on a block marked for deletion cannot be the record.
-
-  // The page hands over the cursor's STAGE point and nothing else. It cannot
-  // hand over a world point: by the time a frame reads it the camera has moved,
-  // so a world point banked at pointermove time is stale by exactly the camera
-  // step. Null (or any non-finite pair) clears it.
+  // WHAT SURVIVES HERE, and why each one is a forwarder and not a re-spelling:
+  //   setCursorStage(sx, sy) — obligation 3a. It has a PUBLIC export and TWO
+  //     page callers (demo-play.html's pointermove handler and its AUTO/HUMAN
+  //     switch). The name stays and the body forwards, so the two callers are
+  //     untouched and still hand over the same STAGE point.
+  //   __test.cursorOffset / __test.leadVec — obligation 3's seam rule: the seam
+  //     MOVES and the tools are re-pointed, or the seam and the tools go
+  //     together by name. It moved; these forward, so
+  //     test/tools/demo-aimlead.mjs PART 1 measures the hosted rule through the
+  //     same names it always used.
+  //   updateCamera() — the camera itself, and it does NOT move at this commit.
+  //     Obligation 2's END STATE (the kernel under production's FRAME.cam) is
+  //     lane 3's, because it needs a page that loads both planes. What changed
+  //     here is where its LEAD comes from.
+  //
+  // A note on WHAT IS NOT DUPLICATED. The derivation of the solved form — the
+  // gain B/(1-B), the cancelled (1-B), the camera-independence of u — ships in
+  // js/game.js, which is the authority. It is not restated in the host and it is
+  // not restated here, because a second copy of a derivation drifts exactly the
+  // way a second copy of a number does.
+  //
+  // ---- THE HOST IS REQUIRED, AND ITS ABSENCE IS LOUD ----------------------
+  // An earlier draft of this block claimed host absence was "LOUD-BY-BEHAVIOUR".
+  // IT WAS NOT. The forwarders silently substituted a ZERO LEAD and the DEFAULT
+  // dials, which is a plain ease to the ship centre with the leash and the arena
+  // clamp — precisely the PORT-S-DEBT hazard, arriving quietly. The Codex
+  // vendor-cross round also showed the load census in that comment was false:
+  // it named the two lab pages, and test/node-golden.mjs's frameWith() and
+  // test/tools/demo-parity.html load this file with no host at all.
+  //
+  // SO ABSENCE IS A THROW, unless the loader has said out loud that it is
+  // rendering WITHOUT A CAMERA. One declaration, one spelling, greppable in a
+  // second:
+  //
+  //     DemoRender.declareNoCamera("<why this render needs no camera>")
+  //
+  // A grep for `declareNoCamera` is the whole census, and it can never be stale
+  // the way a prose list is: a loader that neither installs the host nor
+  // declares itself gets an exception naming both routes out, on the first frame
+  // it draws. That is the mechanism the old comment described and did not have.
+  //
+  // THE DECLARATION IS NOT A SUPPRESSION. It changes nothing about the camera —
+  // a declared render still gets the zero lead and the default dials, because
+  // that is what "no camera" means. What it buys is that the answer was CHOSEN,
+  // and that a later edit turning one of those loaders into a bounded moving
+  // frame has a sentence beside it to contradict.
+  //
+  // IT IS LAZY, deliberately: the throw fires when the camera is ASKED FOR, not
+  // when this file loads. index.html carries the tag and never calls setKernel
+  // or render, so a load-time check would force a declaration onto a page that
+  // draws nothing through this plane.
+  function host() {
+    return (typeof window !== "undefined" && window.EncounterHost)
+      || (typeof globalThis !== "undefined" && globalThis.EncounterHost) || null;
+  }
+  let noCameraReason = "";
+  function declareNoCamera(why) {
+    noCameraReason = String(why == null || why === "" ? "unstated" : why);
+    return noCameraReason;
+  }
+  function requireHost(asked) {
+    const h = host();
+    if (h) return h;
+    if (noCameraReason) return null;   // declared: the documented no-camera render
+    throw new Error(
+      "js/demo-render.js: " + asked + ", but no EncounterHost is installed and this "
+      + "loader has not declared a no-camera render.\n"
+      + "  The owner's camera RULE (D11 — ease, edgeMargin, camLead, cursorPull, leadDz) "
+      + "lives in js/encounter-host.js since PORT-S S3b. Without it this plane would ease "
+      + "to the ship centre with no lead at all, which is the failure "
+      + ".ai-reference/prompts/port-w-20260824/PORT-S-DEBT.md calls 'the hazard'.\n"
+      + "  Two ways out, and pick the true one:\n"
+      + "    load js/encounter-host.js and EncounterHost.install({ kernel }) — a real camera; or\n"
+      + "    DemoRender.declareNoCamera(\"why this render needs no camera\") — no camera, on purpose.");
+  }
   function setCursorStage(sx, sy) {
-    const ok = Number.isFinite(sx) && Number.isFinite(sy);
-    curStageX = ok ? sx : NaN;
-    curStageY = ok ? sy : NaN;
+    const h = requireHost("a cursor stage point was handed to the camera");
+    if (h) h.setCursorStage(sx, sy);
   }
-
-  // production's aiming() (js/game.js:1773) is the right-hold aim MODE. The lab
-  // has exactly one aim mode, so its reading is simply "the cursor is flying".
-  function aiming() {
-    return Number.isFinite(curStageX);
+  function hostedLead(dt) {
+    const h = requireHost("the camera lead was asked for");
+    return h ? h.camGatedLead(dt) : { x: 0, y: 0 };
   }
-
-  // THE CURSOR HALF OF THE OWNER'S CAMERA RULE.
-  //
-  // He stated the rule himself, 2026-08-24, after four rounds of camera work had
-  // chased something else:
-  //
-  //   "the whole camera adjustments i really wanted was just the ability to
-  //    slide the camera center away from the center of the ship depending on
-  //    where the cursor is and the current velocity vector of the ship, with a
-  //    blend between those two."
-  //   "(( ShipCenter + leadVec ) * (1 - Blend) + CursorCenter * (Blend)
-  //    So halfway between ShipCenter and CursorCenter at 0.5, right?"
-  //
-  // IMPLEMENTED IN ITS SOLVED FORM, AND THAT IS NOT A LIBERTY. The literal
-  // formula has the camera on BOTH sides: CursorCenter is a WORLD point, and the
-  // stage -> world conversion runs through the camera itself. Write the camera
-  // CENTRE as Cc, the ship as Sh, the velocity lead as L, and the cursor's offset
-  // from the PANE CENTRE in world px as u. The cursor's world point is Cc + u by
-  // the definition of the pane centre, so
-  //
-  //     Cc = (Sh + L) * (1 - B) + (Cc + u) * B
-  //     Cc * (1 - B) = (Sh + L) * (1 - B) + u * B
-  //     Cc = Sh + L + u * B / (1 - B)
-  //
-  // TWO CONSEQUENCES, and both are written down here because neither is what the
-  // formula READS like:
-  //
-  // 1. THE MIX TERM IS A GAIN, B / (1 - B). So the dial IS that gain, and it is
-  //    named CursorPull and not Blend. CursorPull 1.0 IS the owner's Blend 0.5 —
-  //    the camera exactly halfway between the ship and the cursor. The literal
-  //    dial would have been dead over most of its rail: gain 0.33 at B 0.25, 1 at
-  //    0.5, 3 at 0.75, 9 at 0.9, and UNDEFINED at B 1, where no solution exists
-  //    at all (a screen-FIXED cursor cannot be put at the view centre). The Edge
-  //    leash saturates that instead of letting it diverge, which is exactly why
-  //    it would have been mistaken for a dial that "stops doing anything" above
-  //    about 0.6. CursorPull is linear across its whole rail and has no
-  //    singularity anywhere on it.
-  //    DO NOT "RESTORE" THE LITERAL FORMULA. The panel has no tooltips, and this
-  //    comment is the only place the equivalence is recorded.
-  //
-  // 2. THE (1 - B) ON THE LEAD CANCELS. The velocity lead arrives at FULL
-  //    strength at every setting. CamLead and CursorPull are two INDEPENDENT
-  //    amounts and not a seesaw — "lead my own motion" and "look where I point"
-  //    are tuned separately, which is a feature. It is also why no (1 - pull)
-  //    factor appears anywhere below, and why its absence is not an omission.
-  //
-  // u IS CAMERA-INDEPENDENT, which is why this is NOT a second copy of the
-  // stage -> world conversion stageToWorld() owns. u is a stage -> world
-  // DISPLACEMENT, (stage - paneCentre) / z, and the camera origin cancels out of
-  // it exactly. The 03M-D aim drift (1f118bb) came from banking an absolute world
-  // POINT that the camera then moved out from under; a displacement has no
-  // absolute point in it and cannot carry that fault.
-  //
-  // NO CURSOR IS NO PULL. curStageX is NaN in AUTO, and in HUMAN before the first
-  // pointermove. Zero is the right answer there, and it is the same answer the
-  // zoom's !aiming() branch gives: with no cursor there is nothing to look
-  // toward. The aim ramp this replaces took the OPPOSITE convention — it reported
-  // dist Infinity with no cursor so the ramp SATURATED — and that convention died
-  // with the ramp. Do not carry it back here.
-  function cursorOffset() {
-    if (!aiming()) return { x: 0, y: 0 };
-    const z = camScale();
-    return { x: (curStageX - PLAY_W / 2) / z, y: (curStageY - PLAY_H / 2) / z };
-  }
-
-  // The whole lead: the velocity half, then the owner's cursor pull.
-  //
-  // The velocity half is js/game.js:1644-1657's, and it is the trap: production's
-  // P.vel is px/TICK, so `vel * CAMLEAD` is CAMLEAD ticks of it, while the demo's
-  // S.player.vx is px/SECOND — the /60 buys the same quantity. The demo flies
-  // about twice production's speed (245 vs 120 px/s), so that half throws about
-  // twice as far at the shipped CAMLEAD. The arithmetic is right and the dial is
-  // the lever; do not rescale the default to hide it.
-  //
-  // AND THE DIAL WAS PULLED — the other way. The owner flew this and moved
-  // camLead 25 -> 60, MORE throw, not less (owner feel gate, 2026-08-24). So the
-  // instruction above stands unviolated: nothing was rescaled to hide the 2x, the
-  // lever was simply used. The direction is itself the surprise worth recording —
-  // at twice production's speed the throw still read SHORT to him, which is
-  // evidence the 2x conversion is not what the camera feels like, and a reason to
-  // leave the /60 exactly as it is.
-  //
-  // THE CURSOR TERM IS PART OF THE LEAD, AND ON PURPOSE. It goes through
-  // gatedLead() with the velocity half rather than around it, because the gate
-  // exists to stop the view shaking on a quick reversal and the cursor is where
-  // the quick reversals come from. Putting the pull outside the gate would leave
-  // the gate guarding the calmer of the two terms.
-  //
-  // Production's LEADSRC selector (js/game.js:1617, "vel" | "aim" | "blend" |
-  // "add" | "swap") is GONE from this plane. It selected among mixes of a
-  // velocity lead and a UNIT-direction aim lead, and the owner's rule has no unit
-  // direction in it, so four of its five branches had nothing left to select.
-  // Production still has the selector, and this file no longer mirrors it; that
-  // divergence is recorded in PORT-S-DEBT.md, not here.
-  function leadVec() {
-    const vx = S.player.vx / 60 * CAMLEAD;
-    const vy = S.player.vy / 60 * CAMLEAD;
-    const u = cursorOffset();
-    return { x: vx + CURSORPULL * u.x, y: vy + CURSORPULL * u.y };
-  }
-
-  // js/game.js:1671-1703. A quick reversal flips the ideal lead by up to
-  // ~2 x VMAX x CAMLEAD px in one frame and the ease starts chasing at once, so
-  // the camera follows a persistent COMMITTED lead instead: it tracks the ideal
-  // live while the two stay within 60 degrees (or either is near zero), and a
-  // sharp conflict freezes the committed lead and times the candidate instead.
-  //
-  // The TIMER is where the port diverges, deliberately. Production counts ticks
-  // and commits at Math.max(1, Math.round(LEADDZ / TICK)) = 12 at 60 Hz. This
-  // camera runs once per render(), on a dt already clamped to [0, CAM_DT_MAX],
-  // so the timer accumulates SECONDS off that same dt and commits at
-  // LEADDZ / 1000. One clock, and 200 ms is 200 ms on a 144 Hz panel too.
-  const gate = { x: 0, y: 0, cx: 0, cy: 0, timer: 0, seeded: false };
-
-  function gatedLead(dt) {
-    const i = leadVec();
-    if (LEADDZ === 0 || !gate.seeded) { // gate off, or fresh after a restart — take the ideal as-is
-      gate.x = i.x;
-      gate.y = i.y;
-      gate.timer = 0;
-      gate.seeded = true;
-      return { x: gate.x, y: gate.y };
-    }
-    // THE `< 1` BYPASS, RE-CHECKED AGAINST THE NEW MAGNITUDES (hop 3R) rather
-    // than inherited: a lead under one px has no meaningful DIRECTION, so the
-    // 60-degree conflict test would be comparing noise. Under the old aim ramp
-    // the lead was 300 px flat whenever a cursor existed and this branch was
-    // effectively unreachable in HUMAN. Under the owner's rule the lead is
-    // vel*CAMLEAD + CursorPull * (cursor offset from the PANE CENTRE), so it is
-    // small exactly when the ship is nearly stopped AND the cursor is nearly on
-    // the pane centre — which is the spawn pose, and is a real event rather than
-    // an impossible one. It is still the right guard, and it now fires: at the
-    // shipped dials a stationary ship with the cursor 1 px off centre has a lead
-    // of 1 px. Left exactly as production wrote it.
-    const im = Math.hypot(i.x, i.y);
-    const cm = Math.hypot(gate.x, gate.y);
-    if (im < 1 || cm < 1 || i.x * gate.x + i.y * gate.y >= 0.5 * im * cm) {
-      gate.x = i.x; // no sharp conflict (dot >= cos 60 x |i||c|) — track live
-      gate.y = i.y;
-      gate.timer = 0;
-    } else {
-      // sharp conflict — hold the committed lead and time the candidate
-      if (gate.timer > 0 && i.x * gate.cx + i.y * gate.cy >= 0.5 * im * Math.hypot(gate.cx, gate.cy)) {
-        gate.timer += dt; // the ideal is still pointing the candidate's way
-      } else {
-        gate.cx = i.x; // a new direction — restart the persistence clock on it
-        gate.cy = i.y;
-        gate.timer = dt;
-      }
-      if (gate.timer >= LEADDZ / 1000) {
-        gate.x = i.x; // held long enough — commit; the ease glides from here
-        gate.y = i.y;
-        gate.timer = 0;
-      }
-    }
-    return { x: gate.x, y: gate.y };
-  }
-
-  // A scale that changes by an ASSIGNMENT rather than by an ease has to carry
-  // the origin with it, or the picture jumps. The ship's screen x is
-  // z * (pose.x - camX), so holding that product fixed across the switch is one
-  // line per axis: camX' = pose.x - (pose.x - camX) * zBefore / z.
-  //
-  // THE ANCHOR IS THE SHIP, NOT THE PANE CENTRE, and the difference is not a
-  // preference. Anchoring the centre still moves the ship by
-  // (z - zBefore) * (pose.x - centre), which the camera lead alone can make 150
-  // screen px. Anchoring the ship makes the displacement identically zero.
-  //
-  // THE LEASH CANNOT INVERT UNDER THIS MAP, by construction rather than by luck.
-  // The leash bounds the SAME quantity this map scales — it asks for
-  // EDGEMARGIN / z <= pose.x - camX <= (PLAY_W - EDGEMARGIN) / z — and the map
-  // multiplies (pose.x - camX) by exactly zBefore / z. So a camera legal at
-  // zBefore lands legal at z, on both axes, at every scale. The arena clamp
-  // below is a separate bound and may still shave the result at a wall; it is
-  // the same clamp that would have run anyway.
-  function reanchorScale(pose, zBefore) {
-    const z = camScale();
-    if (!(zBefore > 0) || !(z > 0) || z === zBefore) return;
-    const k = zBefore / z;
-    camX = pose.x - (pose.x - camX) * k;
-    camY = pose.y - (pose.y - camY) * k;
+  function hostedDials() {
+    const h = requireHost("the camera dials were asked for");
+    return h ? h.getCamDials() : CAM_DIAL_DEFAULTS;
   }
 
   // One camera step per presented frame. The target is the ship's PRESENTED
@@ -619,136 +510,109 @@
   // The order is production's: the lead enters the ease TARGET only, then the
   // leash, then the world clamp last.
   function updateCamera(alpha) {
-    if (!S.player) return;
-    const pose = renderPos(S.player, alpha);
+    const local = S.players[0]; // the camera follows the LOCAL seat
+    if (!local) return;
+    const pose = renderPos(local, alpha);
     camPose = pose;
     const clock = S.time + alpha * kernel.STEP;
+    camSteps += 1; // the census — see camSteps' declaration
     const restart = camTick < 0 || S.tick < camTick;
     let dt = restart ? 0 : clock - camClock;
     if (!(dt > 0)) dt = 0; // a stalled or rewound clock is no time at all
     if (dt > CAM_DT_MAX) dt = CAM_DT_MAX;
     camClock = clock;
     camTick = S.tick;
-    // ---- the zoom step, FIRST, and deliberately so -------------------------
-    // camWide is a pure function of the cursor's stage point and the dials. It
-    // reads nothing the camera writes, so putting it first costs nothing and
-    // gives every line below it this frame's own scale rather than last frame's.
-    //
-    // THE AUTO TRAP: curStageX is NaN in AUTO, and NaN would run straight
-    // through zoomFor() into ctx.scale(NaN, NaN), which draws A BLANK PANE. The
-    // !aiming() branch is not a nicety, it is the whole defence. And it EASES
-    // rather than snaps, so leaving Human mode glides back to 1x over about a
-    // second. Both cursor-fed terms in this file now agree on the convention —
-    // no cursor is no zoom here, and no cursor is no pull in cursorOffset().
-    // OFF IS A SWITCH, NOT A TRANSITION, and it has to be. An asymptotic ease
-    // reaches 1.0 only in the limit: measured in the browser, coming from Widen 2
-    // it was still 0.9990 after 2.5 s and 0.99999 after 5 s, so "Widen 1.0 is the
-    // byte-exact OFF" would have been a claim that came true about eight seconds
-    // after the pilot let go of the slider — which is to say, not a claim. At the
-    // OFF rail camWide is ASSIGNED 1, so z is exactly 1 on the very next frame.
-    // (This is a feel property, not a hash one: the no-recapture argument rests
-    // on WORLD_BOUNDED, not on this dial.)
-    //
-    // THE SCALE CANNOT SWITCH ALONE. A scale is half of a view; the other half
-    // is the origin it scales about, and assigning one without the other moves
-    // every world point on the glass. Measured in Chrome at the OFF rail from a
-    // settled z = 0.5000000097: the ship jumped 545.28, 306.84 screen px on the
-    // next frame and then crawled back at ~33 px a frame. Hence reanchorScale()
-    // below — the switch keeps the ship exactly where it is and only the FIELD
-    // OF VIEW changes, which is what "off" is supposed to look like.
-    const zoomOff = !(ZOOMWIDE > 1);
-    let targetWide = 1;
-    if (!zoomOff && aiming()) {
-      const D = Math.hypot(curStageX - PLAY_W / 2, curStageY - PLAY_H / 2);
-      targetWide = 1 / zoomFor(D);
-    }
-    // THREE CASES, NOT TWO, and folding the first two together is what made the
-    // view ease back out after every death. A restart wants the width it would
-    // have SETTLED at, which with a live cursor at a corner is about 2 — not 1.
-    // Measured before this fix: reset with the cursor in the corner gave
-    // target 0.5, then z = 1, .9615, .9272, .8966, .8690 ... — the ease crawling
-    // back out over about a second, in a build whose own comment two lines down
-    // says a restart must never glide in from anywhere.
-    if (restart) {
-      // targetWide is already 1 when the zoom is off or there is no cursor, so
-      // this one assignment covers all three of those. The snap below re-seeds
-      // camX/camY from the pose against exactly this z, so there is no origin
-      // continuity to preserve and reanchorScale() has no work to do here.
-      camWide = targetWide;
-    } else if (zoomOff) {
-      const zBefore = camScale();
-      camWide = 1;
-      reanchorScale(pose, zBefore);
-    } else {
-      const zEase = 1 - Math.pow(1 - ZOOMEASE, dt * CAM_EASE_HZ);
-      camWide += (targetWide - camWide) * zEase;
-      // The last hair snaps, so a settled view is exactly its target rather than
-      // a double a few ULP away from it.
-      if (Math.abs(targetWide - camWide) < 1e-9) camWide = targetWide;
-    }
-    const z = camScale();
     if (restart) {
       // A reset moves the ship without moving it: snap, never glide in from
-      // wherever the last run parked the view.
-      // THE WIDTH IS SNAPPED WITH IT, and it is snapped ABOVE, in the zoom step,
-      // where the rest of the width lives. It was written `camWide = 1` there
-      // once, which is not the same thing at all: a restart with a live cursor
-      // wants that cursor's own width, and 1 made the view ease back out after
-      // every death. Measured, and now instrumented — port-w-3q-probe.mjs
-      // `creep` reads camScale() on each of the first frames after a reset.
-      camX = pose.x - PLAY_W / (2 * z);
-      camY = pose.y - PLAY_H / (2 * z);
-      // production's setCamMode (js/game.js:1636-1637): the gate re-seeds from
-      // the next ideal, so a restart never replays the old run's stale timer.
-      gate.seeded = false;
-      gate.timer = 0;
+      // wherever the last run parked the view. There is no width to snap beside
+      // it any more — the zoom step that used to run above this is deleted.
+      camX = pose.x - PLAY_W / 2;
+      camY = pose.y - PLAY_H / 2;
+      // production's setCamMode: the gate re-seeds from the next ideal, so a
+      // restart never replays the old run's stale timer. The gate lives in the
+      // host now; this is the same call through the seam.
+      // requireHost, not host(): a RESTART frame is still a camera step, and it
+      // is the frame every one-shot renderer draws. Asking here is what makes
+      // the declaration census complete rather than only covering the second
+      // frame onward.
+      const h0 = requireHost("the camera gate was re-seeded on a restart frame");
+      if (h0) h0.camReseed();
     } else {
-      // The TARGET swings only when the gate commits — the ease still glides there.
-      const l = gatedLead(dt);
+      // The TARGET swings only when the gate commits — the ease still glides
+      // there. The lead is the HOST's now: one lead maths, in the file the
+      // owner's rule moved to. THE DIALS ARE READ PER FRAME, from the same
+      // place, so the panel's write half and this read half cannot disagree.
+      const D = hostedDials();
+      const CAM_EASE = D.ease;
+      const EDGEMARGIN = D.edgeMargin;
+      const l = hostedLead(dt);
       const ease = 1 - Math.pow(1 - CAM_EASE, dt * CAM_EASE_HZ);
-      camX += (pose.x + l.x - PLAY_W / (2 * z) - camX) * ease;
-      camY += (pose.y + l.y - PLAY_H / (2 * z) - camY) * ease;
-      // The leash (js/game.js:1717-1718) — whatever the ease asked for, the ship
+      camX += (pose.x + l.x - PLAY_W / 2 - camX) * ease;
+      camY += (pose.y + l.y - PLAY_H / 2 - camY) * ease;
+      // The leash (js/game.js:1895-1896) — whatever the ease asked for, the ship
       // stays at least EDGEMARGIN px inside every view edge. The clamp below may
       // shave that margin at an arena wall; the ship still never leaves the view.
-      // Every margin divides by z: the ship's screen x is z * (pose.x - camX),
-      // so "at least EDGEMARGIN screen px inside the edge" is EDGEMARGIN / z
-      // WORLD px. The interval is non-empty iff PLAY_W >= 2 * EDGEMARGIN, and
-      // Z CANCELS out of that test entirely, so it holds at every zoom.
+      // No margin divides by anything now: the ship's screen x is pose.x - camX,
+      // so "at least EDGEMARGIN screen px inside the edge" is EDGEMARGIN WORLD
+      // px. The interval is non-empty iff PLAY_W >= 2 * EDGEMARGIN.
       // BOTH AXES ARE PART OF THE CLAIM: the y line below needs
       // PLAY_H >= 2 * EDGEMARGIN in its own right, and PLAY_H is the SHORTER
       // side, so the binding condition is min(PLAY_W, PLAY_H) >= 2 * EDGEMARGIN
       // — 120 <= 720 at the shipped Edge 60, and 400 <= 720 at the panel's rail
       // of 200. Naming PLAY_W alone proved half of it. setCamDials() enforces
       // exactly this bound, on the short side, so no caller can empty it either.
-      camX = Math.max(pose.x - (PLAY_W - EDGEMARGIN) / z, Math.min(pose.x - EDGEMARGIN / z, camX));
-      camY = Math.max(pose.y - (PLAY_H - EDGEMARGIN) / z, Math.min(pose.y - EDGEMARGIN / z, camY));
+      camX = Math.max(pose.x - (PLAY_W - EDGEMARGIN), Math.min(pose.x - EDGEMARGIN, camX));
+      camY = Math.max(pose.y - (PLAY_H - EDGEMARGIN), Math.min(pose.y - EDGEMARGIN, camY));
     }
-    // js/game.js:1628-1630, parameterized by the arena AND by the zoom: the view
-    // is PLAY_W / z world px wide now, so that is what has to fit. z is floored
-    // at ZOOM_FLOOR because below it the upper bound goes negative — see the
-    // ZOOM_FLOOR declaration for why that failure is cosmetic and why the panel
-    // cannot reach it.
-    const zc = Math.max(z, ZOOM_FLOOR);
-    camX = Math.max(0, Math.min(ARENA_W - PLAY_W / zc, camX));
-    camY = Math.max(0, Math.min(ARENA_H - PLAY_H / zc, camY));
+    // js/game.js:1720-1723 (clampCam), parameterized by the arena: the view is
+    // PLAY_W world px wide, so that is what has to fit. The ZOOM_FLOOR that used
+    // to floor this divide is gone with the scale it floored — a view wider than
+    // the arena is no longer reachable at all.
+    camX = Math.max(0, Math.min(ARENA_W - PLAY_W, camX));
+    camY = Math.max(0, Math.min(ARENA_H - PLAY_H, camY));
     // The star sheet's screen offset, integrated from the camera's SCREEN motion.
-    // See the declaration above for the derivation and for why the absolute form
-    // it replaces yanked the field. LAST in the function, deliberately: the ease,
-    // the leash and the arena clamp have all had their say by here, so what is
-    // accumulated is the camera's real motion and not what the ease asked for.
+    // LAST in the function, deliberately: the ease, the leash and the arena clamp
+    // have all had their say by here, so what is accumulated is the camera's real
+    // motion and not what the ease asked for.
     //
-    // A restart SEEDS rather than accumulates, so a fresh run puts the sheet
-    // exactly where the absolute expression would have put it. The camera has
-    // just snapped, and the difference across a snap is not motion.
+    // WITHOUT A SCALE THIS TELESCOPES EXACTLY TO camX, and it is left as a sum
+    // anyway rather than collapsed, for one reason that is not tidiness: camVX is
+    // the PER-FRAME increment and the star streak is drawn along it, so the
+    // difference has to be taken whatever the sheet is placed from. The `* z`
+    // factors that made the two quantities differ are gone with the zoom.
+    //
+    // A restart SEEDS rather than accumulates. The camera has just snapped, and
+    // the difference across a snap is not motion.
+    stepStarPan(restart);
+  }
+
+  // ---- THE STAR-PAN AND STREAK STEP (PORT-S-DEBT obligation 3c) ------------
+  // A WRITER IN ITS OWN RIGHT, extracted here at S3b lane 1 commit F. It used to
+  // be four inline lines at the tail of updateCamera(), and the debt entry names
+  // exactly that as the trap: "their ONLY writer is inside the lab
+  // updateCamera() that this obligation lets S3b retire … without it the camera
+  // is correct and the sky stops moving", and it "passes every camera assertion
+  // above it". Naming the writer is what makes it survivable: whatever becomes
+  // of updateCamera() at lane 3, THIS function is what the hosted camera calls,
+  // and a lane that drops it deletes a named function rather than four lines
+  // nobody was looking at.
+  //
+  // SEEDED, NEVER ACCUMULATED, ON A RESTART. The camera has just snapped, and
+  // the difference across a snap is not motion — it would be drawn as one huge
+  // streak and would put the sheet a whole snap out of place.
+  //
+  // IT RUNS LAST, after the ease, the leash and the arena clamp have all had
+  // their say, so what is accumulated is the camera's REAL screen motion and not
+  // what the ease asked for.
+  function stepStarPan(restart) {
     if (restart) {
-      starPanX = camX * z;
-      starPanY = camY * z;
+      starPanX = camX;
+      starPanY = camY;
       camVX = 0;
       camVY = 0;
     } else {
-      camVX = z * (camX - camPrevX);
-      camVY = z * (camY - camPrevY);
+      camVX = camX - camPrevX;
+      camVY = camY - camPrevY;
       starPanX += camVX;
       starPanY += camVY;
     }
@@ -769,52 +633,71 @@
     return { x: camX, y: camY };
   }
 
+  // setCamOrigin(x, y) — hand this renderer the origin production's own camera
+  // just computed, and put it in SUPPLIED mode for good. `setCamOrigin(null)`
+  // hands the camera back, which is the shape every other seam in this program
+  // uses for "stop driving this" (setInput, setPose, unbridgeSeat).
+  //
+  // A NON-FINITE PAIR IS REFUSED WHOLE rather than folded: a NaN origin
+  // translates every draw off the canvas and the field simply vanishes, which
+  // is the least diagnosable failure a camera has.
+  // See the hosted-view declaration above. A partial object is a partial
+  // declaration: every key defaults to this file's own behaviour, so a host
+  // that only wants the transform gets exactly that.
+  function setHostedView(v) {
+    if (v === null || v === undefined) { hosted = null; return true; }
+    if (typeof v !== "object") return false;
+    hosted = {
+      transform: v.transform && Number.isFinite(v.transform.a) ? v.transform : null,
+      extent: v.extent && Number.isFinite(v.extent.w) && Number.isFinite(v.extent.h) ? v.extent : null,
+      background: v.background !== false,
+      players: v.players !== false
+    };
+    return true;
+  }
+
+  function setCamOrigin(x, y) {
+    if (x === null || x === undefined) { camSupplied = false; return true; }
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    camSupplied = true;
+    camX = x;
+    camY = y;
+    return true;
+  }
+
   // The lab dials. A PARTIAL object: only the finite numbers land, unknown keys
   // are ignored, and a slider that sends a blank value leaves the dial alone.
-  // This only STORES — with WORLD_BOUNDED off nothing ever reads what it wrote.
   //
   // FINITE IS NOT A DOMAIN. The HTML sliders cannot send an out-of-range number,
-  // but this function is exported and the sliders are not its only caller — and
-  // some of these dials have values that are finite and still destroy the frame:
-  //   zoomEase -1  makes camWide 0 on the next step and z = Infinity;
-  //   zoomEase  2  makes 1 - Math.pow(-1, dt * 60) NaN at any fractional-frame
-  //                exponent, and ctx.scale(NaN, NaN) DRAWS A BLANK PANE;
-  //   ease         the same two failures, in the pan instead of the zoom;
-  //   zoomWide 12  puts the view wider than the arena, where the clamp's upper
-  //                bound goes negative — see ZOOM_FLOOR;
-  //   zoomRef  0   divides by zero inside zoomFor();
-  //   edgeMargin 400 empties the leash interval — see the non-inversion proof
-  //                in updateCamera(), which is exactly this bound.
-  // So each dial is checked against its OWN domain and an out-of-domain value is
-  // ignored, the same way an unknown key is. Where the domain is forced by the
-  // maths it is derived here (zoomWide against ZOOM_FLOOR, edgeMargin against
-  // the play box) rather than written down. Where the domain is a MEANING rather
-  // than a limit — leadBlend is a 0..1 mix — the panel's rail is used and said so.
+  // but these functions are exported and the sliders are not their only caller —
+  // and some dials have values that are finite and still destroy the frame. The
+  // CAMERA five carry that check with them into js/encounter-host.js, where the
+  // maths that makes each bound real now lives (ease outside [0,1] runs the ease
+  // away or makes it NaN; an edgeMargin past half the SHORT side empties the
+  // leash interval). What is left here is the STAR three, checked below.
+  //   THE FOUR ZOOM DIALS USED TO BE THE WORST OF THESE — zoomEase -1 made the
+  // view width 0 and the scale Infinity, zoomWide 12 put the view wider than the
+  // arena and inverted the clamp, zoomRef 0 divided by zero. They are deleted,
+  // and the lesson they paid for is kept: FINITE IS NOT A DOMAIN.
   function dial(v, lo, hi) {
     return Number.isFinite(v) && v >= lo && v <= hi;
   }
-  // Half the SHORTER side: the leash needs EDGEMARGIN / z px at both ends of
-  // both axes, so min(PLAY_W, PLAY_H) >= 2 * EDGEMARGIN is the real condition.
-  function edgeCap() {
-    return Number.isFinite(PLAY_W) && Number.isFinite(PLAY_H)
-      ? Math.min(PLAY_W, PLAY_H) / 2 : Infinity;
-  }
+  // ---- THE ROUTER (PORT-S-DEBT obligation 3b) ------------------------------
+  // The accessors keep their NAMES and their CALLERS — demo-play.html:609 reads
+  // the shipped set, :639 writes each slider's patch and :649 restores — and
+  // become the place the panel's two systems are separated. The five CAMERA rows
+  // go to the host, which now holds the rule that reads them; the three STAR
+  // rows stay here, because the star pass is not production's camera and does
+  // not move to production at all.
+  //
+  // THEY ARE STILL A PAIR. That is the whole of 3b: move the read half without
+  // the write half and the panel reads from a camera it cannot write to. Both
+  // halves route, both to the same two places, in this one block.
   function setCamDials(next) {
     if (!next || typeof next !== "object") return;
-    if (dial(next.ease, 0, 1)) CAM_EASE = next.ease;                 // 1 - (1-e)^n needs 1-e >= 0
-    if (dial(next.edgeMargin, 0, edgeCap())) EDGEMARGIN = next.edgeMargin;
-    if (Number.isFinite(next.camLead)) CAMLEAD = next.camLead;       // a multiplier; any finite is safe
-    // A GAIN, not a length, and not a 0..1 mix — see the derivation at
-    // cursorOffset(). Any finite non-negative value is meaningful: the leash
-    // saturates the large end, and 0 is the OFF switch (camera on ship + lead).
-    // Negative is rejected because it would pull the camera AWAY from the cursor,
-    // which is not a setting of this rule but a different rule.
-    if (dial(next.cursorPull, 0, Infinity)) CURSORPULL = next.cursorPull;
-    if (dial(next.leadDz, 0, Infinity)) LEADDZ = next.leadDz;        // ms, and 0 is the documented OFF
-    if (dial(next.zoomWide, 1, 1 / ZOOM_FLOOR)) ZOOMWIDE = next.zoomWide;
-    if (dial(next.zoomRef, Number.MIN_VALUE, Infinity)) ZOOMREF = next.zoomRef;  // strictly positive: it divides
-    if (dial(next.zoomDead, 0, Infinity)) ZOOMDEAD = next.zoomDead;
-    if (dial(next.zoomEase, 0, 1)) ZOOMEASE = next.zoomEase;         // as `ease`, and the blank-pane one
+    const h = host();
+    if (h) h.setCamDials(next);   // ease, edgeMargin, camLead, cursorPull, leadDz —
+                                  // each checked against its OWN domain there
     if (dial(next.starLit, 0, Infinity)) STARLIT = next.starLit;     // an alpha multiplier, clamped at use
     // A SIZE multiplier, floored at use by STAR_MIN_PX — so no value of this dial
     // can put a star under 2 px and the sub-pixel regime is unreachable through
@@ -826,58 +709,50 @@
     // the slider can already express and therefore costs no reachable value.
     // (Codex vendor-cross, 03R review.)
     if (dial(next.starSize, 1, 4)) STARSIZE = next.starSize;         // the panel rail; the 2 px floor still applies UNDER the multiply
-    if (dial(next.zoomLW, 0, 1)) ZOOMLW = next.zoomLW;               // MEANING: none .. full compensation
     if (dial(next.streak, 0, 2)) STREAK = next.streak;               // frames of camera travel drawn as a tail; 0 = OFF
   }
 
   function getCamDials() {
+    const D = hostedDials();
     return {
-      ease: CAM_EASE,
-      edgeMargin: EDGEMARGIN,
-      camLead: CAMLEAD,
-      cursorPull: CURSORPULL,
-      leadDz: LEADDZ,
-      zoomWide: ZOOMWIDE,
-      zoomRef: ZOOMREF,
-      zoomDead: ZOOMDEAD,
-      zoomEase: ZOOMEASE,
+      ease: D.ease,
+      edgeMargin: D.edgeMargin,
+      camLead: D.camLead,
+      cursorPull: D.cursorPull,
+      leadDz: D.leadDz,
       starLit: STARLIT,
       starSize: STARSIZE,
-      zoomLW: ZOOMLW,
       streak: STREAK
     };
   }
 
-  // Stroke weight under zoom. Line art is specified in WORLD px and the canvas
-  // draws it at z * w device px, so at z = 0.5 the player hull's 1.65 becomes
-  // 0.83 device px — sub-pixel, and canvas alpha-blends what it cannot fill, so
-  // THE LINE ART DIMS AS WELL AS SHRINKS. That is the same defect class as the
-  // starfield complaint (03P-B): ink lost to sub-pixel coverage, read by the eye
-  // as a fade. This multiplies the requested width by (1/z)^ZOOMLW.
+  // The one place a stroke width is written, and it is now a plain assignment.
   //
-  // ZOOMLW is a dial and not a decision, because neither end is obviously right:
-  // 1 holds the stroke at a constant DEVICE width, which keeps every line crisp
-  // but makes the fleet look heavier as the view widens; 0 is today's behaviour
-  // and lets it dim. 0.5 is the geometric mean and the shipped default, pending
-  // the owner's eye.
+  // IT USED TO COMPENSATE FOR THE ZOOM: line art is specified in WORLD px and a
+  // scaled canvas drew it at z * w device px, so at z = 0.5 the player hull's
+  // 1.65 became 0.83 device px — sub-pixel, alpha-blended, and the line art DIMMED
+  // as well as shrank. The `zoomLW` dial traded that against a fleet that looked
+  // heavier as the view widened. With no scale there is nothing to compensate: the
+  // old expression was `w * Math.pow(1 / camScale(), ZOOMLW)`, and at camScale() 1
+  // that is `w * 1`, which is `w` for every double. So this deletion is
+  // BIT-IDENTICAL at the shipped setting rather than merely close.
   //
-  // AT z === 1 THIS IS EXACTLY THE IDENTITY: Math.pow(1, k) is exactly 1 for
-  // every k, and w * 1 is w for every double — so the wrapping build, where
-  // camScale() is 1 by construction, is bit-identical with no branch at all.
+  // THE HELPER STAYS EVEN SO, and that is not sentiment. ALL IN-SCOPE SITES OR
+  // NONE: the day a width rule comes back it must arrive at ONE place, and
+  // forty-two inlined width writes would make that a forty-two-site edit that
+  // half a fleet would be left out of.
   //
-  // ALL 39 IN-SCOPE SITES OR NONE. Half a fleet with compensated strokes looks
-  // worse than none. The 4 remaining `lineWidth` tokens in this file are the
-  // `w`+`x`.lineWidth writes inside the `if (!BOUNDED)` backdrop body and are OUT OF
-  // SCOPE. Counting them: an assignment to lineWidth through `ctx` must appear
-  // in this file EXACTLY ONCE, on the next line but one; there must be 39 calls
-  // to the helper; and there must be 4 `wx` writes left, all inside the backdrop.
-  // The greps are written with character classes so they do not match this
-  // comment and inflate their own answers:
-  //   grep -c 'ct[x]\.lineWidth'  ->  1
-  //   grep -c 'l[w](ctx, '        -> 40 (39 call sites plus this definition)
-  //   grep -c 'w[x]\.lineWidth'   ->  4
+  // THE COUNTS BELOW WERE STALE AND ARE RE-MEASURED HERE. The block used to
+  // claim 1 / 40 / 4; the file grew and the true figures are 1 / 43 / 5. The
+  // fifth `w`+`x` write is the STAR STREAK's, which is not in the backdrop at
+  // all — so the old sentence "all inside the `if (!BOUNDED)` backdrop body" was
+  // false as well as under-counted. A self-check that is not re-run is not a
+  // self-check. Character classes keep the greps from matching this comment:
+  //   grep -o 'ct[x]\.lineWidth' | wc -l  ->  1  (the helper itself, below)
+  //   grep -o 'l[w](ctx, '        | wc -l  -> 43  (42 call sites + the definition)
+  //   grep -o 'w[x]\.lineWidth'   | wc -l  ->  5  (4 in the backdrop, 1 in the streak)
   function lw(ctx, w) {
-    ctx.lineWidth = w * Math.pow(1 / camScale(), ZOOMLW);
+    ctx.lineWidth = w;
   }
 
   function glow(ctx, x, y, radius, color, alpha) {
@@ -894,16 +769,27 @@
   // The world-space entry point. Everything drawn after it sits at SIM
   // coordinates, so the camera translate belongs here, on top of the shake.
   // The background and the light clear run BEFORE it and stay screen-space.
-  // TRANSFORM ORDER IS LOAD-BEARING IN BOTH DIRECTIONS. The scale goes AFTER the
-  // shake, which keeps the shake a SCREEN-px constant instead of one that shrinks
-  // as the view widens. It goes BEFORE the camera translate, which is what makes
-  // -camX a WORLD offset. Swap them and the wrong world point is anchored.
+  // THE SCALE THAT SAT BETWEEN THESE TWO TRANSLATES IS GONE with the zoom. Its
+  // ORDER was load-bearing in both directions and the reason is worth keeping in
+  // case one ever comes back: it went AFTER the shake, which kept the shake a
+  // SCREEN-px constant instead of one that shrank as the view widened, and BEFORE
+  // the camera translate, which is what makes -camX a WORLD offset. ctx.scale(1,
+  // 1) is the identity transform, so removing it is bit-identical to leaving it.
+  // The base transform every pass starts from: this file's own DPR matrix on a
+  // page it owns, and the HOST's fitted letterbox matrix on one it does not.
+  function baseTransform(ctx) {
+    if (hosted && hosted.transform) {
+      const m = hosted.transform;
+      ctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
+    } else {
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    }
+  }
+
   function beginCanvas(ctx, shakeX, shakeY) {
-    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    baseTransform(ctx);
     ctx.translate(shakeX || 0, shakeY || 0);
     if (BOUNDED) {
-      const z = camScale();
-      ctx.scale(z, z);
       ctx.translate(-camX, -camY);
     }
     ctx.lineJoin = "round";
@@ -913,8 +799,8 @@
   // The canvas extent in CSS pixels — what a full-surface fill or clear must
   // cover. It equals the play box today, and stops being the same number the
   // moment the view is allowed to be wider than the box encounters are built for.
-  function canvasW(ctx) { return ctx.canvas.width / DPR; }
-  function canvasH(ctx) { return ctx.canvas.height / DPR; }
+  function canvasW(ctx) { return hosted && hosted.extent ? hosted.extent.w : ctx.canvas.width / DPR; }
+  function canvasH(ctx) { return hosted && hosted.extent ? hosted.extent.h : ctx.canvas.height / DPR; }
 
   // A positive modulo that tiles the star field across the view. This is screen
   // dressing, not world topology: the bounded world has no seam, the star sheet
@@ -922,7 +808,9 @@
   function tileMod(n, size) { return ((n % size) + size) % size; }
 
   function drawBackground() {
-    wx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    // A HOST OWNS ITS OWN GROUND — see the hosted-view declaration.
+    if (hosted && hosted.background === false) return;
+    baseTransform(wx);
     wx.fillStyle = C.dark;
     wx.fillRect(0, 0, canvasW(wx), canvasH(wx));
     // Screen-pinned art, kept for the wrapping build only. drawBackground()
@@ -1052,7 +940,6 @@
     // device pixels counted by how far above the background they sit — and the
     // fade was there in the numbers: pixels above +128 came in at 0.765 moving
     // over still before the floor, and 1.096 after it.
-    const z = camScale();
     // THE STREAK, and it ships at 0 so this whole paragraph is dormant until the
     // owner moves the slider. What sells travel is not the star, it is the smear
     // the star leaves, and the smear is a real quantity here rather than an
@@ -1086,13 +973,13 @@
         // so the wrapping build's star pixels are bit-identical to what they were.
         wx.fillStyle = rgba(rgbFor(st.tint), Math.min(1, Math.max(0, twinkle * STAR_LAYER_LIT[layer] * STARLIT)));
         // drawBackground() resets the transform, so this pass is screen space and
-        // the tile covers the canvas whatever the zoom. starPanX is the camera's
-        // SCREEN travel, integrated in updateCamera() — not `camX * z`, which is
-        // an absolute world coordinate times a scale that moves, and which yanked
-        // the whole field by up to 49x the camera's own motion whenever the zoom
-        // was easing. The derivation is at the declaration, together with the
-        // measurement showing the two agree bit for bit at the shipped ZoomMax
-        // 1.0, where z never moves.
+        // the tile covers the canvas. starPanX is the camera's SCREEN travel,
+        // integrated in updateCamera(). It used to be `camX * z` — an absolute
+        // world coordinate times a scale that moved — which yanked the whole
+        // field by up to 49x the camera's own motion whenever the zoom was
+        // easing. With the zoom deleted the integral telescopes to camX exactly,
+        // so the two forms are now the same number; the sum is kept because
+        // camVX, which the streak draws along, is its own increment.
         const sx = tileMod(st.x * PLAY_W - starPanX * depth, PLAY_W);
         const sy = tileMod(st.y * PLAY_H - starPanY * depth, PLAY_H);
         // The tail runs BACKWARD along the star's own motion, so it points at
@@ -1335,6 +1222,18 @@
     if (e.type === "cherub") drawSupportLink(ctx, e, pos, glowPass);
     if (e.type === "constructor") drawConstructorGrid(ctx, e, pos, glowPass);
     if (glowPass) {
+      // THIS IS THE GLOW'S OWN LIST AND IT STAYS HERE. PORT-S S3b lane 2 briefly
+      // merged it with the kernel's aggro gate, on the argument that "is this
+      // body showing something" and "may this body re-decide" were one
+      // question. A vendor-cross round measured that they are not: this list is
+      // tuned for READING and carries `dash` without `lunge`, because a
+      // hammerhead's ram wants the extra glow and a snapper's does not — and
+      // the gate that inherited the omission let a snapper retarget mid-dash
+      // and pass through the seat standing in its own painted lane.
+      //
+      // So the two are separate and each says so. The gate is
+      // DemoKernel.committedToALine, which asks whether an ATTACK IS IN
+      // PROGRESS; this asks whether the body should be brighter.
       const active = e.state === "charge" || e.state === "telegraph" || e.state === "dash" || e.state === "open" ||
         e.state === "retaliate" || e.state === "orbCharge" || e.state === "lanceCharge" || e.state === "lasers" ||
         e.state === "beam" || e.state === "beamTell" || e.state === "lungeTell" || e.lance > 0;
@@ -1958,8 +1857,20 @@
     }
   }
 
-  function drawPlayer(ctx, alpha, glowPass, copyPass) {
-    const p = S.player;
+  // EVERY SEAT IS DRAWN, in ascending order (PORT-S S3a commit E). The seat
+  // loop is OUTSIDE the ship-drawing function rather than inside it, because
+  // `drawSeat` recurses into itself for the wrap copies and a loop at the top of
+  // a self-calling function would re-walk the roster once per copy.
+  //
+  // ORDER IS PRESENTATION HERE, NOT ARITHMETIC — this file draws, it does not
+  // step — but it is ascending anyway, so that a reader who finds the pinned
+  // order in the kernel does not have to wonder whether the renderer disagrees.
+  function drawPlayer(ctx, alpha, glowPass) {
+    const list = S.players;
+    for (let s = 0; s < list.length; s++) drawSeat(ctx, list[s], alpha, glowPass, false);
+  }
+
+  function drawSeat(ctx, p, alpha, glowPass, copyPass) {
     const pos = renderPos(p, alpha);
     const angle = lerpAngle(p.pangle, p.angle, alpha);
     if (!p.alive) return;
@@ -1967,7 +1878,7 @@
       const offsets = wrappedRenderOffsets(pos, 34);
       for (let i = 0; i < offsets.length; i++) {
         ctx.save(); ctx.translate(offsets[i].x, offsets[i].y);
-        drawPlayer(ctx, alpha, glowPass, true);
+        drawSeat(ctx, p, alpha, glowPass, true);
         ctx.restore();
       }
     }
@@ -2080,42 +1991,59 @@
   function render(ctxs, alpha, reducedMotion = false) {
     wx = ctxs.world;
     lx = ctxs.light;
-    if (BOUNDED) updateCamera(alpha); // before the first draw — the background reads it too
+    // ---- THE HOST MAY OWN THE GLOW (commit C) ---------------------------
+    // js/fx.js is production's bloom and it already reads every body in the
+    // room through `Encounter.lights()`. A second light pass here would put the
+    // same halos on the same surface twice, at a different radius, under a
+    // composite this file sets and that file does not expect. So a hosted view
+    // with no `light` context runs the WORLD pass alone, and `lit` is what says
+    // so at each of the eight paired draws below.
+    const lit = !!lx;
+    // ...unless an origin was SUPPLIED, in which case this renderer has no
+    // camera of its own to run — see setCamOrigin.
+    if (BOUNDED && !camSupplied) updateCamera(alpha); // before the first draw — the background reads it too
     drawBackground();
-    lx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    lx.clearRect(0, 0, canvasW(lx), canvasH(lx));
+    // A HOST'S LIGHT SURFACE IS ITS OWN TO CLEAR: js/fx.js clears and composes
+    // its glow layer on its own schedule, and a second clear here would erase
+    // the ink production's own passes had already put on it.
+    if (lit && !hosted) {
+      lx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      lx.clearRect(0, 0, canvasW(lx), canvasH(lx));
+    }
     const shakeX = !reducedMotion && S.shake > 0.05 ? Math.sin(S.time * 91.7) * S.shake : 0;
     const shakeY = !reducedMotion && S.shake > 0.05 ? Math.sin(S.time * 77.3 + 1.2) * S.shake : 0;
     lastShakeX = shakeX;  // the test seam's only reader — see __test.shipScreen()
     lastShakeY = shakeY;
     beginCanvas(wx, shakeX, shakeY);
-    beginCanvas(lx, shakeX, shakeY);
-    lx.globalCompositeOperation = "lighter";
+    if (lit) beginCanvas(lx, shakeX, shakeY);
+    if (lit) lx.globalCompositeOperation = "lighter";
 
     for (let i = 0; i < S.entries.length; i++) {
       drawPortal(wx, S.entries[i], alpha, false);
-      drawPortal(lx, S.entries[i], alpha, true);
+      if (lit) drawPortal(lx, S.entries[i], alpha, true);
     }
     drawShockwaves(wx, false);
-    drawShockwaves(lx, true);
+    if (lit) drawShockwaves(lx, true);
     drawOrbs(wx, alpha, false);
-    drawOrbs(lx, alpha, true);
+    if (lit) drawOrbs(lx, alpha, true);
     for (let i = 0; i < S.bullets.length; i++) {
       drawBullet(wx, S.bullets[i], alpha, false);
-      drawBullet(lx, S.bullets[i], alpha, true);
+      if (lit) drawBullet(lx, S.bullets[i], alpha, true);
     }
     for (let i = 0; i < S.enemies.length; i++) {
       drawEnemy(wx, S.enemies[i], alpha, false);
-      drawEnemy(lx, S.enemies[i], alpha, true);
+      if (lit) drawEnemy(lx, S.enemies[i], alpha, true);
     }
     drawFragments(wx, alpha);
     drawParticles(wx, alpha, false);
-    drawParticles(lx, alpha, true);
-    drawPlayer(wx, alpha, false);
-    drawPlayer(lx, alpha, true);
-    lx.globalCompositeOperation = "source-over";
+    if (lit) drawParticles(lx, alpha, true);
+    if (!(hosted && hosted.players === false)) {
+      drawPlayer(wx, alpha, false);
+      if (lit) drawPlayer(lx, alpha, true);
+    }
+    if (lit) lx.globalCompositeOperation = "source-over";
     wx.globalAlpha = 1;
-    lx.globalAlpha = 1;
+    if (lit) lx.globalAlpha = 1;
   }
 
   window.DemoRender = {
@@ -2125,7 +2053,16 @@
     // Kept EXPORTED AND UNCHANGED for compatibility. New callers want
     // stageToWorld(): a raw origin is only half a conversion since the zoom.
     stageToWorld: stageToWorld,
+    // THESE THREE ARE S3b's TOO, and the seam table in the debt file did not
+    // name them at first. setCursorStage is DELETED by the lookahead block's
+    // retirement while demo-play.html still calls it twice; setCamDials is the
+    // WRITE half of a pair whose read half the table did name, and the panel
+    // they drive mixes five production camera dials with three star-pass ones.
+    // See PORT-S-DEBT.md, "What S3b OWES", items 3a and 3b.
+    setCamOrigin: setCamOrigin,
+    setHostedView: setHostedView,
     setCursorStage: setCursorStage,
+    declareNoCamera: declareNoCamera,
     setCamDials: setCamDials,
     getCamDials: getCamDials,
     // A TEST SEAM, the kernel's __test idiom (js/demo-kernel.js). The camera's
@@ -2136,14 +2073,19 @@
     //
     // IT DOES NOT LIVE INSIDE THE BLOCK PORT-S DELETES, and the line that said
     // so was wrong. That block is the lookahead, and this export is at the tail
-    // of the file, outside it. Half of what it publishes (zoomFor, camScale,
-    // setCam, shipScreen) is not lookahead code at all. So PORT-S must remove or
-    // REWIRE this seam explicitly, by name — and the debt note records it, since
-    // a comment on a block that gets deleted cannot carry a debt past its own
-    // deletion. See .ai-reference/prompts/port-w-20260824/PORT-S-DEBT.md.
+    // of the file, outside it — setCam and shipScreen are not lookahead code at
+    // all. So PORT-S removes or REWIRES this seam explicitly, by name, and the
+    // debt note records it, since a comment on a block that gets deleted cannot
+    // carry a debt past its own deletion. See
+    // .ai-reference/prompts/port-w-20260824/PORT-S-DEBT.md.
     __test: {
-      cursorOffset: cursorOffset,
-      leadVec: leadVec,
+      // FORWARDERS, since S3b lane 1 commit F. The rule moved to
+      // js/encounter-host.js; PORT-S-DEBT.md's seam rule is that the seam moves
+      // and the tools are re-pointed, or the seam and the tools go together by
+      // name. It moved, so these keep the names test/tools/demo-aimlead.mjs
+      // PART 1 reads and now measure the hosted rule through them.
+      cursorOffset: function () { const h = host(); return h ? h.__test.cursorOffset() : { x: 0, y: 0 }; },
+      leadVec: function () { const h = host(); return h ? h.__test.leadVec() : { x: 0, y: 0 }; },
       // The star sheet's integrated screen offset, so the sheet-yank measurement
       // reads the number the star pass actually uses instead of re-deriving it
       // and proving its own arithmetic. Multiply by a layer's depth to get that
@@ -2154,9 +2096,18 @@
       // needs no canvas: it reads the presented pose, the dials and the clock,
       // and writes camX/camY. Advance S.time between calls to give it a dt.
       updateCamera: updateCamera,
-      zoomFor: zoomFor,
-      camScale: camScale,
-      setCam: function (x, y, wide) { camX = x; camY = y; if (Number.isFinite(wide)) camWide = wide; },
+      // zoomFor and camScale LEFT THIS SEAM with the zoom, and setCam lost its
+      // third argument with them — there is no width to set. Both were read by
+      // test/tools/demo-zoom-aim.mjs, which is retired by name in the same
+      // commit, and by .ai-reference/tools/port-w-3q-probe.mjs, which is
+      // gitignored reference tooling and is left broken deliberately rather than
+      // shimmed. Nothing else in tests/ or test/ reads either name.
+      setCam: function (x, y) { camX = x; camY = y; },
+      // The census reads: how many times THIS renderer's own camera ran, and
+      // whether it is in supplied mode at all. index.html's page leg asserts
+      // the first is zero.
+      camSteps: function () { return camSteps; },
+      camSupplied: function () { return camSupplied; },
       // The ship's position in the PANE, BEFORE the screen-space shake — from
       // the same presented pose the leash clamped against, so a margin
       // measurement asks the question the leash actually answers. Null before
@@ -2172,8 +2123,10 @@
       // and shakeY itself, deliberately.
       shipScreen: function () {
         if (!camPose) return null;
-        const z = camScale();
-        return { x: z * (camPose.x - camX), y: z * (camPose.y - camY), z: z,
+        // The `z` key went with the scale. A caller that multiplied by it was
+        // multiplying by 1; a caller that reads it now gets undefined and finds
+        // out, which is the outcome a silent 1 would have denied it.
+        return { x: camPose.x - camX, y: camPose.y - camY,
                  shakeX: lastShakeX, shakeY: lastShakeY };
       }
     }

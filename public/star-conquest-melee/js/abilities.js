@@ -111,8 +111,18 @@ const ABILITY_DEFS = [
     // `dmg` is the fourth: 5.0 is FIVE TIMES the basic LMB round (BDMG 1) —
     // owner ruling 2026-08-22, "the railgun should just kill anything. Almost
     // anything." The 2.5 it replaces read as a merely-better bullet.
-    spawn: { n: 1, spd: 4, ttl: 6, r: 2.2, dmg: 5.0, spread: 0,
-             ink: "#d97757", streak: 11 }, // ...the two render-only ones sit in
+    // ---- RESCALED AT THE FIX ROUND (S3BR-04) --------------------------
+    // `r` and `streak` are ARENA-PX and stayed at 40 % scale through commit C:
+    // the ordinary production round moved 2.2 -> 5.5, and the rail's velocity
+    // already scaled itself through `BSPEED * spd` (37.5 x 4), so only its
+    // COLLISION RADIUS and its render streak were left behind. A graze between
+    // 2.2 and 5.5 px of the rail's swept centre missed, although the pre-flip
+    // rail used the ordinary round's own radius.
+    //   THE OTHER FOUR ARE CORRECTLY EXEMPT and it is worth saying which:
+    // `spd` is a MULTIPLIER on an already-scaled speed, `ttl` is TICKS, `dmg`
+    // is damage and `spread` is an angle. None has a length in it.
+    spawn: { n: 1, spd: 4, ttl: 6, r: 5.5, dmg: 5.0, spread: 0,
+             ink: "#d97757", streak: 27.5 }, // ...the two render-only ones sit in
                           // the SPAWN block beside `r`, because they describe
                           // the ROUND; `cue` above is the ABILITY's and stays
                           // one level up, where the arm can read it with no

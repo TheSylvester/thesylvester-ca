@@ -46,27 +46,68 @@
 // parallax at 0.25/0.5/0.75 of camera motion, and a top-right minimap
 // tracks the viewport rectangle and the ship dot.
 
-const FW = 512;         // logical field width — the VIEWPORT onto the world
-const FH = 342;         // logical field height
-const WW = FW * 6;      // world width — a 6×11 grid of view-sized rooms
-const WH = FH * 11;     // world height
+// ---- THE ARENA (PORT-S S3b lane 3, commit C — THE FLIP) -------------------
+// PRODUCTION'S SHIP STAYS THE SHIP AND THE KERNEL SUPPLIES THE ENCOUNTER, so
+// they meet in THE KERNEL'S ARENA. The world below is js/demo-kernel.js's own —
+// a 6x11 grid of 1280x720 play boxes, W1-W3's play box and arena, the home the
+// encounters were designed for — and it arrives with the owner's Option B
+// (S-3g5hk7): the full 16:9 render extent, UI over the live world at the sides.
+//
+// THE OLD WORLD CEASES; NOTHING IS TRANSFORMED INTO THE NEW ONE. The viewport
+// grows NON-UNIFORMLY (3:2 to 16:9 — 2.5x across, 2.105x down), so no map takes
+// an old coordinate to a new one. Every committed trace is RE-AUTHORED at this
+// lane's freeze rather than converted, and the vertical gain is the owner's
+// "gift" sides.
+//
+// ---- THE ONE RATIO IS 2.5 = 1280 / 512, AND IT IS ACROSS ------------------
+// Every px-DIMENSIONED flight constant that survives is multiplied by it, and
+// every exemption is stated at the line. It is the ACROSS ratio and not each
+// axis's own, for the same reason the aim seam gives: two axis ratios would
+// SKEW every quantity that is not on an axis, and a skewed radius is a hit test
+// that answers differently by heading with nothing to say so.
+//
+// THIS IS MECHANICAL AND FEEL-PRESERVING. A ship that crossed a room in 256
+// ticks still crosses one in 256 ticks. The retune TOWARD the demo's own flight
+// model is S5's, with its own recapture; nothing here is a feel decision.
+const FW = 1280;        // logical field width — the VIEWPORT onto the world. x2.5, WAS 512
+const FH = 720;         // logical field height. THE OWNER'S OPTION B: 16:9, WAS 342
+const WW = FW * 6;      // world width — a 6x11 grid of view-sized rooms. 7680, WAS 3072
+const WH = FH * 11;     // world height. 7920, WAS 3762
 const TICK = 1000 / 60; // 60 Hz fixed timestep — twice the original's 30 Hz
-const SHIP_R = 7;
-let VMAX = 2;           // px per tick — 120 px/s baseline; the pause-screen slider drives this live, and
+const SHIP_R = 17.5;    // x2.5, WAS 7. The kernel mirrors it off the pose — its own
+                        // four seat-radius sites default to 7/8 and read this when a
+                        // seat is pose-driven, so both planes hit the same hull
+let VMAX = 5;           // x2.5, WAS 2. px per tick — 120 px/s baseline; the pause-screen slider drives this live, and
                         // Encounter.mods.speed (the AFTERBURNER upgrade) adds px/tick on top of it AT THE
                         // CLAMP in step() — a purchase never writes the tuner value
-let ACCEL = 0.015;      // speed gain — velocity px/tick per count ALONG the heading (slider); default is the settled feel
-let TURN = 0.015;       // turn gain — the same, for the component ACROSS the heading (slider); equal gains = the old single-gain model
+let ACCEL = 0.0375;     // x2.5, WAS 0.015. speed gain — velocity px/tick per count ALONG the heading (slider); default is the settled feel
+let TURN = 0.0375;      // x2.5, WAS 0.015. turn gain — the same, for the component ACROSS the heading (slider); equal gains = the old single-gain model
 let FLICK = 0.01;       // flick curve — gain × (1 + |delta| × FLICK); a 100-count flick doubles its push.
                         // No slider — a let only so the measurement harness (__test.setFlick) can
                         // isolate the curve from the heading resample; the default never moves here
-const DAMP = 1;         // per-tick velocity retention — 1 = no friction, like the original; try 0.98 to coast down
+let DAMP = 1;           // per-tick velocity retention — 1 = no friction, like the original.
+                        // ---- A DIAL AT ITS SHIPPED DEFAULT (PORT-S S5, commit G) ----
+                        // It was a `const` and it is a `let` with a slider now, at the
+                        // SAME 1, so the sim is byte-identical: this commit moves no hash.
+                        //
+                        // AND THE PROGRAM'S PREMISE ABOUT IT IS INVERTED, which is why the
+                        // dial exists at all. The port program has been carrying "production
+                        // damps and the demo does not"; measured, it is the other way round.
+                        // The demo kernel bleeds 1.5 % of a ship's speed per tick against a
+                        // hard cap; production has NO friction whatever, which is what a
+                        // retention of exactly 1 means. A comet that never slows is a comet
+                        // whose only brake is the wall, and the owner's feel gate is the
+                        // right place to decide whether that is the feel — so the lever is
+                        // here and the number is not moved.
+                        //
+                        // MOVING THE DEFAULT IS A 13-TRACE RECAPTURE PLUS SELFCHECK, and it
+                        // is the OWNER'S ruling at the gate, not this lane's (slider, flight tab)
 let KEYTHRUST = 16;     // keyboard thrust — synthetic mouse counts per tick, through the same impulse pipeline
 let WALLLOSS = 0.5;     // fraction of the flipped velocity component the ship loses on a wall bounce
-let AIMSENS = 0.03;     // push-mode aim gain — offset px per count. Code-only, like BMODE: push mode
+let AIMSENS = 0.075;    // x2.5, WAS 0.03. push-mode aim gain — offset px per count. Code-only, like BMODE: push mode
                         // left the aim-control menu once locked mode covered it, so its one knob left
                         // the panel with it. The mode itself still runs — see AIMDESC
-let AIMDIST = 20;       // direction-marker distance from the ship, px
+let AIMDIST = 50;       // x2.5, WAS 20. direction-marker distance from the ship, px
 let AIMMODE = "locked"; // locked = the default; mouse = visible absolute pointer; push = legacy relative/pointer-lock
                         // controls; locked = mouse-mode roles under ONE held pointer lock, aiming with a
                         // cursor drawn on the canvas — the lock never cycles, so the browser's takeover
@@ -85,7 +126,7 @@ let INPUTLAG = 0;        // ms of artificial input delay — the playability pro
 let BCOOL = 400;        // ms between shots — 2.5 shots/s; one gate for click fire and autofire
 let AUTOFIRE = true;    // hold LEFT to keep firing at the cooldown rate
 let BMODE = "off";      // bullet physics — off | newtonian (adds ship vel × factor) | cq-scale (ship speed × factor); code-only, no menu knob
-let BSPEED = 15;        // bullet speed, px per tick (off and newtonian modes)
+let BSPEED = 37.5;      // x2.5, WAS 15. bullet speed, px per tick (off and newtonian modes)
 let BFACTOR = 1;        // the ship-velocity factor — newtonian adds it, cq-scale multiplies by it
 let BMAX = 15;          // max live bullets (the original capped at 5)
 let BLIFE = 0.5;        // bullet lifetime, seconds
@@ -97,8 +138,8 @@ let CONTACTCD = 62;     // ticks before one enemy body can take contact damage a
                         // a second instead of melting; at the slider's 0 floor a body pays once per TICK of
                         // contact — never twice for one touch, see contactEvent; slider, combat tab
 let BOUNCE = false;     // bullets bounce off walls instead of dying at them
-let BLASTR = 18;        // BLAST CHARGE splash radius at rank 1, px — the shop row's reach; slider, weapons tab
-let BLASTGAIN = 8;      // px the radius grows per rank past the first: BLASTR + BLASTGAIN × (rank − 1)
+let BLASTR = 45;        // x2.5, WAS 18. BLAST CHARGE splash radius at rank 1, px — the shop row's reach; slider, weapons tab
+let BLASTGAIN = 20;     // x2.5, WAS 8. px the radius grows per rank past the first: BLASTR + BLASTGAIN × (rank − 1)
 // ---- comet mode ----------------------------------------------------------
 // Right-hold is COMET MODE now (the Androsynth comet): while a seat's comet
 // flag is up the ship answers the stick much harder, tops out much faster,
@@ -124,7 +165,7 @@ let COMETHIT = 0;       // pool spent per COMET EVENT — a ram that bills COMET
 let COMETTHR = 0;       // thrust-scaled drain: this much extra pool per unit of thrust applied
                         // on the tick, so a coasting comet is cheap and a hard-burning one is
                         // not. 0 SHIPS IT OFF — flat drain is the default model (slider, comet tab)
-let COMETAOE = 11;      // px the drawn comet halo stands CLEAR OF THE HULL at a full pool —
+let COMETAOE = 27.5;    // x2.5, WAS 11. px the drawn comet halo stands CLEAR OF THE HULL at a full pool —
                         // the pool's in-world readout. The whole clearance scales with the
                         // pool, so an empty one collapses the glow onto the ship's own
                         // radius: there is no floor holding a ring around a spent comet,
@@ -132,10 +173,25 @@ let COMETAOE = 11;      // px the drawn comet halo stands CLEAR OF THE HULL at a
                         // 11 is the old 5 px floor plus the old 6 px of growth, so a FULL
                         // pool draws the exact radius it always did. Render only
                         // (slider, comet tab)
-let COMETAOEDMG = 0;    // px the comet's DAMAGE reach grows at a full pool, on top of body
-                        // contact. 0 SHIPS IT OFF and the comet stays a pure body ram, exactly
-                        // as it is today; above 0 the halo becomes real and the sweep widens
-                        // with the pool (slider, comet tab)
+let COMETAOEDMG = 22.5; // PORT-S S5 commit D, D40's first-pass value: px the comet's DAMAGE
+                        // reach grows at a full pool, ON TOP OF COMETAOE. 17.5 + 27.5 + 22.5 =
+                        // 67.5 production px of total halo at a full pool, which is the x2.5
+                        // translation of demo-v5's 27 px. It was 0 for two lanes — a dead lever
+                        // with live plumbing — because the pass that reads it did not exist.
+                        // D26's aura is that pass, and this is the dial that gives it its reach.
+                        // THE HALO THE PILOT SEES IS THE CIRCLE THAT COLLIDES: `auraRadiusOf`
+                        // is the one derivation and draw, light and the kernel all read it.
+                        // (slider, comet tab)
+let COMETAURA = 0.5;    // D26's AURA DAMAGE, per tick, to every hp-bearing BODY and enemy ROUND
+                        // inside the halo. D40's first pass. NOT COMETDMG — that is the ram's
+                        // per-bite number, and at 3/tick an aura would be a switch rather than
+                        // pressure and would deal 62x the ram inside one COMETCD window. The
+                        // lab runs 1/tick against a FIRE hit of 2; production normalizes that
+                        // half-hit pressure against BDMG 1, which is 0.5. At 0.5, hp 1-2 chaff
+                        // dies in 2-4 ticks, a 4-hp swarmling in 8 and a 12-hp warden in 24:
+                        // pressure for bodies, a filter for chaff. It crosses the seam once per
+                        // tick through EncounterHost.setAuraDamage — the kernel reads no
+                        // production surface and may not hold a copy (slider, comet tab)
 let COMETFURY = 0.5;    // OVERLOAD, per rank: the extra fraction of COMETDMG a ram deals at an
                         // EMPTY pool, falling linearly to nothing at a full one. The shop row
                         // is what arms it; at rank 0 this changes nothing (slider, comet tab)
@@ -267,7 +323,47 @@ function storeAudio() {
     window.localStorage.setItem(SFXMUTE_KEY, SFXMUTE ? "1" : "0");
   } catch { /* a volume that cannot be remembered is still the volume this session */ }
 }
-let INVERT = true;      // swap right-button roles — off: hold right to aim; on: mouse aims until right is held to fly
+// THE NOSE'S TURN RATE, in radians per second, and it is the demo's number
+// because it is the demo's FEEL. `js/demo-kernel.js:1335` turns the player's
+// nose with `rotateToward(p.angle, aimAngle, dt * 6.4)`, and the lab records its
+// own caveat beside the thrust frame that reads it: "after a fast mouse whip the
+// thrust direction swings around over about half a second". THAT HALF-SECOND IS
+// THE BUILD THE OWNER PASSED. A round that replaces it with an instantaneous
+// cursor bearing has changed the feel, not repaired it.
+const HEADRATE = 6.4;   // rad/s — the converged nose's turn rate (js/demo-kernel.js:1335)
+// THE THRUST FRAME — D12, and `ship` is the DEFAULT (the owner re-ruled D12's
+// "beside the screen-relative default" clause once he said which build he flew:
+// "Ship relative thrust IS the demo as I flew it — with the R (soon to be T)
+// switch"). BOTH modes ship. `screen` is the mapping production has always had:
+// KEY_AIM's fixed vectors, W is up on the SCREEN. `ship` rotates that vector by
+// the converged nose, so W is FORWARD along the ship — and because the nose
+// converges on the cursor, "cursor-direction thrust" is EMERGENT rather than
+// derived. It is a pure ROTATION of the input vector: magnitude, drag and top
+// speed are untouched, which is the owner's own scope for D12.
+// PERSISTED, because a hotkey does not survive a reload and a pilot who flipped
+// the frame once should not have to find it again. The storage idiom is the
+// audio pair's above, for the audio pair's reasons: a try/catch around every
+// access (a private window throws on the ACCESSOR), and a VALIDATING read so a
+// corrupt value can never reach the let — anything that is not exactly "screen"
+// reads as the shipped default rather than as a third mode.
+const THRUSTFRAME_KEY = "scmelee.thrustframe";
+function storedThrustFrame() {
+  try {
+    return window.localStorage.getItem(THRUSTFRAME_KEY) === "screen" ? "screen" : "ship";
+  } catch { return "ship"; }
+}
+let THRUSTFRAME = storedThrustFrame();
+// The one writer, so the store, the readout and the live let can never disagree.
+// It is NOT called from the sim: the frame is a client preference and the tick
+// only ever READS it, which is what keeps a mid-flight flip from being anything
+// more than the next tick mapping the same keys differently.
+function setThrustFrame(m) {
+  THRUSTFRAME = m === "screen" ? "screen" : "ship";
+  try { window.localStorage.setItem(THRUSTFRAME_KEY, THRUSTFRAME); } catch { /* a
+        frame that cannot be remembered is still the frame this session */ }
+  syncTuner();
+  render();
+}
 const AIM_R = 16;       // push-model offset clamp radius, px
 const MIN_FIRE_V = 0.25; // cq-scale refuses to fire below this ship speed — the original's rule
 const FLAME_EASE = 0.3; // per-tick easing of the engine flame toward the thrust actually applied
@@ -312,6 +408,15 @@ function makePlayer(id) {
     aimAngle: 0,
     aimOff: { x: 0, y: 0 }, // relative/snap state — its direction is the stored aim
     aimed: false, // stored aim history; false until first aim, so bullets initially follow the heading
+    heading: 0,   // THE CONVERGED NOSE (D32) — HASHED per-seat sim state, and the
+                  // one field production did not have. `aimAngle` is the AIM,
+                  // recomputed whole every frame with no rate, so it cannot lag;
+                  // this turns TOWARD the aim at HEADRATE and therefore can.
+                  // Two consumers by design: the ship-relative thrust frame
+                  // (D12) reads it now, and D29's parry arc faces it later —
+                  // one field, one spelling, replicated as `hd` at R7. It is a
+                  // SIM value and never a render one, because both readers run
+                  // inside the tick.
     cool: 0, // ticks until the next shot is allowed
     comet: false, // right-hold's sim-visible ACTIVE half — HASHED. The button states a
                   // WANT (input.cometWant below); energyStep is the only site in the sim
@@ -405,8 +510,17 @@ let SELECTED_ABILITY = Abilities.ABILITY.RAILSHOT;
 // keydown set even if the selection changed in between. Client-side transport,
 // read once per bank.
 const heldAbilityKeys = new Map();
+// THE RIGHT BUTTON IS NO LONGER HARD-WIRED TO THE COMET — D30. The middle term
+// was `(G.rightHeld ? AB_COMET : 0)`, and it is the second half of the RMB
+// double-arm §2.12 names: `setRightHeld` wrote the want and THIS wrote the held
+// level, so an RMB bound to a weapon while either survived would have drained
+// COMETDRAIN every held tick in the local predictor. Both halves go in this
+// commit, and D31's SHIFT branch — which lands its bit through heldAbilityKeys
+// below, exactly as Space does — is what supplies the comet's level now.
+// LMB keeps its term: the fire button is still hard-wired, and only the right
+// button was ruled free.
 function heldAbilityMask() {
-  let m = (G.leftHeld ? AB_FIRE : 0) | (G.rightHeld ? AB_COMET : 0);
+  let m = G.leftHeld ? AB_FIRE : 0;
   for (const id of heldAbilityKeys.values()) m |= Abilities.bit(id);
   return m;
 }
@@ -696,11 +810,63 @@ function cometPresTick() {
 //           the term stays a value with no ink attached to it.
 //   flash — the confirm flash, 1 on the tick the wire agreed and decaying to
 //           0 across COMET_FLASH_TICKS; 0 unless the phase is CP_LIVE
+// ---- THE ONE HALO DERIVATION (PORT-S S5, commit C) -------------------------
+// `SHIP_R + (COMETAOE + COMETAOEDMG) * f`. Two terms, one number, and D26's
+// aura collides on exactly the radius the pilot SEES — which is the whole
+// reason the damage reach is folded into the drawn halo rather than given its
+// own invisible circle. At the shipped `COMETAOEDMG` of 0 this is byte-for-byte
+// the arithmetic that shipped before it (`SHIP_R + COMETAOE * f`), so commit C
+// moves no pixel and no hash; commit D turns the dial on.
+function auraRadiusOf(f) { return SHIP_R + (COMETAOE + COMETAOEDMG) * f; }
+
+// ---- THE AUTHORITATIVE RADIUS, PER SEAT, NEVER HASHED ----------------------
+// PRESENTATION STATE, on cometPres's own footing: two sparse arrays that exist
+// so DRAW, LIGHT and the kernel's COLLISION cannot disagree about how big the
+// halo is on a given tick.
+//
+// WHY A CACHE AND NOT A SECOND CALL TO cometView. The pool is DRAINED before
+// the pose is pushed — `energyStep()` runs at js/game.js's tick and
+// `poseKernelSeats()` eighty-five lines later — so a radius sampled at the pose
+// reads the POST-SPEND pool and a radius sampled at draw time reads it again,
+// one drain later still. On the ARM tick that is the difference between a halo
+// of 67.5 and a halo of 67.0 while the public pool says 99, and between a
+// collision circle and a drawn circle that are not the same circle.
+//
+// SO THE FRACTION IS SAMPLED ONCE, BEFORE THE DRAIN, and the radius derived
+// from it is what the pose carries and what the local surfaces draw.
+// `AURA_F[s]` is that pre-spend fraction; `AURA_R[s]` is the radius.
+//
+// NEITHER IS HASHED and neither is on a seat record. They are module-local
+// arrays in the render/presentation half of this file, exactly like `cometPres`
+// and the shake machine, and nothing in `hashState` walks them.
+const AURA_F = [];
+const AURA_R = [];
+
+// The presented radius for a seat: the authoritative cache where production
+// simulated this seat, and the presented-pool formula where it did not — which
+// is every seat on a net client. A client's only error is the one drain
+// between pre-spend and post-spend, and v10 carries no exact radius to fix it.
+//
+// THE OWNERSHIP TEST IS EXPLICIT (S5 FIX ROUND, Codex CX-3). Ruling 3's "one
+// authoritative radius" is a HOST/LOCAL contract: a `?mp` client runs no
+// collision for ANY seat — its own included — so it owns no radius and must
+// draw the licensed one-drain approximation for every seat until R7 puts the
+// exact `auraR` on the wire. `Net.active()` is fixed at load (js/net.js), so
+// this is a mode test and not a per-tick condition. The cleared cache at the
+// pose site already makes the fall-through happen; this line SAYS it, so a
+// future local write cannot quietly re-open the hole.
+function presentedAuraR(s) {
+  if (window.Net && Net.active()) return cometView(s, presentedPool(s)).r;
+  const c = AURA_R[s];
+  if (Number.isFinite(c)) return c;
+  return cometView(s, presentedPool(s)).r;
+}
+
 function cometView(s, pool) {
   const r = cometPres(s);
   const p = pool || presentedPool(s);
   const f = p.enMax > 0 ? Math.max(0, Math.min(1, p.en / p.enMax)) : 0;
-  return { phase: r.phase, f, r: SHIP_R + COMETAOE * f,
+  return { phase: r.phase, f, r: auraRadiusOf(f),
     wind: r.phase === CP_WIND ? Math.min(1, (r.t + 1) / COMET_WIND_TICKS) : 0,
     flash: r.phase === CP_LIVE ? Math.max(0, 1 - r.t / COMET_FLASH_TICKS) : 0 };
 }
@@ -728,23 +894,59 @@ function cometView(s, pool) {
 // drive.
 const SHAKE_SEED = 0x5A11C3B7; // this machine's own salt — never HULL_SEED's
                                // or FX_SALT's stream position
-const SHAKE_MAX = 14;      // px — the summed-impulse ceiling
+// ---- RESCALED AT THE FIX ROUND (S3BR-07) ---------------------------------
+// Every number below is PX OF CAMERA OFFSET, and the logical viewport grew x2.5
+// at the flip while they stayed put — so the same amplitudes occupied 40 % of
+// their former screen fraction. Hull hits, kills, rails, rams and clears all
+// had materially weaker screen feedback after the flip than before it, which is
+// a feel regression the fixture re-author would have frozen.
+//   THE TWO SLIDERS ARE EXEMPT and it is worth saying which: `SHAKEAMP` is a
+// MASTER MULTIPLIER and `SHAKEDECAY` is TICKS. Neither has a length in it.
+const SHAKE_MAX = 35;      // px — the summed-impulse ceiling. x2.5, WAS 14
 // the per-event sizes, in px of camera offset at master amplitude 1 — the
 // starting tune, judged in play (the owner's feel pass moves these)
-const SHAKE_HIT = 7;       // own hull hit — the one the pilot must FEEL
-const SHAKE_KILL = 2;      // an enemy dies (kind is the only size channel —
-const SHAKE_KILLHEAVY = 3.5; // the emit strips e.r, so heavy rides its kind)
-const SHAKE_RAM = 4.5;     // comet ram, INFERRED (see shakeCueLocal)
-const SHAKE_RAIL = 1.2;    // own railshot — a punctuation tap
-const SHAKE_CLEAR = 3;     // wave clear — celebratory, not violent
+const SHAKE_HIT = 17.5;    // own hull hit — the one the pilot must FEEL. WAS 7
+const SHAKE_KILL = 5;      // an enemy dies (kind is the only size channel —
+const SHAKE_KILLHEAVY = 8.75; // the emit strips e.r, so heavy rides its kind)
+const SHAKE_RAM = 11.25;   // comet ram, INFERRED (see shakeCueLocal). WAS 4.5
+const SHAKE_RAIL = 3;      // own railshot — a punctuation tap. WAS 1.2
+const SHAKE_CLEAR = 7.5;   // wave clear — celebratory, not violent. WAS 3
 // ...and HOW FAR a death is still felt. A kill is a WORLD event, so it needs
 // the same cull the sound of it already gets: js/audio.js's att() silences a
 // cue past FAR, and a screen that jumps for a kill nobody can hear is a jump
 // with no cause on screen. Linear, full inside NEAR, zero at FAR — FAR is
 // audio's number deliberately, so the felt reach and the heard reach are one
 // distance. ESTIMATES, judged in play like the rest of the shake tune.
-const SHAKE_NEAR = 400;    // px — full amplitude
-const SHAKE_FAR = 1100;    // px — nothing; mirrors js/audio.js's FAR
+//
+// ---- THE MIRROR IS A LIVE READ (FIX ROUND S3BR-07, corrected at the HOLD
+// ROUND) --------------------------------------------------------------------
+// `SHAKE_FAR` said it mirrored js/audio.js's `FAR` and was a HAND COPY of it,
+// which is the shape every mirror in this repository has eventually drifted
+// into. It had ALREADY drifted on the near side — 400 against audio's 260 —
+// before FIX 6 moved FAR to 2750 and broke the far side too.
+//
+// S3BR-07 MADE IT A READ AND THE READ NEVER RAN. `const SHAKE_FAR = ... ?
+// window.SfxReach.far() : 2750` is evaluated when js/game.js is PARSED, and
+// index.html loads js/game.js BEFORE js/audio.js — so `window.SfxReach` did not
+// exist yet and production captured the literal fallback every time. The two
+// numbers agree exactly today, which is precisely why nothing said so: the fix
+// was numerically right and structurally absent, and the comment promised drift
+// protection that did not exist. The final review measured it.
+//
+// SO THE READ IS AT USE, NOT AT PARSE. `shakeReach()` asks js/audio.js each
+// time the falloff needs it, so a retune of audio's `NEAR` moves the felt reach
+// on the same frame — which is what the promise was always for. It is a
+// property read and a comparison on a path that already does a `hypot`.
+//   THE FALLBACK IS STILL THE MECHANICAL ANSWER and it still has a stated
+// reason: js/audio.js is NOT a SIM_FILE, so the headless vm loads js/game.js
+// without it, and a reach of `undefined` would silence every falloff in the
+// Node realm. 2750 = 1100 x 2.5, the same number the read returns.
+const SHAKE_NEAR = 1000;   // px — full amplitude. x2.5, WAS 400
+const SHAKE_FAR_FALLBACK = 2750; // px — 1100 x 2.5, for a realm with no audio
+function shakeReach() {
+  return (typeof window !== "undefined" && window.SfxReach)
+    ? window.SfxReach.far() : SHAKE_FAR_FALLBACK;
+}
 let SHAKEAMP = 1;          // master amplitude, 0..2 (slider; 0 = off exactly)
 let SHAKEDECAY = 18;       // ticks a full impulse takes to settle (slider)
 const SHAKE = { amp: 0, peak: 0, age: 0, seed: 0, ox: 0, oy: 0, prevFlash: 0 };
@@ -772,9 +974,10 @@ function shakeFalloff(at) {
   const lx = r ? r.cx : P.ship.x;
   const ly = r ? r.cy : P.ship.y;
   const d = Math.hypot(at.x - lx, at.y - ly);
+  const far = shakeReach(); // LIVE — see the block at SHAKE_NEAR
   if (d <= SHAKE_NEAR) return 1;
-  if (d >= SHAKE_FAR) return 0;
-  return 1 - (d - SHAKE_NEAR) / (SHAKE_FAR - SHAKE_NEAR);
+  if (d >= far) return 0;
+  return 1 - (d - SHAKE_NEAR) / (far - SHAKE_NEAR);
 }
 // the event intake, solo-drain flavour: EVERY kind, the own-rail tap included.
 // The net wire drain must NOT reach the ability branch (its own rail already
@@ -1016,7 +1219,7 @@ const Flight = {
     const flick = 1 + Math.hypot(dx, dy) * FLICK;
     const s = Math.hypot(K.vel.x, K.vel.y);
     let dvx, dvy;
-    if (s < 0.05) { // at rest there is no heading — all input builds speed
+    if (s < REST_EPS) { // at rest there is no heading — all input builds speed
       dvx = dx * ACCEL * ka * flick;
       dvy = dy * ACCEL * ka * flick;
     } else {
@@ -1121,7 +1324,68 @@ const Flight = {
       if (ctx.alive) {
         if (a.ax || a.ay) Flight.aim(K, a.ax, a.ay);
         if (a.tx || a.ty) Flight.thrust(K, a.tx, a.ty);
-        if ((a.kx || a.ky) && ctx.keyThrust()) Flight.thrust(K, a.kx * KEYTHRUST, a.ky * KEYTHRUST);
+        if ((a.kx || a.ky) && ctx.keyThrust()) {
+          // THE FRAME, applied here and not at the bank: `kx/ky` ride the wire
+          // as SCREEN axes, so a client that pre-rotated them would put its own
+          // frame setting into every frame it sends and the server would have no
+          // way to tell a rotated pair from an unrotated one. The seat's own
+          // nose does the rotation at the point of use, which also means a
+          // seat's frame is its own business and never travels.
+          const kf = ctx.thrustFrame(a.tf, a.kx, a.ky);
+          Flight.thrust(K, kf.x * KEYTHRUST, kf.y * KEYTHRUST);
+        }
+        // ---- THE COMET'S OWN THRUST (PORT-S S5, commit F) ---------------
+        // D31/owner-ruled: the comet SUPPLIES forward thrust in addition to
+        // COMETACC, COMETTURN and COMETVMAX. A burning pilot is not a fast
+        // pilot who happens to be turning well; it is a pilot being carried.
+        //
+        // IT IS GATED ON BURNING ALONE AND SITS AFTER THE KEY BLOCK, not
+        // inside it. Inside, it would only ever fire with a key already down
+        // and the no-W case — a coasting comet accelerating along its nose —
+        // would not exist at all.
+        //
+        // IT FOLLOWS `K.heading`, THE SETTLED NOSE (D32), and it is NOT a
+        // second steering direction: the nose is turned once per tick by
+        // `headingStep`, after this, so a burning tick thrusts along the nose
+        // as it stood when the tick began. At heading 0 the nose is +x, so the
+        // unit nose in this funnel's WORLD-vector convention is
+        // (cos h, sin h) — the same convention `thrustFrame` rotates the
+        // keyboard axes INTO one line above.
+        //
+        // THROUGH `Flight.thrust`, WHICH IS THE POINT. The funnel applies
+        // `COMETACC` and `COMETTURN` (js/game.js's `ka`/`kt`) to whatever it
+        // is handed, so this term inherits the 3x gains for free, stacks with
+        // an ordinary key vector rather than replacing it, and is clamped by
+        // the same `COMETVMAX` radial cap in `integrateSlice`.
+        //
+        // ITS MAGNITUDE IS ONE FULL KEYBOARD VECTOR — `KEYTHRUST`. The lab's
+        // 300 is a lab unit against a lab's own ACCEL and does not translate;
+        // "as hard as holding W" does, and it is the number the owner's feel
+        // gate is being asked about.
+        //
+        // COMETTHR SEES IT FOR FREE. The burn is `COMETDRAIN + COMETTHR *
+        // |thrustAcc|` and this term adds to `thrustAcc`, so at the shipped
+        // COMETTHR of 0 a coasting burn still costs exactly COMETDRAIN — and a
+        // nonzero COMETTHR would begin billing the nose term. That is a DIAL
+        // FACT, not a change, and wave1's restored (8) pins both halves.
+        //
+        // ONCE PER AUTHORITATIVE TICK, AND `k === 0` IS WHAT BUYS THAT
+        // (corrected at the S5 FIX ROUND, Codex CX-2). The keyboard vector
+        // beside it is per input FRAME and belongs there: a pilot who sent two
+        // frames really did hold W for two frames. This term is TIME-driven —
+        // the comet supplies it, not the pilot — and this loop runs 0, 1 or 2
+        // times per tick by transport cadence alone (drainTickInput's
+        // at-most-two policy). Left per frame it was applied 0, 1 or 2 times
+        // for the same tick of simulated time, so packet jitter moved the
+        // ship. The twin below covers the 0-frame tick; between them the term
+        // lands exactly once per alive burning seat per tick.
+        //
+        // IT STAYS HERE rather than being hoisted above or below the loop
+        // because `Flight.thrust` is velocity-direction dependent, so moving
+        // it past `fx.fire()` and the ability arms would change the 1-frame
+        // tick — the shipped case, and the one every golden trace drives.
+        if (k === 0 && K.comet) Flight.thrust(K, Math.cos(K.heading) * KEYTHRUST,
+                                      Math.sin(K.heading) * KEYTHRUST);
         if (ap & AB_FIRE) fx.fire();
       }
       b.fireHeld = !!(ah & AB_FIRE);
@@ -1159,6 +1423,15 @@ const Flight = {
                         // downed seat's click survives to ask for a deal)
         }
       }
+    }
+    // THE 0-FRAME TWIN of the comet's own thrust above. A tick that drains no
+    // frame at all is still a tick of simulated time, and the comet supplies
+    // its thrust for it. Together with the `k === 0` gate above, the term is
+    // applied EXACTLY ONCE per alive burning seat per authoritative tick, for
+    // every drain width the transport can produce.
+    if (!frames.length && ctx.alive && K.comet) {
+      Flight.thrust(K, Math.cos(K.heading) * KEYTHRUST,
+                       Math.sin(K.heading) * KEYTHRUST);
     }
     // AFTER the entries applied: the HELD levels take the LAST drained frame's
     // mask — so a catch-up tick lands on the newest button state, and a tick
@@ -1315,7 +1588,19 @@ const Flight = {
     // two; the magnitude rides through as the thud's volume, so a graze
     // whispers and a full-speed slam lands. Handed to the effect sink, which
     // in the sim queues it on the encounter's event stream.
-    if (wallHit > 0) fx.thud(K.ship.x, K.ship.y, Math.min(1, wallHit / 4));
+    // ---- THE DENOMINATOR RESCALES (FIX ROUND, S3BR-08) -----------------
+    // It was 4 — `VMAX x 2` at the retired `VMAX` of 2 — so a base-cap wall
+    // slam normalized to 2/4 = 0.5 and the band above it was for a boosted or
+    // comet impact. After the flip `VMAX` is 5 and the SAME ordinary collision
+    // read min(1, 5/4) = 1: every full-speed wall contact saturated the cue and
+    // sounded twice as strong in normalized terms, erasing the distinction the
+    // gain exists to draw.
+    //   THE RATIO IS THE INVARIANT AND IT IS DERIVED, not restated: `VMAX * 2`,
+    // which reads 10 at the shipped tuner and reproduces the old 4 at the old
+    // one. It is the LIVE tuner value, so dragging the max-speed slider moves
+    // the normalization with it — which is what "a base-cap slam is half" has
+    // always meant.
+    if (wallHit > 0) fx.thud(K.ship.x, K.ship.y, Math.min(1, wallHit / (VMAX * 2)));
     // no camera here: the view follows in the frame loop, after step() returns —
     // the simulation runs the same with no camera at all
     K.flame.x += (K.thrustAcc.x - K.flame.x) * FLAME_EASE;
@@ -1338,6 +1623,11 @@ window.Flight = Flight; // the vm sandbox and the page both reach it here; a
 // be pure garbage. Neither is re-entrant and neither needs to be — a slice
 // call returns before the next one starts.
 const FLIGHT_CTX = { alive: true, terms: null, keyThrust: null,
+  thrustFrame: null, // the seat's KEY-VECTOR MAP (D12), bound per seat by the
+                 // drain because the frame reads that seat's own converged nose.
+                 // It is a ctx entry rather than a direct call so the kernel
+                 // keeps knowing nothing about seats — the same reason keyThrust
+                 // is one.
   owned: null }; // the seat's RAW rank vector — the ownership Flight.abilityOn
                  // judges an ability against. `terms` beside it is the DERIVED
                  // view and cannot answer "does this seat own it at all".
@@ -1432,8 +1722,8 @@ const G = {
   started: false, // velocity zeroes on the first start only — a resume keeps it, like unpausing
   mouse: { x: 0, y: 0, seen: false }, // last native-pointer client position for absolute mouse aiming
   bullets: [],
-  leftHeld: false,
-  rightHeld: false,
+  leftHeld: false, // ...and there is no rightHeld beside it: D30 unbound that
+                   // button and C2 took the field with its last reader
   keys: new Set(), // held QWE/ADZXC codes
 };
 // The moved flight fields stay reachable as G.<field>: G keeps its object
@@ -1453,15 +1743,34 @@ for (const f of ["ship", "vel", "aimAngle", "aimOff", "aimed", "cool", "thrustAc
 }
 
 // ---- canvas sizing: fit the logical field to the window, letterboxed ----
-// The letterbox is a RESERVATION now: GUTTER CSS px per side are held out of
-// the fit for the shop column (left) and the leaderboard (right), so the
-// pillarbox a 16:9 window already gave the 512×342 field becomes usable
-// surface instead of dead bars. The field pays at most 1 − FIELD_MIN of its
-// gutterless size for that — past the floor the gutters give way instead
-// (and the panels collapse with them, see panelsOn/panelCompact), so a
-// squarer window never crushes the game to grow its menus.
-let GUTTER = 180;       // CSS px reserved each side for the panels
-const FIELD_MIN = 0.85; // the field keeps at least this fraction of its gutterless fit
+// ---- OPTION B: THE PANELS SIT OVER THE LIVE WORLD (S3b lane 3, commit D3) --
+// THE OWNER'S RULING, S-3g5hk7, arriving with the world it describes: "the FULL
+// 16:9 RENDER EXTENT, UI OVER THE LIVE WORLD AT THE SIDES". The field takes the
+// whole window fit and the two panels are BANDS drawn over its left and right
+// edges, in device space, outside the field transform exactly as they always
+// were — what changes is where the band is, not how it is drawn.
+//
+// WHY THE RESERVATION HAD TO GO, and it is arithmetic rather than taste. The
+// letterbox used to RESERVE `GUTTER` CSS px per side, which worked because a
+// 512x342 field (3:2) in a 16:9 window already left real pillarbox to spend.
+// The arena is 16:9 now. On this repo's own headless window (780x493) the
+// gutterless fit is 0.609 and the reserved fit is 0.328 — the field would give
+// up 46 % of itself to grow its menus, which is precisely what FIELD_MIN was
+// written to forbid. With the floor holding, `ox` lands at 58.5 CSS px against
+// a PANEL_MIN of 60 and BOTH PANELS SIMPLY STAND DOWN: no shop, no board, no
+// click path, on every window whose aspect is near the field's own.
+//
+// SO THE BAND IS NOT TAKEN OUT OF THE FIELD. `GUTTER` is now the band's WIDTH
+// and nothing is subtracted from the fit; the field is centred at its full
+// scale and the bands overlay it. `panelsOn`, `panelPlace`, `panelAt` and
+// `panelToClient` all read the band rather than `ox`, so the hit test still
+// inverts exactly the transform the draw used — the one property that whole
+// group of functions exists to hold.
+//
+// FIELD_MIN IS GONE WITH THE RESERVATION. It floored a trade that no longer
+// happens: the field never pays for the panels now, so there is nothing for a
+// floor to protect.
+let GUTTER = 180;       // CSS px of BAND at each side, drawn OVER the field
 let scale = 1;
 let ox = 0;
 let oy = 0;
@@ -1470,13 +1779,8 @@ function resize() {
   dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = Math.round(Math.max(1, window.innerWidth) * dpr);
   canvas.height = Math.round(Math.max(1, window.innerHeight) * dpr);
-  const sFull = Math.min(canvas.width / FW, canvas.height / FH);
-  const g = Math.round(GUTTER * dpr);
-  // the reserved fit, floored so the panels can never shrink the field past
-  // FIELD_MIN of what the window alone would give it (a window narrower
-  // than the field makes the reserved term negative — the floor covers it)
-  scale = Math.max(Math.min((canvas.width - 2 * g) / FW, canvas.height / FH),
-                   sFull * FIELD_MIN);
+  // THE FULL FIT — Option B. Nothing is reserved; the panels overlay.
+  scale = Math.min(canvas.width / FW, canvas.height / FH);
   ox = (canvas.width - FW * scale) / 2;
   oy = (canvas.height - FH * scale) / 2;
   hintTop = (oy + (FH / 2 + 96) * scale) / dpr; // just below the pause hints, in field space
@@ -1539,16 +1843,22 @@ const PANEL_COMPACT = 110; // ...and narrower than this the LEADERBOARD tightens
                            // well; the shop now measures its own type instead
                            // (Encounter.shopTextPlan), so this number is a
                            // padding threshold and nothing more.
-const panelsOn = () => PANELS && !!(window.Encounter && Encounter.panelSpec) && ox / dpr >= PANEL_MIN;
+// The band, in DEVICE pixels: `GUTTER` CSS px per side, but never more than a
+// quarter of the window — a narrow window must not hand half its width to two
+// menus. One derivation, read by the four functions below and by nothing else.
+const panelBand = () => Math.min(Math.round(GUTTER * dpr), Math.floor(canvas.width * 0.25));
+const panelsOn = () => PANELS && !!(window.Encounter && Encounter.panelSpec)
+  && panelBand() / dpr >= PANEL_MIN;
 const panelCompact = () => ox / dpr < PANEL_COMPACT;
 // fit a logical panel space {w, h} into the left or right bar: one uniform
 // scale, centred both ways. Null when the bar has no room at all.
 function panelPlace(spec, side) {
   const m = PANEL_MARGIN * dpr;
-  const k = Math.min((ox - 2 * m) / spec.w, (canvas.height - 2 * m) / spec.h);
+  const band = panelBand();
+  const k = Math.min((band - 2 * m) / spec.w, (canvas.height - 2 * m) / spec.h);
   if (!(k > 0)) return null;
-  const x0 = side === "left" ? (ox - spec.w * k) / 2
-                             : canvas.width - ox + (ox - spec.w * k) / 2;
+  const x0 = side === "left" ? (band - spec.w * k) / 2
+                             : canvas.width - band + (band - spec.w * k) / 2;
   return { x0, y0: (canvas.height - spec.h * k) / 2, k };
 }
 // which panel a device-pixel point lands in, and where in that panel's own
@@ -1556,7 +1866,8 @@ function panelPlace(spec, side) {
 // hit test always inverts exactly the transform the draw used
 function panelAt(bx, by) {
   if (!panelsOn() || !G.started) return null;
-  const side = bx < ox ? "left" : bx > canvas.width - ox ? "right" : null;
+  const band = panelBand();
+  const side = bx < band ? "left" : bx > canvas.width - band ? "right" : null;
   if (!side) return null;
   const spec = Encounter.panelSpec();
   const p = panelPlace(side === "left" ? spec.shop : spec.board, side);
@@ -1604,12 +1915,11 @@ function hoverFromLcur() {
 // Modes: "lock" pins the ship to the center every tick; "smooth" eases a
 // CAMEASE fraction of the remaining gap per tick; "deadzone" moves only the
 // minimum needed to keep the ship inside an inner box (CAMBOX of the view),
-// no easing; "lookahead" is smooth toward a led point — LEADSRC picks what
-// leads: the velocity (CAMLEAD ticks of it), the aim (AIMLEAD px along
-// fireDir), a LEADBLEND mix of the two, their plain sum, or a swap that
-// follows the aim only while aiming() — all five through the LEADDZ commit
-// gate (gatedLead) that sits between the ideal lead and the camera target;
-// "flip" treats the world as a 6×11
+// no easing; "lookahead" is smooth toward a led point — D11's rule, spelled
+// out at cursorOffset() below: CAMLEAD ticks of the ship's own velocity plus
+// CURSORPULL of the cursor's offset from the pane centre, through the LEADDZ
+// commit gate (gatedLead) that sits between the ideal lead and the camera
+// target; "flip" treats the world as a 6×11
 // grid of view-sized rooms and slides to the ship's room over FLIP_MS with
 // a cubic ease-out — retargeting mid-slide if the ship crosses into yet
 // another room. Smooth and lookahead also wear a LEASH: after the ease,
@@ -1618,14 +1928,38 @@ function hoverFromLcur() {
 // ship off screen. The world clamp still runs last, so a ship within
 // EDGEMARGIN of a world wall keeps less margin but never leaves the view.
 let CAMMODE = "lookahead"; // lock | smooth | deadzone | lookahead | flip (pause-screen selector)
-let CAMEASE = 0.08;     // smooth/lookahead — fraction of the gap closed per tick (slider)
+// THE THREE DIALS D11 CARRIED, and production's own numbers stay cited beside
+// them because both are load-bearing: the owner's are what he flew and passed,
+// this file's are what a reader would otherwise take these lines to have always
+// said. The source is the PORT-W feel gate, 2026-08-24, recorded verbatim in
+// .ai-reference/prompts/port-w-20260824/FEEL-GATE.md and carried by
+// PORT-S-DEBT.md. EDGEMARGIN 60 and LEADDZ 200 were already his numbers and
+// did not move.
+let CAMEASE = 0.05;     // smooth/lookahead — fraction of the gap closed per tick (slider).
+                        // THE OWNER'S; this file shipped 0.08 until D11.
 let CAMBOX = 0.4;       // deadzone — the inner box, as a fraction of the viewport (slider)
-let CAMLEAD = 25;       // lookahead — ticks of velocity the target leads by (slider)
-let LEADSRC = "blend";  // lookahead — what the target leads: vel | aim | blend | add | swap (selector)
-let AIMLEAD = 120;      // lookahead — px of aim lead along fireDir() (slider)
-let LEADBLEND = 0.5;    // lookahead blend — 0 = all velocity, 1 = all aim (slider)
+let CAMLEAD = 60;       // lookahead — ticks of velocity the target leads by (slider).
+                        // THE OWNER'S; this file shipped 25 until D11. He chose it at the
+                        // TOP of a rail that stopped at 60, so it is a FLOOR on his
+                        // preference and not a measurement — the slider below reaches 150
+                        // now, the width the lab gave it, so the feel gate can go past it.
+let CURSORPULL = 1.0;   // lookahead — D11 ITSELF, and the one dial here with NO production
+                        // counterpart before it: a GAIN on the cursor's offset from the
+                        // pane centre. 1.0 is the owner's own Blend 0.5. See cursorOffset().
+                        // NEVER FLOWN at this value — it was reached by algebra rather than
+                        // by his hand on a slider, which is why the row exists.
 let LEADDZ = 200;       // lookahead — ms a conflicting lead direction must persist to commit; 0 = gate off (slider)
 let EDGEMARGIN = 60;    // smooth/lookahead leash — min px between the ship and every view edge (slider)
+                        // EXEMPT FROM COMMIT C's x2.5, and it is the sharpest exemption on
+                        // the table. This is the OWNER'S OWN DIAL, chosen at the PORT-W feel
+                        // gate on a 1280x720 pane and PASSED there — so it is ALREADY an
+                        // arena-px number, and the arena is what production has just moved
+                        // into. Multiplying it would revert the feel gate, and it would
+                        // break the alarm too: js/encounter-host.js holds the declared third
+                        // copy of this rule at 60 and demo-host LEG 5 reds if the two
+                        // disagree. The other four camera dials need no clause at all —
+                        // CAMEASE and CURSORPULL are fractions, CAMLEAD is TICKS (its px
+                        // come from a velocity that rescaled itself) and LEADDZ is ms.
 const FLIP_MS = 250;    // flip — room slide duration, ms
 const cam = {
   x: WW / 2 - FW / 2, // start centered on the spawn (already inside the clamp)
@@ -1643,24 +1977,110 @@ function setCamMode(m) {
   gate.seeded = false; // the commit gate re-seeds from the next ideal — a mode switch never replays a stale timer
   gate.timer = 0;
 }
-// lookahead's lead vector, per LEADSRC: the velocity scaled by CAMLEAD
-// ticks, the aim (fireDir) stretched to AIMLEAD px, a LEADBLEND mix of the
-// two, their plain sum, or a swap — the aim lead while aiming(), the
-// velocity lead otherwise. No fire direction at all (at rest and never
-// aimed) makes the aim lead zero, not undefined.
+// D11 — THE CURSOR HALF OF THE OWNER'S CAMERA RULE, and the mechanism this file
+// did not have at all before it.
+//
+// He stated the rule himself, 2026-08-24, after four rounds of camera work had
+// chased something else:
+//
+//   "the whole camera adjustments i really wanted was just the ability to
+//    slide the camera center away from the center of the ship depending on
+//    where the cursor is and the current velocity vector of the ship, with a
+//    blend between those two."
+//   "(( ShipCenter + leadVec ) * (1 - Blend) + CursorCenter * (Blend)
+//    So halfway between ShipCenter and CursorCenter at 0.5, right?"
+//
+// IMPLEMENTED IN ITS SOLVED FORM, AND THAT IS NOT A LIBERTY. The literal formula
+// has the camera on BOTH sides: CursorCenter is a WORLD point, and the view →
+// world conversion runs through the camera itself. Write the camera CENTRE as
+// Cc, the ship as Sh, the velocity lead as L, and the cursor's offset from the
+// PANE CENTRE as u. The cursor's world point is Cc + u by the definition of the
+// pane centre, so
+//
+//     Cc = (Sh + L) * (1 - B) + (Cc + u) * B
+//     Cc * (1 - B) = (Sh + L) * (1 - B) + u * B
+//     Cc = Sh + L + u * B / (1 - B)
+//
+// TWO CONSEQUENCES, and neither is what the formula READS like:
+//
+// 1. THE MIX TERM IS A GAIN, B / (1 - B). So the dial IS that gain, and it is
+//    named CURSORPULL and not Blend. CURSORPULL 1.0 IS the owner's Blend 0.5 —
+//    the camera exactly halfway between the ship and the cursor. The literal
+//    dial would have been dead over most of its rail: gain 0.33 at B 0.25, 1 at
+//    0.5, 3 at 0.75, 9 at 0.9, and UNDEFINED at B 1, where no solution exists at
+//    all, since a screen-FIXED cursor cannot be put at the view centre. The Edge
+//    leash saturates that instead of letting it diverge, which is exactly why a
+//    literal dial would have been mistaken for one that stops doing anything
+//    above about 0.6. CURSORPULL is linear across its whole rail.
+//    DO NOT "RESTORE" THE LITERAL FORMULA. The panel has no tooltips, and this
+//    comment is now the only place the equivalence is recorded in a file that
+//    ships — the lab copy that used to carry it is what PORT-S deletes.
+//
+// 2. THE (1 - B) ON THE LEAD CANCELS. The velocity lead arrives at FULL strength
+//    at every setting. CAMLEAD and CURSORPULL are two INDEPENDENT amounts and
+//    not a seesaw — "lead my own motion" and "look where I point" are tuned
+//    separately, which is a feature. It is also why no (1 - pull) factor appears
+//    below, and why its absence is not an omission.
+//
+// u IS CAMERA-INDEPENDENT, and it has to be or the camera is back on both sides
+// of its own equation. It is read from the cursor's PANE point directly — lcur
+// is already view/field coordinates, and pointerField() puts the native pointer
+// in that same frame — and never from wcur or lcurWorld(), which are those very
+// points with `cam` already added. The 03M-D aim drift (1f118bb) came from
+// banking an absolute world POINT the camera then moved out from under; a
+// displacement has no absolute point in it and cannot carry that fault. This
+// camera has no scale term anywhere, so the pane offset IS the world offset;
+// js/demo-render.js divides its copy by the lab's zoom and there is no z here to
+// divide by.
+//
+// THE CURSOR IT READS IS THE ONE THE PLAYER CAN SEE — locked mode's drawn
+// cursor, mouse mode's native pointer. That is bankTickInput()'s rule and it
+// must be the same rule here: a camera that slid toward the hidden cursor while
+// the shots left along the visible one is the two-cursor defect S1 paid for once
+// already, wearing a different hat.
+//
+// NO CURSOR IS NO PULL. Mouse mode before the first pointer event has no pointer
+// at all, and a canvas with no box yet resolves to none. Zero is the right answer
+// there: with no cursor there is nothing to look toward.
+//
+// THE GUTTERS ARE REACHABLE AND THAT IS FINE. clampLcur() deliberately lets the
+// drawn cursor leave the field rect to reach the shop panel, so |u| can exceed
+// half the pane. The leash saturates it, which is the same thing an oversized
+// CAMLEAD has always done — see updateCamera().
+function cursorOffset() {
+  const p = lockedMode() ? in0.lcur
+    : G.mouse.seen ? pointerField(G.mouse.x, G.mouse.y) : null;
+  if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return { x: 0, y: 0 };
+  return { x: p.x - FW / 2, y: p.y - FH / 2 };
+}
+// lookahead's lead vector — D11's rule: CAMLEAD ticks of the ship's own
+// velocity, plus CURSORPULL times the cursor's offset from the pane centre.
+//
+// THE VELOCITY UNIT IS THE TRAP, AND IT POINTS THE OTHER WAY HERE. P.vel is px
+// per TICK, so `P.vel * CAMLEAD` is CAMLEAD ticks of it and there is no divide;
+// js/demo-render.js divides by 60 because the demo stores px per SECOND. The
+// number 60 means the same thing in both files, but only one of them may divide.
+// What genuinely differs is the THROW, and it differs because the WORLDS differ:
+// at VMAX 2 px/tick this ship tops out at 120 px/s against the demo's 245, so
+// CAMLEAD 60 buys about 120 px of lead here and about 245 px there. That is a
+// property of the world rather than a unit slip, and it is a FEEL-GATE flag —
+// not something to "correct" by rescaling the owner's number behind his back.
+//
+// AIMLEAD, LEADBLEND AND LEADSRC ARE GONE, and the reason is that the rule
+// replaced them rather than retuned them. They mixed the velocity lead with a
+// UNIT-direction aim lead (fireDir() stretched to AIMLEAD px), which PANS a
+// fixed distance along a bearing — it buys forward reach by selling rearward
+// reach. The owner's rule SLIDES the view a proportion of the way to the cursor.
+// The two disagree about what the camera is FOR, so four of the selector's five
+// branches had nothing left to select. "swap" went with them: D30 had already
+// collapsed it onto "aim", and S1 left the option standing on purpose so that
+// this commit could retire it beside the rule that supersedes it, rather than
+// have a deletion smuggled into the commit that emptied it.
 function leadVec() {
   const P = localPlayer(); // VIEW: the lead belongs to the ship the camera follows
-  const vx = P.vel.x * CAMLEAD;
-  const vy = P.vel.y * CAMLEAD;
-  if (LEADSRC === "vel") return { x: vx, y: vy };
-  const d = fireDir();
-  const ax = d ? d.x * AIMLEAD : 0;
-  const ay = d ? d.y * AIMLEAD : 0;
-  if (LEADSRC === "aim") return { x: ax, y: ay };
-  if (LEADSRC === "blend") return { x: vx * (1 - LEADBLEND) + ax * LEADBLEND,
-                                    y: vy * (1 - LEADBLEND) + ay * LEADBLEND };
-  if (LEADSRC === "add") return { x: vx + ax, y: vy + ay };
-  return aiming() ? { x: ax, y: ay } : { x: vx, y: vy }; // swap
+  const u = cursorOffset();
+  return { x: P.vel.x * CAMLEAD + CURSORPULL * u.x,
+           y: P.vel.y * CAMLEAD + CURSORPULL * u.y };
 }
 // the commit gate between leadVec() and the camera target — lookahead only.
 // A quick left-right reversal flips the ideal lead by up to ~2 × VMAX ×
@@ -1687,7 +2107,7 @@ function gatedLead() {
   }
   const im = Math.hypot(i.x, i.y);
   const cm = Math.hypot(gate.x, gate.y);
-  if (im < 1 || cm < 1 || i.x * gate.x + i.y * gate.y >= 0.5 * im * cm) {
+  if (im < LEAD_EPS || cm < LEAD_EPS || i.x * gate.x + i.y * gate.y >= 0.5 * im * cm) {
     gate.x = i.x; // no sharp conflict (dot ≥ cos 60° × |i||c|) — track live
     gate.y = i.y;
     gate.timer = 0;
@@ -1756,16 +2176,17 @@ const lockedMode = () => AIMMODE === "locked";
 // the absolute-cursor aim family: the visible native pointer (mouse) and the
 // drawn synthetic one (locked) share every aim decision; push stays apart
 const cursorAim = () => mouseMode() || lockedMode();
-// The right button hides the cursor because in mouse mode it means "the mouse
-// is flying the ship now". A FROZEN overlay owns the field instead, and the
-// shop is a mouse UI — the cursor is the only way to click a card — so the
-// hide stands down for as long as the freeze lasts, however the button sits.
-const cursorHidden = () => mouseMode() && G.running && G.rightHeld &&
-                           !(window.Encounter && Encounter.frozen());
+// THE RIGHT BUTTON NO LONGER HIDES THE CURSOR, because it no longer flies the
+// ship — D30. cursorHidden() was `mouseMode() && G.running && G.rightHeld &&
+// !frozen()`, and with the button unbound its middle term is never true, so the
+// whole predicate was a constant false and is gone. Mouse mode keeps its native
+// pointer at every moment now, which is one of D30's four shipped-default play
+// changes: the cursor aims, so taking it away was always the role swap's doing.
+// LOCKED mode is untouched — it hides the CSS cursor for the whole running
+// session because its held lock hides the native pointer anyway and the canvas
+// draws its own.
 function syncCursor() {
-  // locked mode hides the CSS cursor for the whole running session: the held
-  // lock hides the native pointer anyway, and the canvas draws its own
-  canvas.classList.toggle("hide-cursor", cursorHidden() || (lockedMode() && G.running));
+  canvas.classList.toggle("hide-cursor", lockedMode() && G.running);
   // ...and the pointer over a live frozen overlay is a menu pointer, not the
   // crosshair the field wears. Both classes are set from one place so they
   // cannot contradict: hide-cursor only ever applies in flight, this only
@@ -1774,10 +2195,20 @@ function syncCursor() {
   canvas.classList.toggle("ui-cursor",
     !lockedMode() && G.running && !!(window.Encounter && Encounter.frozen()));
 }
-// One boolean preserves the original invertible role swap in both modes:
-// while aiming(), the mouse owns the aim and the keys thrust; otherwise the
-// mouse thrusts and the keys snap the stored aim.
-const aiming = () => G.rightHeld !== INVERT;
+// THE ROLE SWAP IS GONE — D30. `aiming()` was `G.rightHeld !== INVERT`: while
+// it held, the mouse owned the aim and the keys thrust; otherwise the mouse
+// thrust and the keys snapped the stored aim. The owner deleted the swap, so
+// there is one arrangement and it is the one that was already the shipped
+// default: THE CURSOR AIMS, THE KEYS THRUST, LMB FIRES. Every site that asked
+// the predicate has been resolved to its TRUE arm rather than left behind a
+// constant, so the file no longer describes a choice nobody can make.
+//
+// `INVERT`, `G.rightHeld` and `aiming()` are GONE, and so are the two setters
+// that wrote them — deleted here with EVERY reader restaged in the same commit,
+// which is the ruling. A no-op shim would have left 76 call sites across tests/,
+// test/tools/ and server/selfcheck.mjs silently vacuous: still calling, still
+// green, still describing a role swap the game no longer has. The staging those
+// sites did is not replaced anywhere, because there is nothing left to stage.
 // The ring's THRUST role ships STOCK now — mods.keyThrust defaults true and
 // the WSAD ENGINE CONTROLS shop row is gone (user feedback: the keys are the
 // baseline, not an upgrade). The predicate survives as the one gate on
@@ -1911,9 +2342,35 @@ function clearTickInput() {
 function bankTickInput() {
   if (INPUTMODE !== "tick") return;
   const { x: kx, y: ky } = keyDirection();
-  const w = lcurWorld();
+  // THE BANK TAKES THE CURSOR THE PLAYER CAN SEE. It took lcurWorld() in BOTH
+  // aim modes, and in mouse mode nothing moves `lcur` — so the banked aim was
+  // the hidden locked-mode cursor while fireDir() read the visible native
+  // pointer through `wcur`. Two cursors, one seat. It was inert while nothing
+  // hashed read the banked point; D12 made it PLAYER-VISIBLE, because the nose
+  // converges on the BANKED cursor and the default ship frame rotates WSAD by
+  // that nose: with the pointer east and a stale lcur north, the shots went
+  // east while the ship turned north and W accelerated north with it.
+  //   clientStep() refreshes wcur immediately before this call, so the value is
+  // this tick's. LOCKED mode is unchanged — its drawn cursor IS lcur, and that
+  // is the pointer its player sees.
+  const w = mouseMode() && wcur.seen ? wcur : lcurWorld();
   in0.ring.push({ tx: in0.acc.tx, ty: in0.acc.ty, ax: in0.acc.ax, ay: in0.acc.ay,
-                  cx: w.x, cy: w.y, ap: in0.acc.ap, ah: heldAbilityMask(), kx, ky });
+                  cx: w.x, cy: w.y, ap: in0.acc.ap, ah: heldAbilityMask(), kx, ky,
+                  // THE THRUST FRAME RIDES THE FRAME IT MODIFIES. It was a
+                  // process GLOBAL for one commit, and a global cannot be right
+                  // on a server: one host, one value, and it could honour
+                  // neither a pilot who chose `screen` nor two seats choosing
+                  // differently — while js/net.js predicted with the CLIENT's
+                  // choice, so a screen-mode pilot's own W disagreed with the
+                  // authority on every held tick and the correction rubber-
+                  // banded it back. Stamped here, it is ORDERED against the
+                  // kx/ky it rotates and PER-SEAT by construction.
+                  //   ABSENT MEANS `ship`, the default, so a frame from any
+                  // producer that does not care carries nothing and gets the
+                  // shipped behaviour. Only the non-default is spelled — the
+                  // `vt` idiom, and the same reason: absence must be a meaning
+                  // rather than a zero.
+                  ...(THRUSTFRAME === "screen" ? { tf: "screen" } : {}) });
                   // TWO MASKS and nothing else: `ap` is the tick's accumulated
                   // press edges, `ah` the buttons' live LEVELS read at the bank.
                   // The three named booleans they replaced — fp, fh, rh — are
@@ -1950,6 +2407,13 @@ function pushInputFrame(seat, f) {
   // default, so a frame without a view tick stays byte-identical to every
   // committed fixture's F() record and earns a zero rebate at the drain
   if (Number.isInteger(f.vt)) rec.vt = f.vt;
+  // ...and the THRUST FRAME (D12), on the same terms as vt: only the NON-DEFAULT
+  // is copied, and an unrecognised value falls through to absence rather than
+  // being clamped into one — a mode has an enumeration, not a lid, so a value
+  // outside it is meaningless rather than large (the R1 mask lesson). Absence
+  // IS `ship`, so a frame from any producer that does not care stays
+  // byte-identical to every committed fixture's record.
+  if (f.tf === "screen") rec.tf = "screen";
   P.input.ring.push(rec);
   return true;
 }
@@ -1987,6 +2451,9 @@ function drainTickInput() {
                      // formula. Per seat, so one seat's purchase can never arm
                      // another's ability
     FLIGHT_CTX.keyThrust = keyThrustUnlocked; // the gate, still evaluated per frame
+    FLIGHT_CTX.thrustFrame = (mode, kx, ky) => thrustFrame(s, mode, kx, ky); // ...and
+                     // the MAP, bound to THIS seat: every seat rotates by its
+                     // own nose, and by the mode its own frame carried
     FLIGHT_FX.seat = s;
     Flight.drainSlice(players[s], FLIGHT_FRAMES, FLIGHT_CTX, FLIGHT_FX);
   }
@@ -2180,16 +2647,17 @@ function enterAim() {
   P.aimOff.y = d.y * AIM_R;
 }
 
-// Bullets, the direction marker and aim-aware cameras share this. While the
-// mouse-mode pointer owns aim, they resolve against its live position. While
-// mouse motion owns flight (and in push mode), they use the last relative/
-// snapped aim, or the ship heading until the first aim (the CQ behavior).
+// Bullets, the direction marker and aim-aware cameras share this. The
+// cursor-aim modes ALWAYS resolve against the pointer's live position now — D30
+// deleted the arrangement in which mouse motion owned flight — so the fall-
+// through below serves the pre-pointer case alone: the stored aim, then the
+// ship heading until the first aim (the CQ behavior).
 function fireDir() {
-  if (cursorAim() && aiming()) return mouseAimDir();
+  if (cursorAim()) return mouseAimDir();
   const P = localPlayer(); // the DOM client's own seat; seatFireDir serves the rest
   if (P.aimed) return { x: Math.cos(P.aimAngle), y: Math.sin(P.aimAngle) };
   const s = Math.hypot(P.vel.x, P.vel.y);
-  return s < 0.05 ? null : { x: P.vel.x / s, y: P.vel.y / s };
+  return s < REST_EPS ? null : { x: P.vel.x / s, y: P.vel.y / s };
 }
 
 // A non-DOM seat's fire direction: its aim point is the banked scur its
@@ -2202,7 +2670,7 @@ function seatFireDir(seat) {
   if (d) return d;
   if (P.aimed) return { x: Math.cos(P.aimAngle), y: Math.sin(P.aimAngle) };
   const s = Math.hypot(P.vel.x, P.vel.y);
-  return s < 0.05 ? null : { x: P.vel.x / s, y: P.vel.y / s };
+  return s < REST_EPS ? null : { x: P.vel.x / s, y: P.vel.y / s };
 }
 // The DOM-fed seat resolves through fireDir() (its aim modes are the client's
 // business); every other seat resolves from its banked scur. On the server and
@@ -2215,12 +2683,11 @@ const fireDirFor = (seat) => (seat === localSeat() ? fireDir() : seatFireDir(sea
 // it: two pointers on one screen, disagreeing. The render pass resolves
 // against lcur instead. Bullets, the fire gate and every camera keep reading
 // fireDir(), so the delay still shows where it is real — the shots leave along
-// the older aim. Every other mode already resolves locally (mouse mode's live
-// pointer, the stored snap during right-flight, push mode's aim offset), so
-// this hands back fireDir() unchanged there. Render pass ONLY: never step(),
+// the older aim. Mouse mode already resolves locally against its live pointer,
+// so this hands back fireDir() unchanged there. Render pass ONLY: never step(),
 // never a hash — lcur is input state, exactly as its declaration says.
 function markerDir() {
-  if (lockedMode() && INPUTMODE === "tick" && aiming()) return cursorDir(lcurWorld());
+  if (lockedMode() && INPUTMODE === "tick") return cursorDir(lcurWorld());
   return fireDir();
 }
 
@@ -2305,7 +2772,8 @@ function fire(seat = 0) {
   G.bullets.push({ id: window.Encounter ? Encounter.nextId() : 0,
                    x: P.ship.x, y: P.ship.y, px: P.ship.x, py: P.ship.y, vx, vy,
                    ox: P.ship.x + d.x * SHIP_R, oy: P.ship.y + d.y * SHIP_R,
-                   r: 2.2, dmg: BDMG, owner: seat, dead: false, spent: false,
+                   r: 5.5, dmg: BDMG, owner: seat, dead: false, spent: false, // r x2.5, WAS 2.2
+
                    // THE SPLASH RADIUS, CAPTURED AT FIRE TIME (standing rule 5).
                    // blastAt used to read termsFor(seat).blast at IMPACT, so a
                    // rank bought while a round was in the air widened it
@@ -2445,19 +2913,92 @@ function abilityFire(seat, id) {
 // resets per wave. It counts frozen calls too: a replay reproduces the raw
 // call stream, and the shop's frozen ticks are part of that stream.
 let simTick = 0;
+// THE CONVERGENCE, ported from js/demo-kernel.js by VALUE and not by import:
+// the kernel is hosted dormant beside this file and stepping it here would make
+// production's hash depend on a second simulation. angleDelta wraps the signed
+// difference into (-PI, PI] so the nose always takes the SHORT way round, and
+// rotateToward clamps one tick's worth of it. Both are the kernel's exact
+// arithmetic (`js/demo-kernel.js` angleDelta / rotateToward) — same operations
+// in the same order, because a re-derivation that agreed to five decimals would
+// still diverge in the hash.
+const TAU = Math.PI * 2;
+function angleDelta(a, b) {
+  let d = (b - a) % TAU;
+  if (d > Math.PI) d -= TAU;
+  if (d < -Math.PI) d += TAU;
+  return d;
+}
+function rotateToward(a, b, max) {
+  const d = angleDelta(a, b);
+  return a + (d < -max ? -max : d > max ? max : d);
+}
+// **seatFireDir FOR EVERY SEAT, AND THE REASON IS THE CAMERA.** The heading is
+// HASHED, and phase 4's whole result is that the sim is CAMERA-FREE and aims in
+// the WORLD frame: `seatFireDir` resolves a seat's bearing from its BANKED world
+// cursor (`P.input.scur`), then the stored aim, then the velocity — every term a
+// value the server has and none of them derived from a viewport.
+//   `fireDirFor` was tried here first, on the reasoning that the nose should
+// follow where the SHOTS go, and it is WRONG for a hashed value: it routes the
+// DOM seat through `fireDir()`, which resolves `wcur` — the pointer converted
+// through THIS CLIENT'S CAMERA. Two hosts with different cameras then converge
+// two different noses from the same banked input, and the hash splits. The
+// browser suite and the Node parity suite disagreed by exactly that, on the
+// `ship` part alone, which is what found it.
+//   The cost is stated rather than hidden: EVENT mode banks no cursor at all, so
+// seat 0's nose there falls through to the stored aim and then to its VELOCITY.
+// That is still deterministic and still reproduces in both hosts; it is simply
+// not cursor convergence, and event mode is the dev A/B path — `INPUTMODE` ships
+// "tick", which is where the ship frame is meant to be flown.
+//   A NULL answer HOLDS the nose. At rest, never aimed, and with nothing banked
+// there is no bearing to converge on, and snapping to a default would put every
+// fresh seat's nose along +x for one tick.
+function headingStep() {
+  const max = HEADRATE * (TICK / 1000);
+  for (let s = 0; s < players.length; s++) {
+    const P = players[s];
+    const d = seatFireDir(s);
+    if (!d) continue;
+    P.heading = rotateToward(P.heading, Math.atan2(d.y, d.x), max);
+  }
+}
+// THE FRAME, applied to a key vector on its way to the kernel. `screen` hands
+// back the pair unchanged — OFF is bit-identical rather than merely equivalent,
+// and a rotation by zero is not applied, which also keeps a rotation from ever
+// manufacturing a -0.
+//   The rotation is by `a + PI/2`, because the ship's nose IS its angle and
+// world y grows DOWNWARD. Checked at heading 0 (nose along +x): W (0,-1) maps to
+// (1,0) — forward along the nose — and D (1,0) maps to (0,1), off the starboard
+// beam. A plain rotation by `a` is 90 degrees wrong and sends W hard to port.
+// This is `demo-play.html:427-446`'s expression, character for character.
+// `mode` comes from the DRAINED FRAME and never from THRUSTFRAME: the global is
+// the CLIENT's stamp source alone (what this page writes onto the frames it
+// banks), and the sim must obey what each seat actually sent. A frame with no
+// mode is `ship`, the default.
+function thrustFrame(seat, mode, kx, ky) {
+  if (mode === "screen" || (kx === 0 && ky === 0)) return { x: kx, y: ky };
+  const P = players[seat];
+  if (!P || !Number.isFinite(P.heading)) return { x: kx, y: ky }; // an unrotated
+                       // pair is a far better failure than NaN thrust in the sim
+  const sa = Math.sin(P.heading);
+  const ca = Math.cos(P.heading);
+  return { x: -kx * sa - ky * ca, y: kx * ca - ky * sa };
+}
 function keyDirection() {
   let x = 0;
   let y = 0;
-  // The ring thrusts while the mouse owns the aim (aiming()) AND while the
-  // right button holds comet mode: WSAD is the default engine control now,
-  // so engaging the comet must never silence it — the hold multiplies the
-  // same keys' impulses (COMETACC/COMETTURN in thrustImpulse), it does not
-  // retire them. With INVERT off, aiming() IS G.rightHeld, so the extra term
-  // changes nothing and the non-inverted role swap keeps its exact contract.
+  // THE RING ALWAYS THRUSTS — D30. The gate was `(aiming() || G.rightHeld)`:
+  // the first term asked whether the mouse owned the aim, the second kept the
+  // keys alive through a comet hold, because WSAD is the default engine control
+  // and engaging the comet must never silence it — the hold MULTIPLIES the same
+  // keys' impulses (COMETACC/COMETTURN in thrustImpulse) rather than retiring
+  // them. With the role swap deleted the first term is always true, so the pair
+  // collapses and the keys thrust whenever any are down. The comet clause was
+  // load-bearing under the old gate and is now simply subsumed — the amplify-
+  // never-silence rule it protected is unchanged and still has its own leg.
   // Client-side only: in tick mode this direction is BANKED (kx, ky) and the
   // sim drains it from the ring — the comet's sim half still arrives through
-  // the ability masks alone, and step() still never reads G.rightHeld.
-  if ((aiming() || G.rightHeld) && G.keys.size) {
+  // the ability masks alone, and step() never reads a button at all.
+  if (G.keys.size) {
     for (const c of G.keys) { x += KEY_AIM[c][0]; y += KEY_AIM[c][1]; }
     const m = Math.hypot(x, y);
     if (m) { x /= m; y /= m; }
@@ -2487,8 +3028,16 @@ function energyStep() {
     FLIGHT_CTX.terms = termsOf(s);
     FLIGHT_CTX.owned = null; // the energy pass runs no arm rule
     FLIGHT_CTX.keyThrust = null; // the energy pass reads no input gate
+    FLIGHT_CTX.thrustFrame = null; // ...and no key vector
+    // THE PRE-SPEND SAMPLE (PORT-S S5, commit C) — taken HERE, one line before
+    // the drain, because this is the last moment the tick's pool is the pool
+    // the pilot armed on. See AURA_F's own block.
+    const EP = players[s];
+    AURA_F[s] = EP && EP.energyMax > 0
+      ? Math.max(0, Math.min(1, EP.energy / EP.energyMax)) : 0;
     Flight.energySlice(players[s], FLIGHT_CTX);
   }
+  AURA_F.length = players.length;
 }
 function step() {
   simTick++;
@@ -2505,10 +3054,61 @@ function step() {
   // the keys fly the ship — the ring's thrust role ships stock, and it stays
   // live through a comet hold (keyDirection's own gate). Only an explicit
   // mods.keyThrust re-lock quiets this sum.
-  if (INPUTMODE !== "tick" && keyThrustUnlocked()) {
-    const { x: kx, y: ky } = keyDirection();
-    if (kx || ky) thrustImpulse(kx * KEYTHRUST, ky * KEYTHRUST);
+  if (INPUTMODE !== "tick") {
+    if (keyThrustUnlocked()) {
+      const { x: kx, y: ky } = keyDirection();
+      // event mode banks nothing, so there is no frame to carry a mode and the
+      // client's own stamp IS the seat's mode. Seat-0-only, like the whole path.
+      const kf = thrustFrame(0, THRUSTFRAME === "screen" ? "screen" : undefined, kx, ky);
+      if (kx || ky) thrustImpulse(kf.x * KEYTHRUST, kf.y * KEYTHRUST);
+    }
+    // THE COMET'S OWN THRUST, event-mode half (PORT-S S5, commit F). See the
+    // block at Flight.drainSlice for the whole reasoning; the only thing worth
+    // repeating is WHY IT IS INSIDE THIS `INPUTMODE !== "tick"` BLOCK. Outside
+    // it, a tick-mode tick would apply the term TWICE for seat 0, because
+    // `drainTickInput()` has already applied it per seat through
+    // `Flight.drainSlice`. Inside, each mode applies it exactly once.
+    //
+    // ONCE PER TICK IS THE CONTRACT, and it is what this site already has:
+    // `step()` runs once per authoritative tick and this block is straight-line
+    // inside it, so the term lands once whatever the transport did. The drain
+    // slice's twin needed a `k === 0` gate to reach the same contract, because
+    // it sits inside a per-FRAME loop that runs 0, 1 or 2 times. Corrected at
+    // the S5 FIX ROUND (Codex CX-2): the term is TIME-driven, so "the same
+    // scope as the keyboard vector beside it" was the wrong law for it — the
+    // keyboard vector is per frame and rightly so.
+    //
+    // ...AND IT IS OUT OF THE KEY GATE (S5 FIX 11, the seat's ruling on the
+    // asymmetry FIX 2 left). It used to sit INSIDE `keyThrustUnlocked()`, so a
+    // pilot who re-locked keyboard thrust — `Encounter.mods.keyThrust`, an
+    // INPUT mod that makes thrust mouse-only — lost the comet's autonomous
+    // thrust with it, while a tick-mode pilot under the same lock kept it.
+    // AN AUTONOMOUS, TIME-DRIVEN TERM MUST NOT DEPEND ON AN INPUT MOD: ruling
+    // 8's sentence is "a coasting burning seat accelerates along its nose",
+    // and a locked keyboard is exactly a coasting seat. It stays under
+    // `INPUTMODE !== "tick"` (tick mode's drain applies it per seat and would
+    // otherwise apply it twice for seat 0) and immediately AFTER the key block,
+    // so with the mod UNLOCKED the order and the arithmetic are the ones that
+    // shipped, to the bit.
+    //
+    // THE ALIVE GATE IS NEW HERE and it makes the two modes agree. Tick mode
+    // reads `ctx.alive` at the drain; this site read nothing, so on the tick
+    // after a seat died it still thrusted on the previous tick's flag while
+    // tick mode refused. `energySlice` forces a corpse's `comet` false, so this
+    // costs one tick and buys the two modes one answer.
+    if (players[0] && players[0].comet && seatAlive(0)) {
+      thrustImpulse(Math.cos(players[0].heading) * KEYTHRUST,
+                    Math.sin(players[0].heading) * KEYTHRUST);
+    }
   }
+  headingStep(); // THE NOSE TURNS AFTER THE THRUST, and the order is the demo's
+                 // rather than a preference. The lab computes its frame in the
+                 // PROVIDER, before the kernel step that turns the nose, so a
+                 // tick thrusts along the nose as it stood when the key was
+                 // read and the turn lands behind it. Rotating by THIS tick's
+                 // freshly-turned nose instead would shave one tick off every
+                 // convergence and change the half-second swing that IS the
+                 // passed feel. Seats walk ASCENDING, the pinned order.
   energyStep(); // the comet wants resolve into flags and the pool pays — after
                 // every impulse this tick (COMETTHR prices the real thrust) and
                 // before the integrate loop, whose radial clamp reads the flag
@@ -2521,6 +3121,7 @@ function step() {
     FLIGHT_CTX.terms = termsOf(si); // the seat's OWN AFTERBURNER rank feeds the cap
     FLIGHT_CTX.owned = null; // ...and the integrate pass runs no arm rule either
     FLIGHT_CTX.keyThrust = null;
+    FLIGHT_CTX.thrustFrame = null;
     FLIGHT_FX.seat = si;
     Flight.integrateSlice(players[si], FLIGHT_CTX, FLIGHT_FX);
   }
@@ -2575,6 +3176,26 @@ function step() {
       queueWallFx(b, w.x, w.y, b.vx / m, b.vy / m);
     } else if (b.ttl <= 0) b.spent = true; // mid-air fade — no impact, nothing was hit
   }
+  // ---- THE SUCCESSOR PLANE STEPS HERE (PORT-S S3b lane 3, commit C) ------
+  // ONE PRODUCTION TICK, ONE KERNEL STEP, and the slot is chosen rather than
+  // convenient. The ships have integrated, the rounds have integrated, so:
+  //
+  //   1. THE POSE. Every seat production owns is written onto the kernel's
+  //      seat record, from the pose production has just produced. Same tick,
+  //      one read, which is the same-tick contract this lane's LEG 8 enforces.
+  //   2. THE KERNEL STEP. Bodies move, their ordnance moves, and anything that
+  //      reaches a posed seat goes back out through `hitPlayer`.
+  //   3. Encounter.step() BELOW. Its surviving bullet sweep then meets those
+  //      bodies where they NOW are — which is production's own order, where
+  //      `stepEnemy` runs before `resolveBulletHits` for exactly that reason.
+  //
+  // THE PAGE DECIDES, NEVER THE KERNEL. This runs only where a host has been
+  // installed; index.html installs one and the two lab pages install a CAMERA
+  // and step the kernel off their own rAF. A surface that installs nothing
+  // steps nothing, which is what keeps every kernel-oracle instrument measuring
+  // the kernel alone.
+  poseKernelSeats();
+  if (window.EncounterHost && EncounterHost.installed()) EncounterHost.step();
   if (window.Encounter) Encounter.step(); // enemies, damage, XP, wave state
   flushWallFx(); // only the bullets the sweep left alive really met the wall
   clearClaimPress(); // ...and the tick's claim edges are spent. LAST, after the
@@ -2583,6 +3204,171 @@ function step() {
                      // drain) is what lets event mode — which banks no frame at
                      // all — and a check's direct press land on the same rule.
 }
+// ---- THE SUCCESSOR FIELD'S DRAW (PORT-S S3b lane 3, commit C) -------------
+// PORT-S-DEBT.md obligation 2's END STATE, and this is the half that makes it
+// real: PRODUCTION'S OWN `updateCamera` decided the origin, `FRAME.cam` carries
+// it, and js/demo-render.js CONSUMES it through `getCamOrigin()`'s write half
+// rather than running a camera of its own. One rule drives the view on this
+// page, and demo-flip asserts the other one never ran.
+//
+// IT DRAWS IN `Encounter.draw`'s OWN SLOT — under the camera, below the ship —
+// because that is the slot the bodies were always drawn in and commit D deletes
+// production's own body art out of it.
+//
+// THE HOSTED VIEW IS FOUR DECLARATIONS and each names something production
+// owns: the fitted LETTERBOX matrix (that renderer would otherwise set its own
+// devicePixelRatio transform and paint outside the bars), the logical EXTENT it
+// derives from canvas pixels, its BACKGROUND (production fills its own field
+// ground and draws three hashed parallax star layers over it), and its PLAYER
+// draw (production's ship stays the ship, with its hull damage, its seat hue,
+// its crown and its comet halo).
+//
+// AND NO LIGHT CONTEXT, deliberately. js/fx.js is production's bloom and it
+// already reads every body in the room through `Encounter.lights()`, which
+// commit C re-pointed at the kernel. A second light pass would put the same
+// halos on the same surface twice, at a different radius, under a composite
+// that file does not expect.
+//
+// THE ALPHA IS 1. Production's own presentation plane already interpolates
+// every body it draws (buildFrameView, the PRES rings); the successor plane's
+// bodies are drawn at their settled tick pose, which is the same thing
+// `Encounter.draw` does for a body with no PRES entry. Smoothing them is the
+// presentation round's, not the flip's.
+// THE ISOLATING LEVER, and it is a `__test` seam rather than a shipped switch.
+// A canvas claim about THIS draw cannot be a bare pixel count: production's own
+// ship, HUD, wall border and three star layers are on the same surface, and a
+// count of the whole picture is a count of the whole picture. The first cut of
+// demo-flip's claim measured 125 lit samples with this function DELETED.
+//
+// AND THE OBVIOUS LEVER IS NOT ISOLATING EITHER. Uninstalling the host also
+// empties `Encounter.lights()`, so the BLOOM goes dark with the bodies and the
+// difference measures two changes at once — which is how that second cut still
+// reported 300 pixels of "successor ink" with this function returning
+// immediately. One lever, one change: this one moves the draw and nothing else.
+let SUCCESSOR_DRAW = true;
+
+function drawSuccessorField() {
+  if (!SUCCESSOR_DRAW) return;
+  if (!window.DemoRender || !window.EncounterHost || !EncounterHost.installed()) return;
+  // save/restore, NOT a transform reset, and the difference was measured. That
+  // renderer leaves more than a matrix behind: `lineJoin` and `lineCap` are set
+  // to "round" for its own art, and `globalAlpha`, `fillStyle` and `strokeStyle`
+  // are whatever its last pass used. Restoring only the transform left 265
+  // canvas pixels different around the corner map's stroked frame — a
+  // MITRED corner drawn round — with nothing in the field itself moved. A
+  // renderer borrowed for one pass has to be given the surface back the way it
+  // found it.
+  ctx.save();
+  DemoRender.setHostedView({ transform: { a: scale, b: 0, c: 0, d: scale, e: ox, f: oy },
+                             extent: { w: FW, h: FH },
+                             background: false, players: false });
+  DemoRender.setCamOrigin(FRAME.cam.x, FRAME.cam.y);
+  DemoRender.render({ world: ctx, light: null }, 1);
+  ctx.restore();
+}
+
+// ---- THE POSE PUSH (PORT-S S3b lane 3, commit C) --------------------------
+// Every seat production owns, ascending — the pinned order every other per-seat
+// walk in this file keeps. The units are PRODUCTION's on this side of the seam
+// and js/encounter-host.js is the converter; nothing here divides or multiplies
+// anything, which is the point of having one converter.
+//
+// `seatHealth` is the read, and it is production's own published accessor
+// rather than a reach into E.seats: the hull, its ceiling, the i-frames, the
+// hit flash and the absence flag are exactly the five facts a mirror needs, and
+// they are already gathered in one place for the ship draw. It allocates one
+// small object per seat per tick, which is the same order as the pose itself.
+//
+// AND THE KERNEL NOW HOLDS EVERY SEAT THIS ROOM HAS (PORT-S S4, commit A).
+// The line that used to stand here said "resetRun builds ONE seat and the roster
+// count becomes the room's fact at S4, so today seat 0 poses and the rest are
+// not the kernel's to hold." S4 is here and the fact is settled: production's
+// `players.length` IS the room's seat count, and the kernel is sized to it once
+// per tick, immediately before the pose loop that fills those records.
+//
+// THE SIZE CALL LEADS THE LOOP, and the order is load-bearing rather than
+// tidy: `pushSeatPose` refuses a seat the kernel does not hold, so a pose
+// pushed before the roster grew would be dropped and the seat would fly a tick
+// behind. It also self-repairs every reset path — `resetRun` rebuilds the
+// roster back to one seat, and both `restart` and the wipe re-call THIS
+// function inside the same statement (see js/encounter.js FIX 10), so the
+// count is restored before the poses land.
+//
+// AT ONE SEAT IT IS A NO-OP, which is what keeps commit A byte-identical on
+// every shipped one-seat surface and on both bounded manifests.
+function poseKernelSeats() {
+  if (!window.EncounterHost || !EncounterHost.installed() || !window.Encounter) return;
+  EncounterHost.setSeatCount(players.length);
+  AURA_R.length = players.length;
+  for (let s = 0; s < players.length; s++) {
+    const P = players[s];
+    // THE AUTHORITATIVE RADIUS, WRITTEN HERE (PORT-S S5, commit C). This
+    // function is gated on the host being INSTALLED, which is exactly the
+    // condition under which a kernel collision exists — so the radius is
+    // derived precisely where there is something for it to have to agree with.
+    //
+    // THE POSE TAKES IT UNCONDITIONALLY; THE CACHE DOES NOT (S5 FIX ROUND,
+    // Codex CX-3). `AURA_F[s]` is written by `energyStep()` and by nothing
+    // else, so it is ABSENT until this seat's pool has been sampled by a local
+    // sim tick. The old line folded that absence to 0 and cached the result —
+    // and `Encounter.reset()` poses before any `energyStep`, so a `?mp` boot
+    // cached seat 0 at `auraRadiusOf(0)` = SHIP_R and left it there: a net
+    // client drew a 17.5 px halo for a seat the server was colliding at 67.5.
+    // A CACHE MAY HOLD ONLY A RADIUS THE LOCAL SIM ACTUALLY SAMPLED. Where the
+    // fraction is absent the entry is cleared, and `presentedAuraR` falls
+    // through to the presented-pool formula that every remote seat already
+    // uses. The POSE keeps the folded 0, because the kernel needs a number and
+    // an unsampled seat has not armed anything to collide with.
+    const aR = auraRadiusOf(AURA_F[s] || 0);
+    AURA_R[s] = Number.isFinite(AURA_F[s]) ? aR : undefined;
+    const h = Encounter.seatHealth(s);
+    // ---- PRESENCE, PUSHED FOR EVERY SEAT (PORT-S S4, commit D) -----------
+    // ABOVE the health guard, deliberately. D14's budget counts seats that are
+    // CLAIMED AND NOT PARKED, and `absent` is production's own word for the
+    // second half — `parkSeat` and `unseatSeat` both reach it through
+    // `vacateSeat`, `reseatSeat` clears it. A seat with no health record yet is
+    // reported PRESENT: the room holds it, the kernel holds it, and the only
+    // thing missing is a record `restart()` has not synced. Leaving it out of
+    // this push would let a seat's presence fall to whatever the last push
+    // said, which for a freshly grown index is nothing at all.
+    //
+    // A DEAD SEAT AND A SEAT WAITING ON ITS CLAIM CLICK ARE BOTH PRESENT.
+    // Somebody is there in both cases; only an EMPTY seat is not.
+    EncounterHost.setSeatPresent(s, h ? !h.absent : true);
+    if (!h) continue;
+    EncounterHost.pushSeatPose(s, {
+      x: P.ship.x, y: P.ship.y, vx: P.vel.x, vy: P.vel.y,
+      angle: P.heading,          // THE CONVERGED NOSE (D32), not aimAngle
+      alive: !h.absent && h.hull > 0,
+      hull: h.hull, hullMax: h.hullMax,
+      invuln: h.inv, flash: h.flash,
+      r: SHIP_R,                 // the hull the kernel's four seat-radius sites read
+      // ---- THE COMET PAIR (PORT-S S5, commit C) --------------------------
+      // The BURNING flag and the halo the pilot is looking at. The kernel's
+      // `auraRadius` accessor reads them and D26's aura pass walks nothing
+      // when the flag is down — so a room with no comet is byte-identical.
+      comet: !!P.comet,
+      auraR: aR });
+  }
+  // ---- D38's BUILD TOTAL, PUSHED ONCE PER TICK (S4 fix 10) ---------------
+  // *"If turned on it sums PRESENT seats' purchases."* One scalar, beside the
+  // presence flags and for the same reason: the shop is production's plane and
+  // the kernel reads no production surface, so the total crosses the seam here
+  // and `bossHull` reads it at the deal. AFTER the loop, deliberately — it is a
+  // fact about the ROOM and not about a seat, and the loop above is what has
+  // just told the kernel which seats are present.
+  //
+  // AT THE DEFAULT DIAL (BUILDSCALE 0) NOTHING DOWNSTREAM READS IT, so this
+  // line moves no fixture; it is here so the dial can be turned by the dev tune
+  // route without a second seam crossing being invented on the day.
+  EncounterHost.setBuildPurchases(Encounter.presentPurchases());
+  // ---- D26'S AURA DAMAGE, PUSHED ONCE PER TICK (PORT-S S5, commit D) -----
+  // The build total's twin, and for the same reason: `COMETAURA` is
+  // production's dial and the kernel reads no production surface. AFTER the
+  // seat loop, because it is a fact about the ROOM rather than about a seat.
+  EncounterHost.setAuraDamage(COMETAURA);
+}
+
 // the per-tick reset for the claim latch. Every seat, ascending, like every
 // other per-seat walk in this file; a press is worth exactly one tick, so an
 // unread one is dropped rather than carried into a tick its player never made.
@@ -3326,7 +4112,7 @@ function drawAim() {
   // keep converting through canonical `cam`, and the sim keeps fireDir().
   const vp = FRAME.ships[P.id] || P.ship;
   let d = null;
-  if (cursorAim() && aiming()) {
+  if (cursorAim()) {
     // the pointer's world point through the RENDER camera — locked mode's
     // drawn cursor is field space, mouse mode's native pointer converts
     // through pointerField; off-field means no marker, as before
@@ -3404,11 +4190,30 @@ function drawTracers(list) {
 // the tick, and a tick-drawn cursor would be a fresh coupling of the kind
 // this chain removed. lcur is view space, so the cursor holds its SCREEN
 // position and rides the camera between hand motions — the kept feel.
-// Hidden during right-hold flight, mirroring how mouse mode's hidden native
-// cursor holds still for the same stretch.
+// IT IS NEVER HIDDEN NOW — D30. The line below used to withhold it during
+// right-hold flight (`if (!aiming() && !frozen()) return;`), mirroring the
+// native cursor mouse mode hid for the same stretch. Neither stretch exists any
+// more, so both cursors stay on screen for the whole run. One of D30's four
+// shipped-default play changes.
+// THE FRAME, LEGIBLE IN FLIGHT — D12's own requirement ("the live mode must be
+// legible on screen"), and the lab's hint line is the precedent: it prints
+// "T thrust: SCREEN" on the play screen so the pilot can always see which map
+// his keys are on. A mode the pilot cannot see is a mode he will fight.
+//   It is drawn HERE rather than in the HUD because js/game.js owns THRUSTFRAME
+// and js/encounter.js has no bridge to this file's tunables — inventing one to
+// move two words across it would be the larger change. Render pass ONLY: it
+// reads a client preference and touches no hashed state.
+//   Bottom-left of the FIELD, clear of the encounter's own top-left readouts and
+// of the gutter panels on the right.
+function drawThrustHint() {
+  if (!G.running) return; // the paused screens carry the same fact in their copy
+  ctx.setTransform(scale, 0, 0, scale, ox, oy);
+  ctx.fillStyle = C.dim;
+  ctx.font = "400 9px " + FONT;
+  ctx.fillText("T thrust: " + (THRUSTFRAME === "ship" ? "SHIP" : "SCREEN"), 8, FH - 8);
+}
 function drawLockedCursor() {
   if (!lockedMode() || !G.running) return;
-  if (!aiming() && !(window.Encounter && Encounter.frozen())) return;
   ctx.strokeStyle = C.bright;
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -3418,12 +4223,52 @@ function drawLockedCursor() {
   ctx.fillRect(in0.lcur.x - 0.6, in0.lcur.y - 0.6, 1.2, 1.2);
 }
 
-// the world map in the corner: world-aspect (3072:3762 ≈ 76:93), a dot for
-// the ship, a bright rectangle for the slice of world the camera shows, and
-// contact dots for the live enemies, XP orbs and player shots
+// the world map in the corner: WORLD-ASPECT, a dot for the ship, a bright
+// rectangle for the slice of world the camera shows, and contact dots for the
+// live enemies, XP orbs and player shots
+//
+// ---- THE ASPECT IS DERIVED NOW (FIX ROUND, S3BR-05) ----------------------
+// `MM_W:MM_H` was the literal pair 76:93, and its own comment named the source:
+// the RETIRED world's 3072:3762. Commit C moved the world to 7680:7920 and left
+// the pair behind, so `ky/kx = (93/7920)/(76/7680) = 1.1866` — EVERY point,
+// circle and viewport rectangle on the corner map was stretched vertically by
+// 18.66 %. Equal world offsets did not render equally on the two axes, which
+// makes a tactical map lie about bearing and relative distance.
+//
+// THE WIDTH IS KEPT AND THE HEIGHT IS DERIVED, which is the whole fix: 76 is an
+// owner-sized HUD dial and the ASPECT is an invariant, so the invariant is the
+// one that gets computed. `MM_H` is 78.375 at the shipped world — and a future
+// world moves it without anyone remembering to.
+//
+// ---- THE FOOTPRINT IS A FEEL-GATE FLAG, NOT A DECISION -------------------
+// Whether the map should GROW — 76 px of width was chosen against a 512 px
+// field and the field is 1280 now — is a design question the owner owns, and
+// it is FLAGGED to the feel gate rather than answered here. Removing the
+// anisotropy is not a design question; it is arithmetic.
+// ---- THE EPSILON GATES, RESCALED (FIX ROUND, S3BR-11) --------------------
+// Four live gates carried UNITS and kept their pre-flip values. They are small
+// enough to look dimensionless and they are not:
+//   `REST_EPS` is PX PER TICK — below it a ship "is at rest" and all input
+//     builds speed instead of resolving into an along/across basis, and it is
+//     the same threshold `fireDir` and `seatFireDir` fall back to a heading at.
+//   `LEAD_EPS` is PX — a lead vector shorter than this is treated as
+//     near-zero by the dead-zone gate, so the gate tracks live instead of
+//     holding.
+// At the retired scale 0.05 px/tick was 2.5 % of `VMAX 2`; at `VMAX 5` it is
+// 1 %, so a residual velocity in that band now chooses a different thrust basis
+// or a different fire-heading fallback than it did before the flip. Stock
+// 16-count keyboard thrust rarely reaches these boundaries; raw and banked
+// inputs can.
+//   THEY JOIN THE GEOMETRY TABLE at the one named ratio, 2.5.
+//
+// NO BOUNDARY ORACLE IS BUILT, and that is a stated omission rather than an
+// oversight: NO epsilon in this tree has one, so building one here would be a
+// new class of instrument attached to the smallest of them. Carried as residue.
+const REST_EPS = 0.125;   // px/tick — "at rest". x2.5, WAS 0.05
+const LEAD_EPS = 2.5;     // px — a lead vector this short is near-zero. x2.5, WAS 1
 let MINIMAP = true;
 const MM_W = 76;
-const MM_H = 93;
+const MM_H = MM_W * WH / WW;
 const MM_M = 8; // margin from the viewport corner, px
 function drawMinimap() {
   const mx = FW - MM_W - MM_M;
@@ -3476,7 +4321,6 @@ function drawMinimap() {
 // enemies the viewport has lost. The geometry and the drawing live in
 // encounter.js beside the enemy list; this flag is the world-tab switch it
 // reads, declared here with the rest of the HUD toggles.
-let EDGEARROWS = true;
 
 // ---- the first-run controls card -------------------------------------------
 // One cached bitmap that teaches the shipped control contract — the visible
@@ -3560,7 +4404,7 @@ guideImg.src = GUIDE_SRC;
 // "and there is a bitmap to draw". Everything the card suppresses keys off
 // SHOWN, so an unloaded frame is the plain text screen, unchanged.
 function guideEligible() {
-  return !G.running && !G.started && !UI.dev && cursorAim() && INVERT;
+  return !G.running && !G.started && !UI.dev && cursorAim();
 }
 function guideShown() { return guideEligible() && guideReady; }
 
@@ -3793,40 +4637,35 @@ function drawImpacts() { // draw-only — reads burst state, never mutates it
 // defaults true), so the unlocked wordings are what a player normally sees;
 // the locked pair survives because keyThrustUnlocked() is still honest state
 // a future mode could lower — the wording just no longer points at a shop
-// row that no longer exists. The fourth line, "right held: mouse flies ·
-// keys aim", stays true either way.
+// row that no longer exists.
+//
+// EVERY LINE BELOW WAS REWRITTEN AT D30/D31/D12, because every one of them
+// described the ROLE SWAP: "hold right to swap", "right held: mouse flies · keys
+// aim", "release to aim again". None of that happens any more. The copy now says
+// the four things that are true — the cursor aims, WSAD thrusts (ship-relative
+// by default, T toggles), LMB fires, SHIFT is the reflex hold — and it says
+// nothing about the right button, because the right button does nothing. A page
+// that still taught the swap would be teaching a build nobody can run.
 function pauseLines() {
   if (guideEligible()) {
-    return ["cursor aims · left fires · wsad fly · qezc add diagonals",
-            "hold right for comet · uses energy · fast · invulnerable · ram"];
+    return ["cursor aims · left fires · wsad thrust · qezc add diagonals",
+            "hold shift for comet · uses energy · fast · rams · t flips thrust"];
   }
   const ring = keyThrustUnlocked();
   if (lockedMode()) {
     // the roles, in the same shape mouse mode states them. The lock is how the
-    // mode works, not how the game is played, so it is not in the copy. The
-    // full stock-key/comet onboarding belongs to the first-run branch above;
-    // this later-pause wording focuses on the cursor's swappable role.
-    return INVERT
-      ? ["use the cursor to aim · click or hold left to fire",
-         "right held: mouse flies · release to aim again · esc pauses"]
-      : ["mouse motion flies · hold right to aim with the cursor",
-         "right held: the cursor aims · left fires · esc pauses"];
+    // mode works, not how the game is played, so it is not in the copy.
+    return ["the drawn cursor aims · click or hold left to fire",
+            "shift holds the comet · t flips the thrust frame · esc pauses"];
   }
-  if (mouseMode()) {
-    return INVERT
-      ? [ring ? "the visible cursor aims · keys thrust · hold right to swap"
-              : "the visible cursor aims · hold right to swap",
-         "right held: mouse flies · keys aim · left fires · esc pauses"]
-      : ["mouse motion flies · keys aim · hold right to swap",
-         ring ? "right held: cursor aims · keys thrust · left fires · esc pauses"
-              : "right held: cursor aims · left fires · esc pauses"];
-  }
-  return INVERT
-    ? [ring ? "qweasdzxc keys fly the ship · the mouse aims · hold right to swap"
-            : "the mouse aims · hold right to fly the ship",
-       "left fires · esc releases"]
-    : ["mouse motion is thrust — a steady side push carves an arc",
-       "hold right to aim — qweasdzxc snaps it · left fires · esc releases"];
+  const mouseLines = [ring ? "the visible cursor aims · wsad thrust · shift holds the comet"
+                           : "the visible cursor aims · shift holds the comet",
+                      "left fires · t flips the thrust frame · esc pauses"];
+  // (the third arm — push mode's copy, "qweasdzxc keys fly the ship…" — is
+  // UNREACHABLE after D30 and is deleted with the mode. AIMMODE is "mouse" or
+  // "locked" and nothing else, so the two branches above are exhaustive; a
+  // fallthrough return would be dead code wearing the shape of a default.)
+  return mouseLines;
 }
 
 // ---- the drawn-pose probe --------------------------------------------------
@@ -3864,8 +4703,13 @@ function recordDrawnFrame() {
   // the designated enemy reads the FRAME view — the exact shadow objects the
   // draw call below (Encounter.draw) receives, so this IS the pose that
   // frame paints; the __test fallback covers a page without a built frame
-  const T = window.__test;
-  const foes = FRAME.enemies || (T && T.enc ? T.enc.E.enemies : null);
+  // ...and the fallback reaches the PLANE THAT HAS BODIES (S3b lane 3, D5).
+  // It read `__test.enc.E.enemies`, production's own list, which is deleted.
+  // `Encounter.mapState()` is the accessor that crosses to the successor
+  // plane and is already this file's own reader two screens up — one door, not
+  // a second reach into another module's state.
+  const foes = FRAME.enemies
+    || (window.Encounter && Encounter.mapState ? Encounter.mapState().enemies : null);
   const e = !foes || !foes.length ? null
     : PROBE_ENEMY < 0 ? foes[0]
       : foes.find((b) => b.id === PROBE_ENEMY) || null;
@@ -3901,9 +4745,16 @@ function recordDrawnFrame() {
 // apply() or any sim function; nothing here writes sim or presented state,
 // draws from the seeded stream, or reads a wall clock.
 const alerpR = (a, b, k) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * k; // game.js's own copy — a linear lerp of an angle pops at ±π
-const PRES_SNAP = 28; // px — the displacement guard: clear of a hard dash,
-                      // under any real teleport, so a respawn or restart
-                      // crosses in ONE presented frame (row 4's bar)
+const PRES_SNAP = 70; // x2.5, WAS 28 (PORT-S S3b lane 3's arena rescale — the
+                      // constant table's own ratio, applied here at commit D2
+                      // because commit C's table missed it and the fx suite's
+                      // ghost probe found it). px — the displacement guard:
+                      // clear of a hard dash, under any real teleport, so a
+                      // respawn or restart crosses in ONE presented frame
+                      // (row 4's bar). It is a LENGTH on the same field as
+                      // every other length: left at 28 it would cut the
+                      // presentation on an ordinary tick of travel, because a
+                      // ship at VMAX 5 now moves 5 px where it moved 2.
 // ---- the CUT verdict, forwarded to the light layer ------------------------
 // PRES_SNAP is the ONE displacement predicate on this screen now. It used to
 // have a rival: js/fx.js carried its own TELEPORT of 80 px, measured per
@@ -3926,13 +4777,62 @@ const presTakeCut = (seat) => {
   PRES_CUT[seat] = false;
   return c;
 };
+// ---- THE RESET DETECTOR IS PER FAMILY (PORT-S S3b lane 3, commit D) --------
+// THE ID-MONOTONICITY BILL, PAID, and the lane says WHICH of the two answers
+// js/encounter-host.js prescribed it took: A DELIBERATE REPLACEMENT OF THE
+// RESET DETECTOR, not a globally monotone id source across both producers.
+//
+// WHY NOT THE SHARED SOURCE. The two counters are `nextEntityId` in
+// js/encounter.js and `nextId` in js/demo-kernel.js. Handing the kernel a
+// different source would move every id it mints, and its ids are hashed state
+// in tests/fixtures/demo-bounded-reference — the bounded pair would re-key.
+// That is S3a's STOP class and this lane may not spend it.
+//
+// WHAT WENT WRONG WITH ONE GLOBAL MAX, exactly, because the shape is subtle
+// and the review that found it had to correct an earlier wrong diagnosis. It
+// was NOT a collision: the wire keeps four separate arrays and js/net.js builds
+// a separate Map per family, so an enemy 7 and a bullet 7 never meet. The
+// failure needs no collision at all. `PRES.maxId` was ONE number across four
+// caches, so once production had presented bullet id 100, a NEW enemy id 7
+// from a SECOND producer satisfied `7 <= 100 && !PRES.enemies.has(7)` — and
+// every presentation cache cleared for a body that had aliased nothing. After
+// the flip that is not an edge case: the two producers mint from 1
+// independently, so it fires constantly, and the whole field takes a cold
+// presentation cut on most ticks.
+//
+// THE REPLACEMENT IS ONE MAX PER FAMILY PER PRODUCER, and it is STRICTLY MORE
+// FAITHFUL to what the number always meant. "Ids are monotonic and never
+// reused" is a property of a PRODUCER, so the max has to be one too.
+//
+// AND THE FAMILY ALONE IS NOT ENOUGH, which the first cut of this block got
+// wrong. ORBS is a family with TWO producers in ONE array — production pays a
+// PvP death out in orbs and the successor plane drops the enemy plane's — and
+// server/sim-host.mjs partitions their WIRE ids so they cannot alias. That
+// closes the collision and leaves the ORDERING open: a production orb (a low
+// id) arriving after a successor orb (a high one) is still "an id at or below
+// the max this cache has seen", and the orb cache would take a cold cut every
+// time a pilot died.
+//
+// SO THE PRODUCER IS DERIVED FROM THE ID ITSELF, off the partition the wire
+// already draws: `Engine.WIRE_ID_BASE` is the one authority for where one
+// producer's range ends and the other's begins, and each family keeps a max on
+// each side of it. Two numbers per family, no list of producers to maintain,
+// and a third producer would need only a third range rather than a rewrite.
+const PRES_ID_BASE = () => (window.Engine && Engine.WIRE_ID_BASE) || Infinity;
 const PRES = {
   serial: 0,     // capture ticks — the seen-stamp the sweep prunes against
-  maxId: 0,      // highest entity id ever captured — ids are monotonic and
-                 // never reused, so a NEW body wearing an id at or below
-                 // this is an ID-SPACE RESET (restart set nextEntityId back
-                 // to 1) and every id-keyed cache clears rather than let the
-                 // next entity 1 inherit the dead one's pose
+  // highest id ever captured, PER FAMILY and PER RANGE — see the block above.
+  // `lo` is the producer minting below the wire's id base, `hi` the one above
+  // it. A NEW body wearing an id at or below its OWN slot's max is THAT
+  // producer resetting its id space, and only that family's cache clears.
+  max: { enemies: { lo: 0, hi: 0 }, missiles: { lo: 0, hi: 0 },
+         orbs: { lo: 0, hi: 0 }, bullets: { lo: 0, hi: 0 } },
+  // ...and HOW MANY TIMES each family has taken one. A cold presentation cut is
+  // invisible in every other reading — the cache clears, the same bodies roll
+  // straight back in, the sizes match and the maxes come back to where they
+  // were — so "did this family reset" is only answerable by counting. It is
+  // instrument bookkeeping: nothing hashed, nothing drawn, never reset.
+  cuts: { enemies: 0, missiles: 0, orbs: 0, bullets: 0 },
   camSeeded: false,
   cam: { px: 0, py: 0, cx: 0, cy: 0 },
   ships: new Map(),    // seat -> {px,py,cx,cy,seen}
@@ -3943,7 +4843,7 @@ const PRES = {
 };
 // roll one id-keyed record: new id → appear AT the current pose (never lerp
 // from zero); a displacement above the guard snaps prev to cur (hard cut)
-function presRoll(map, id, x, y) {
+function presRoll(map, id, x, y, fam) {
   let r = map.get(id);
   if (!r) { r = { px: x, py: y, cx: x, cy: y, snap: true, seen: 0 }; map.set(id, r); }
   else {
@@ -3953,14 +4853,27 @@ function presRoll(map, id, x, y) {
     if (r.snap) { r.px = x; r.py = y; }
   }
   r.seen = PRES.serial;
-  if (id > PRES.maxId) PRES.maxId = id;
+  if (fam) {
+    const slot = id >= PRES_ID_BASE() ? "hi" : "lo";
+    if (id > PRES.max[fam][slot]) PRES.max[fam][slot] = id;
+  }
   return r;
 }
 function presSweep(map) { // id missing from the current tick → gone at once: no one-frame corpse
   for (const [id, r] of map) if (r.seen !== PRES.serial) map.delete(id);
 }
-const presIdReset = (list, map) => {
-  for (const o of list) { const id = o.id | 0; if (id > 0 && id <= PRES.maxId && !map.has(id)) return true; }
+const presIdReset = (list, map, fam) => {
+  const base = PRES_ID_BASE();
+  const top = PRES.max[fam];
+  // `| 0` TRUNCATES TO 32 BITS and the partitioned ids are past that, so the
+  // id is read as a NUMBER here. It was `| 0` while every id fitted; a
+  // successor id of 1e9 + n does not, and folding it to a negative would put
+  // every one of them below every max at once.
+  for (const o of list) {
+    const id = o.id;
+    if (!Number.isFinite(id) || id <= 0) continue;
+    if (id <= top[id >= base ? "hi" : "lo"] && !map.has(id)) return true;
+  }
   return false;
 };
 function capturePresent() {
@@ -3980,11 +4893,17 @@ function capturePresent() {
     // the camera's OWN guard sits far above the body guard: a flip-mode room
     // slide legitimately moves ~50 px per tick and must stay smooth, while a
     // respawn recentre (world-scale) still hard-cuts
-    if (Math.abs(c.cx - c.px) > 200 || Math.abs(c.cy - c.py) > 200) { c.px = c.cx; c.py = c.cy; }
+    // 500, x2.5, WAS 200 — the same rescale as PRES_SNAP above and for the
+    // same reason: a flip-mode room slide is a room WIDER by the ratio, so the
+    // guard that must sit above it moves with the room.
+    if (Math.abs(c.cx - c.px) > 500 || Math.abs(c.cy - c.py) > 500) { c.px = c.cx; c.py = c.cy; }
   }
   // ships, keyed by seat — players[] mutates in place but the SEAT is the identity
   for (const P of players) {
     const had = PRES.ships.has(P.id);
+    // NO FAMILY, deliberately: this map is keyed by SEAT, and a seat index is
+    // an enumeration rather than a minted id. There is no producer here to
+    // reset, so there is nothing for a max to detect.
     const r = presRoll(PRES.ships, P.id, P.ship.x, P.ship.y);
     // a FIRST sighting is not a cut. presRoll marks a new record snap so it
     // appears AT its pose rather than lerping from zero, but there is no prior
@@ -3993,19 +4912,18 @@ function capturePresent() {
     if (had && r.snap) PRES_CUT[P.id] = true;
   }
   presSweep(PRES.ships);
-  // the encounter's bodies and the bullets share ONE id space — the reset
-  // check runs across all four lists before any of them rolls
+  // EACH FAMILY ANSWERS FOR ITS OWN PRODUCER — see the PRES block. The four
+  // checks are independent now and each one clears only what it detected.
   const m = window.Encounter && Encounter.mapState ? Encounter.mapState() : null;
   const foes = m ? m.enemies : null;
   const miss = m ? m.missiles : null;
   const orbs = m ? m.orbs : null;
-  if ((foes && presIdReset(foes, PRES.enemies)) || (miss && presIdReset(miss, PRES.missiles)) ||
-      (orbs && presIdReset(orbs, PRES.orbs)) || presIdReset(G.bullets, PRES.bullets)) {
-    PRES.enemies.clear(); PRES.missiles.clear(); PRES.orbs.clear(); PRES.bullets.clear();
-    PRES.maxId = 0;
-  }
+  if (foes && presIdReset(foes, PRES.enemies, "enemies")) { PRES.enemies.clear(); PRES.max.enemies = { lo: 0, hi: 0 }; PRES.cuts.enemies += 1; }
+  if (miss && presIdReset(miss, PRES.missiles, "missiles")) { PRES.missiles.clear(); PRES.max.missiles = { lo: 0, hi: 0 }; PRES.cuts.missiles += 1; }
+  if (orbs && presIdReset(orbs, PRES.orbs, "orbs")) { PRES.orbs.clear(); PRES.max.orbs = { lo: 0, hi: 0 }; PRES.cuts.orbs += 1; }
+  if (presIdReset(G.bullets, PRES.bullets, "bullets")) { PRES.bullets.clear(); PRES.max.bullets = { lo: 0, hi: 0 }; PRES.cuts.bullets += 1; }
   if (foes) for (const e of foes) {
-    const r = presRoll(PRES.enemies, e.id, e.x, e.y);
+    const r = presRoll(PRES.enemies, e.id, e.x, e.y, "enemies");
     // facing rolls with the pose; a guard snap or a MODE boundary hard-cuts
     // the angles too (bodyAngle switches source fields at the boundary — a
     // lerp across it would spin the hull through poses the sim never held)
@@ -4016,7 +4934,7 @@ function capturePresent() {
   if (foes) presSweep(PRES.enemies);
   if (miss) {
     for (const b of miss) {
-      const r = presRoll(PRES.missiles, b.id, b.x, b.y);
+      const r = presRoll(PRES.missiles, b.id, b.x, b.y, "missiles");
       // the heading rolls with the pose — a velocity heading steps once per
       // tick exactly like an enemy facing, so it gets the same pf/cf idiom
       // (alerpR at draw); a new id or a guard snap hard-cuts the angle too
@@ -4028,8 +4946,8 @@ function capturePresent() {
     }
     presSweep(PRES.missiles);
   }
-  if (orbs) { for (const o of orbs) presRoll(PRES.orbs, o.id, o.x, o.y); presSweep(PRES.orbs); }
-  for (const b of G.bullets) if ((b.id | 0) > 0) presRoll(PRES.bullets, b.id, b.x, b.y);
+  if (orbs) { for (const o of orbs) presRoll(PRES.orbs, o.id, o.x, o.y, "orbs"); presSweep(PRES.orbs); }
+  for (const b of G.bullets) if (Number.isFinite(b.id) && b.id > 0) presRoll(PRES.bullets, b.id, b.x, b.y, "bullets");
   presSweep(PRES.bullets);
 }
 // the frame VIEW the render pass reads at its choke points — one coherent
@@ -4175,6 +5093,8 @@ function render() {
   ctx.lineWidth = 1;
   ctx.strokeRect(0.5, 0.5, WW - 1, WH - 1); // the world border
   if (window.Encounter) Encounter.draw(ctx, FRAME); // enemies, orbs, telegraphs — under the camera, below the ship
+  drawSuccessorField(); // ...and the successor plane's, in the same slot — see below
+
   drawFlame();
   // ...and WHO LEADS, read ONCE for the whole frame rather than per seat: it
   // sorts the seat records, and asking it four times a frame would sort them
@@ -4206,6 +5126,14 @@ function render() {
     // predicted for the local net seat, so the halo sizes off the stick and
     // exists off the authority
     const cv = cometView(P.id, presentedPool(P.id));
+    // ...and the RADIUS comes from the authoritative cache where there is one
+    // (PORT-S S5, commit C). For a seat production simulates, that is the same
+    // number the pose handed the kernel to collide on; for a REMOTE seat there
+    // is no cache and this falls back to `cv.r` — the presented pool's own
+    // halo, which trails the authority by exactly one drain. v10 carries no
+    // radius field to close that gap; the exact `auraR` beside D39's kind and
+    // state is on the R7 wire bill.
+    cv.r = presentedAuraR(P.id);
     const vp = FRAME.ships[P.id] || P.ship; // the frame's pose for this seat
     if (cv.phase === CP_LIVE) drawCometGlow(P, cv, vp); // the glow rides the frame pose
                                             // too. CONFIRMED only: the windup and the
@@ -4366,6 +5294,7 @@ function render() {
   // vanish exactly where the shop needs it
   ctx.setTransform(scale, 0, 0, scale, ox, oy);
   drawLockedCursor();
+  drawThrustHint();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (window.Sfx) Sfx.frame(); // the draw path drives the engine hum, never step():
                                // five coalesced sim ticks cost one param write, and
@@ -4488,15 +5417,19 @@ function stopLoop() {
 // ---- input -----------------------------------------------------------------
 const locked = () => document.pointerLockElement === canvas;
 const lockSupported = typeof canvas.requestPointerLock === "function";
+// PUSH MODE RETIRES HERE — D30. Its only aim call was gated on the deleted
+// predicate, `cursorAim()` already excluded it, and index.html has offered two
+// options for a long time, so the mode was UI-unreachable before this commit and
+// is unreachable in code after it. Two modes remain and `cursorAim()` is now
+// always true, which is what kills the snapshotMouseAim edge this function used
+// to take: `wasMouseAim && (!cursorAim() || !aiming())` cannot hold when both
+// inner terms are constants.
 function setAimMode(m) {
-  const wasMouseAim = cursorAim() && aiming();
   const wasLocked = lockedMode();
-  AIMMODE = m === "push" ? "push" : m === "locked" ? "locked" : "mouse";
-  G.rightHeld = false;
+  AIMMODE = m === "locked" ? "locked" : "mouse";
   if (lockedMode() && !wasLocked) seedLockedCursor(); // enter at the aim the player left
   refreshPointerWorld(); // the aim source changed — re-store its world point
   syncCursor();
-  if (wasMouseAim && (!cursorAim() || !aiming())) snapshotMouseAim();
   // This is mainly selected while paused, but keep programmatic/live mode
   // changes safe too: mouse mode must immediately give the pointer back.
   // Locked mode keeps any lock it holds — one acquisition per session is
@@ -4514,7 +5447,11 @@ function pause() {
   // guard each of them would slam an open dev panel shut behind the user.
   UI.dev = false;
   G.leftHeld = false; // a mouseup can vanish in the lock transition — never resume with a stuck button
-  setRightHeld(false);
+  setCometWant(false); // ...and the comet WANT, which used to leave through the
+                       // right button's arm block. D30 unbound that button, so
+                       // the release is stated here directly — a want left
+                       // standing across a pause is a burn nobody asked for on
+                       // the first tick after the resume
   // locked mode releases its held lock here too — pause is real UI, and the
   // resume click is the one gesture that re-arms it (one banner per resume)
   if ((mouseMode() || lockedMode()) && locked() && typeof document.exitPointerLock === "function") document.exitPointerLock();
@@ -4573,40 +5510,60 @@ function requestLock(pauseOnFailure = true, preferRaw = true) {
   };
   attempt(preferRaw);
 }
-function setRightHeld(held) {
-  const wasMouseAim = cursorAim() && aiming();
-  G.rightHeld = held;
-  // seat 0's comet WANT, synced at the client boundary. In tick mode the very
-  // next drained frame re-states it from bit 1 of the banked `ah` mask; event
-  // mode has no ring, so this write IS its level. The sim itself still never
-  // reads G.rightHeld. It is the want and not the flag: the button asks,
-  // energySlice answers on the next tick, and a seat with an empty pool holds
-  // this down for nothing.
-  // physically seat 0: the DOM listener layer is a SEAT-0-ONLY producer (one
-  // document, one pointer lock — see in0). In net mode the banked frame goes
-  // upstream seat-agnostic and the SERVER binds it to this socket's seat, so
-  // this write is never the thing that decides whose comet turns on.
-  // THE PRESS EDGE, and it is one line now. In tick mode — solo and net alike —
-  // it ORs the comet's bit into the tick's press mask and the banked frame
-  // carries it; the sim's drain reads the bit rather than reconstructing a rise
-  // out of the held level, so the prevRh walk, its hardSnap re-seed and the
-  // solo-only DOM latch that used to paper over net mode are all deleted.
-  // Event mode banks nothing, which is why its latch survives: that IS its
-  // comet path, mirroring how event mode bypasses the ring everywhere.
+// THE COMET'S ARM BLOCK, and the only copy — a button asks for the comet by
+// calling this, and nothing else about that button travels with the ask. It
+// was setRightHeld's middle five lines until D31 gave the comet a SECOND
+// button; two buttons writing the same want by hand is two copies that can
+// disagree about the press edge, which is the one part of it that is not
+// idempotent.
+//
+// seat 0's comet WANT, synced at the client boundary. In tick mode the very
+// next drained frame re-states it from bit 1 of the banked `ah` mask; event
+// mode has no ring, so this write IS its level. It is the want and not the
+// flag: the button asks, energySlice answers on the next tick, and a seat with
+// an empty pool holds this down for nothing.
+// physically seat 0: the DOM listener layer is a SEAT-0-ONLY producer (one
+// document, one pointer lock — see in0). In net mode the banked frame goes
+// upstream seat-agnostic and the SERVER binds it to this socket's seat, so
+// this write is never the thing that decides whose comet turns on.
+// THE PRESS EDGE, and it is one line now. In tick mode — solo and net alike —
+// it ORs the comet's bit into the tick's press mask and the banked frame
+// carries it; the sim's drain reads the bit rather than reconstructing a rise
+// out of the held level, so the prevRh walk, its hardSnap re-seed and the
+// solo-only DOM latch that used to paper over net mode are all deleted.
+// Event mode banks nothing, which is why its latch survives: that IS its
+// comet path, mirroring how event mode bypasses the ring everywhere.
+function setCometWant(held) {
   if (held) {
     if (INPUTMODE === "tick") in0.acc.ap |= AB_COMET;
     else if (!players[0].input.cometWant) players[0].input.cometPress = 1;
   }
   players[0].input.cometWant = !!held;
-  syncCursor();
-  if (wasMouseAim && !aiming()) snapshotMouseAim();
 }
-function setInvert(v) {
-  const wasMouseAim = mouseMode() && aiming();
-  INVERT = v;
-  if (wasMouseAim && !aiming()) snapshotMouseAim();
-  syncAimUi();
-  render();
+// THE REFLEX HOLD (D31), as ONE function — the press and the release together,
+// because they are two halves of one rule and they were briefly two hand-written
+// copies. A hold is TWO writes and neither is optional: the WANT (the arm block
+// above, which carries the press EDGE) and the LEVEL (heldAbilityKeys, which is
+// what heldAbilityMask ORs into every banked frame and therefore what re-states
+// the want after each drain). Staging only the first arms the comet for exactly
+// one tick in tick mode and then loses it — which is the bug this function
+// exists to make unwriteable.
+//   The release asks the MASK rather than the code, because both Shifts are
+// bound and letting go of one while holding the other is not a release. In tick
+// mode dropping the key is already the whole release (the drain re-states the
+// want from `ah`); EVENT mode banks nothing, so the want write IS its level and
+// the explicit `false` is for that mode alone.
+const REFLEX_ABILITY = Abilities.ABILITY.COMET; // the binding table's occupant —
+                       // a later defensive ability takes the slot by editing
+                       // THIS line, which is the whole of D31's "not a taxonomy"
+function reflexHold(code, held) {
+  if (held) {
+    setCometWant(true);
+    heldAbilityKeys.set(code, REFLEX_ABILITY);
+    return;
+  }
+  heldAbilityKeys.delete(code);
+  if (!(heldAbilityMask() & AB_COMET)) setCometWant(false);
 }
 // arrows must not nudge sliders mid-flight — either paused screen can hold
 // the focus, and a clicked button keeps it until something takes it away
@@ -4645,9 +5602,17 @@ function resume() {
     // lands with working flight controls.
     G.running = true;
     syncCursor();
+    // LOCKED mode's session lock is untouched — it is this mode's only pause
+    // route and the source of the unbounded movementX/Y its drawn cursor rides.
+    // The two branches that followed are both gone: `!mouseMode()` was push's,
+    // and `!aiming()` was mouse mode's old right-flight lock. **MOUSE MODE NOW
+    // TAKES NO LOCK AT ALL, and that is the one boolean §2.12 says decides
+    // whether the mode stays playable** — the deleted predicate resolves TRUE,
+    // so this branch never fires. Resolved the other way, mouse mode would grab
+    // a lock at resume, `if (!locked()) trackMouse(e)` would stop running, and
+    // the aim would freeze at the last pre-lock position with the native cursor
+    // gone. It is not inferable from the diff, so it is written here.
     if (lockedMode()) requestLock(true, false); // the session's one (standard) lock
-    else if (!mouseMode()) requestLock();
-    else if (!aiming()) requestLock(false, false);
     blurPanels(); // the overlay keys live on document — nothing may be holding them
     syncTuner();
     startLoop();
@@ -4664,15 +5629,15 @@ function resume() {
                                      // field keeps
   }
   if (lockedMode()) requestLock(true, false); // the session's ONE acquisition — the
-                        // standard lock (OS acceleration intact), held until pause
-  else if (!mouseMode()) requestLock();
-  else if (!aiming()) requestLock(false, false); // inverted-off starts in mouse-flight
+                        // standard lock (OS acceleration intact), held until pause.
+                        // Mouse mode takes NO lock — see the frozen branch above
   G.running = true;
   syncCursor();
   blurPanels();
   syncTuner();
   startLoop();
-  if (!mouseMode() && aiming()) enterAim(); // inverted push mode opens at the existing fire direction
+  // (the trailing `if (!mouseMode() && aiming()) enterAim()` retired with push
+  // mode — it opened push's relative aim at the existing fire direction)
 }
 canvas.addEventListener("mousedown", (e) => {
   e.preventDefault();
@@ -4771,32 +5736,24 @@ canvas.addEventListener("mousedown", (e) => {
     if (e.button === 0) requestLock(true, !lockedMode());
     return;
   }
-  if (e.button === 2) {
-    const wasMouseFlight = mouseMode() && !aiming();
-    setRightHeld(true);
-    if (lockedMode()) {
-      // the lock never cycles on the buttons in this mode — held since resume
-    } else if (mouseMode()) {
-      if (!aiming()) requestLock(false, false); // old flight path: pointer-locked, unbounded deltas
-      else if (wasMouseFlight && locked() && typeof document.exitPointerLock === "function") document.exitPointerLock();
-    } else if (aiming()) enterAim();
-  } else if (e.button === 0) {
+  // **THE RIGHT BUTTON IS UNBOUND — D30, and unbound is the whole ruling.** It
+  // is not re-bound to something else here and it is not left doing a quieter
+  // version of what it did: it is a free weapon button, reserved for a later
+  // binding, and reserving it means this branch has nothing in it to keep. What
+  // went: the comet arm (setRightHeld's, and heldAbilityMask's hard-wired bit),
+  // the pointer-lock cycling that entered and left mouse-flight, and push mode's
+  // enterAim. Locked mode's branch was already empty — "the lock never cycles on
+  // the buttons in this mode" — so that mode loses nothing at all.
+  //   `canvas.contextmenu`'s preventDefault STAYS: an unbound button must still
+  // not raise the OS menu over a live field, which is a page concern and never
+  // was a binding.
+  if (e.button === 0) {
     G.leftHeld = true;
     inputFire();
   }
 });
 document.addEventListener("mouseup", (e) => {
   if (e.button === 0) G.leftHeld = false;
-  else if (e.button === 2) {
-    const leavingMouseFlight = mouseMode() && !aiming();
-    setRightHeld(false);
-    if (mouseMode()) { // locked mode skips this whole dance — its lock is held either way
-      if (leavingMouseFlight && locked() && typeof document.exitPointerLock === "function") document.exitPointerLock();
-      else if (!aiming()) requestLock(false, false); // inverted-off release returns to mouse-flight
-    }
-    if (G.running && !mouseMode() && !lockedMode() && aiming()) enterAim(); // inverted push mode
-                        // re-enters its relative aim; locked keeps the drawn cursor
-  }
 });
 // the 8-way ring — QWE/ADZXC around S, by e.code so any layout works; S
 // doubles as down, same as X. The keys snap the aim while the mouse
@@ -4863,6 +5820,48 @@ document.addEventListener("keydown", (e) => {
                        // record that arms on a hold reads the button honestly
     return;
   }
+  // THE REFLEX HOLD — D31. Shift holds whatever defensive ability the pilot
+  // owns, and the comet is today's occupant. TAKE THAT LITERALLY: this is a
+  // BINDING TABLE and not a taxonomy, so the ability is named here, in one
+  // place, and a later defensive ability takes the slot by editing this branch.
+  // There is no role field, no defensive-class enum and no second selector.
+  //
+  // It calls setCometWant rather than inputAbility, because inputAbility
+  // REFUSES the comet by design — `id < AB_FIRST` (:1851) — the comet's whole
+  // state is scalars (P.cool's sibling pool, P.comet) rather than a slot
+  // record, so it has no slot for the general path to arm.
+  //
+  // BOTH physical Shifts bind. A pilot's left hand is on WSAD, so the left
+  // Shift is the one under the little finger; the right one is bound too
+  // because a mirrored grip exists and an unbound key that LOOKS bound is the
+  // worse failure for a panic button.
+  if (e.code === "ShiftLeft" || e.code === "ShiftRight") {
+    if (e.repeat) return; // auto-repeat is not a press: the level below is
+                          // already set, and a second edge would re-latch the
+                          // press bit every ~30 ms of a held panic button
+    reflexHold(e.code, true); // the want AND the held level — see reflexHold
+    return;
+  }
+  // THE THRUST FRAME TOGGLE — D12, and `KeyT` is the owner's key ("It can be T,
+  // I don't care"). It sits with the other bench bindings, between the running
+  // gate and the aim ring, so it inherits the SAME four guards: the typing gate,
+  // Escape, the frozen overlay and the running test.
+  //   THE TYPING GATE IS D12'S OWN LAW, not a convenience — "a T typed into
+  // 'Trader' must not flip the pilot's thrust frame" — and the reason it is free
+  // here is exactly the reason the SHIFT branch's is: this handler opens with
+  // `if (typingName()) return;`. js/encounter.js's KeyR restart carries the same
+  // guard by hand and its comment records why the redundancy survives.
+  //   R WAS THE FIRST CHOICE AND WAS WITHDRAWN: KeyR is the death-screen RESTART
+  // (js/encounter.js, gated on E.state === "dead"), so sharing it would have
+  // bought a state gate at two call sites for a key the owner did not care
+  // about. `KeyT` collides with nothing — the complete bound set across js/,
+  // index.html and demo-play.html is KeyA/C/D/E/Q/R/S/W/X/Z plus Escape, Space,
+  // the Shifts and Digit0-9.
+  if (e.code === "KeyT") {
+    if (e.repeat) return; // a held T is one flip, not thirty a second
+    setThrustFrame(THRUSTFRAME === "ship" ? "screen" : "ship");
+    return;
+  }
   if (e.code.startsWith("Digit")) {
     const n = Number(e.code.slice(5));
     // 1 selects the first BENCH ability, so the two shipped ones keep their own
@@ -4874,16 +5873,22 @@ document.addEventListener("keydown", (e) => {
   const d = KEY_AIM[e.code];
   if (!d) return;
   G.keys.add(e.code);
-  if (aiming() || e.repeat) return; // thrust role — step() applies it while held
-  // Deliberately instant: key aim-snap is client-local here and a candidate for a later pass.
-  const P = localPlayer(); // the client's own aim state — see localSeat()
-  const m = Math.hypot(d[0], d[1]);
-  P.aimAngle = Math.atan2(d[1], d[0]);
-  P.aimOff.x = (d[0] / m) * AIM_R; // keep the push model in step
-  P.aimOff.y = (d[1] / m) * AIM_R;
-  P.aimed = true;
+  // **THE KEY AIM-SNAP IS GONE — D30, and it is a HASHED deletion, which is why
+  // it is spelled out.** The gate was `if (aiming() || e.repeat) return;` and
+  // the block below it wrote P.aimAngle, P.aimOff and P.aimed — all three
+  // hashed — whenever the ring held the AIM role instead of the thrust role.
+  // With the swap deleted the ring only ever thrusts, so the gate is always
+  // taken and the block was unreachable. Deleting it moves NO trace: for a
+  // shipped-default player the gate was already always taken (INVERT shipped
+  // true, so aiming() was true with the button released), and the four fixtures
+  // that used to stage `setInvert(false)` were re-authored onto the ring one
+  // commit ago precisely so this deletion would be provably neutral.
 });
-document.addEventListener("keyup", (e) => { G.keys.delete(e.code); heldAbilityKeys.delete(e.code); });
+document.addEventListener("keyup", (e) => {
+  G.keys.delete(e.code);
+  if (e.code === "ShiftLeft" || e.code === "ShiftRight") reflexHold(e.code, false);
+  else heldAbilityKeys.delete(e.code);
+});
 // ...and NOT guarded by typingName: a key released while the editor is open must
 // still leave G.keys, or a key held before the click stays held forever. The
 // keydown guard is what keeps anything from entering that set in the first
@@ -4907,22 +5912,28 @@ document.addEventListener("mousemove", (e) => {
     if (pp && pp.panel === "shop") Encounter.shopHover(pp.x, pp.y);
     else Encounter.shopHover(-1e9, -1e9); // off the panel — the same call clears it
   }
+  // **THE MOUSE NO LONGER THRUSTS, IN EITHER MODE — D30's first shipped-default
+  // play change.** Locked mode's deltas always move the drawn cursor; mouse
+  // mode's pointer always aims. The `else inputThrust(...)` arms that flew the
+  // ship are gone from both, and push mode's whole tail (`inputAim` / else
+  // `inputThrust`) retired with the mode.
+  //   THAT LEAVES `inputThrust` AND `inputAim` WITH NO CALLER ON THIS CLIENT,
+  // and they are deliberately KEPT. tx/ty/ax/ay are WIRE fields: the sim still
+  // drains them (`Flight.thrust(K, a.tx, a.ty)`, `Flight.aim(K, a.ax, a.ay)`)
+  // for any frame that carries them, and server/server.js's frameIsActive reads
+  // all four. Removing a wire field is R7's binary-wire work, not this unit's,
+  // so the plane stays alive on the wire and in the sim and dead on the DOM.
   if (lockedMode()) { // never trackMouse here — the frozen client coordinates would poison the mirror
     if (!locked() || !G.running) return;
-    if (aiming()) {
-      inputCursor(e.movementX, e.movementY); // deltas move the drawn cursor...
-      hoverFromLcur();                       // ...and the panel hover reads it
-    } else inputThrust(e.movementX, e.movementY); // the role swap flies the ship
+    inputCursor(e.movementX, e.movementY); // deltas move the drawn cursor...
+    hoverFromLcur();                       // ...and the panel hover reads it
     return;
   }
-  if (mouseMode()) {
-    if (!locked()) trackMouse(e); // locked deltas fly the ship; preserve the pre-lock cursor target for release
-    if (locked() && G.running && !aiming()) inputThrust(e.movementX, e.movementY);
-    return;
-  }
-  if (!locked() || !G.running) return;
-  if (aiming()) inputAim(e.movementX, e.movementY);
-  else inputThrust(e.movementX, e.movementY);
+  // mouse mode holds NO lock now (see resume), so the guard below is a constant
+  // — kept as written rather than dropped, because it is the honest statement of
+  // when a native-pointer read is valid, and a mode that acquired one later
+  // would need it back.
+  if (!locked()) trackMouse(e);
 });
 document.addEventListener("pointerlockchange", () => {
   if (!locked()) clearTickInput(); // the event stream just ended — nothing banked may land later
@@ -4933,20 +5944,19 @@ document.addEventListener("pointerlockchange", () => {
     if (!locked() && G.running) pause();
     return;
   }
-  if (!mouseMode()) {
-    if (!locked()) pause();
-    return;
-  }
-  if (locked() && aiming()) { // a delayed right-flight request resolved after the button was released
-    if (typeof document.exitPointerLock === "function") document.exitPointerLock();
-  } else if (!locked() && G.running && !aiming()) {
-    pause(); // Escape or unexpected lock loss ends right-flight cleanly
-  }
+  // push mode's branch (`if (!mouseMode()) { if (!locked()) pause(); }`) retired
+  // with the mode. What is left is MOUSE mode, which asks for no lock any more —
+  // so the only lock it can be holding is one a mode switch left behind, and the
+  // right answer is still to give it back rather than to pause. The old second
+  // arm — pause on a lost lock while flying with the mouse — went with the
+  // flight role that made a lost lock mean anything.
+  if (locked() && typeof document.exitPointerLock === "function") document.exitPointerLock();
 });
 document.addEventListener("pointerlockerror", () => {
-  if (lockedMode()) { pause(); return; } // no lock, no mode — land on the menu; never
-                                         // a retry loop against Chrome's re-lock cooldown
-  if (!mouseMode() || (G.running && !aiming())) pause();
+  if (lockedMode()) pause(); // no lock, no mode — land on the menu; never a retry
+                             // loop against Chrome's re-lock cooldown. Mouse mode
+                             // requests no lock, so it can raise no error; push
+                             // mode, which paused on one, is retired.
 });
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) pause();
@@ -4966,11 +5976,13 @@ document.addEventListener("visibilitychange", () => {
 // business (pointerlockchange above has it), and clearTickInput() stays OUT — the
 // accumulator holds real input the pilot made in the milliseconds before the
 // blur and the next tick is entitled to it, which is precisely what is NOT true
-// across a pause. The four writes are a COPY of pause()'s, in pause()'s order,
-// and the two sites are one list: a held level added to either belongs in both.
+// across a pause. The writes are a COPY of pause()'s, in pause()'s order, and
+// the two sites are one list: a held level added to either belongs in both.
 window.addEventListener("blur", () => {
   G.leftHeld = false;
-  setRightHeld(false);
+  setCometWant(false); // pause()'s line, in pause()'s order — the two sites are
+                       // ONE list, and D30 moved this release out of the right
+                       // button into both of them
   G.keys.clear();
   heldAbilityKeys.clear();
 });
@@ -5017,7 +6029,6 @@ function syncDevTabs() {
 function setDevTab(name) {
   if (!DEV_TABS.includes(name)) return; // __test can call this — an unknown name would hide every section
   UI.tab = name;
-  if (name === "enemies") buildEnemyTab(); // __test can land here without openDev() — same lazy gate
   syncDevTabs();
   placeDevPanel(); // tabs differ in height — the new one re-hangs the panel
   devbody.scrollTop = 0; // a tab opens at its own top, never at the last one's offset
@@ -5025,7 +6036,6 @@ function setDevTab(name) {
 }
 function openDev() {
   UI.dev = true;
-  buildEnemyTab(); // encounter.js loads after this file, so the tab can only exist by now
   syncTuner();
   render(); // the pause text goes away — the panel owns the screen now
 }
@@ -5036,12 +6046,8 @@ function closeDev() {
 }
 function syncAimUi() {
   canvas.setAttribute("aria-label", lockedMode()
-    ? "Ship playground — the cursor aims; W A S D flies and Q E Z C add diagonals; left fires and Space fires the rail shot, which costs energy and a cooldown; hold right for energy-powered comet mode: fast, invulnerable, and able to ram enemies; Escape pauses"
-    : mouseMode()
-    ? INVERT
-      ? "Ship playground — the visible pointer aims; W A S D flies and Q E Z C add diagonals; left fires and Space fires the rail shot, which costs energy and a cooldown; hold right for energy-powered comet mode: fast, invulnerable, and able to ram enemies; Escape pauses"
-      : "Ship playground — mouse motion flies and QWE/ASDZXC aims; left fires and Space fires the rail shot; hold right to aim with the visible pointer and engage energy-powered comet mode; Escape pauses"
-    : "Ship playground — relative push controls use pointer lock; QWE/ASDZXC flies while the mouse aims; left fires and Space fires the rail shot; hold right for energy-powered comet mode; Escape releases pointer lock");
+    ? "Ship playground — a drawn cursor aims; W A S D thrust and Q E Z C add diagonals, along the ship's nose by default with T to flip to screen-relative; left fires and Space fires the rail shot, which costs energy and a cooldown; hold Shift for energy-powered comet mode: fast, and able to ram enemies; Escape pauses"
+    : "Ship playground — the visible pointer aims; W A S D thrust and Q E Z C add diagonals, along the ship's nose by default with T to flip to screen-relative; left fires and Space fires the rail shot, which costs energy and a cooldown; hold Shift for energy-powered comet mode: fast, and able to ram enemies; Escape pauses");
 }
 // the audition readout's gain, guarded: Sfx.state() is js/audio.js's and this
 // file's caller may be skewed against it — a cached OLD audio.js beside this
@@ -5060,13 +6066,17 @@ function showTuner() {
   out("turn-out", TURN.toFixed(3));
   out("keythrust-out", KEYTHRUST.toFixed(1) + " counts/tick · " + (VMAX / (KEYTHRUST * ACCEL * (1 + KEYTHRUST * FLICK)) / 60).toFixed(1) + " s to top");
   out("wallloss-out", Math.round(WALLLOSS * 100) + "% speed lost per bounce");
+  out("damp-out", DAMP === 1 ? "1 — no friction: a ship coasts until a wall stops it"
+    : Math.round((1 - DAMP) * 1000) / 10 + "% of speed bled per tick");
   out("inputmode-out", INPUTDESC[INPUTMODE]);
   out("inputlag-out", INPUTMODE === "tick"
     ? (INPUTLAG === 0 ? "no delay" : INPUTLAG + " ms · " + Math.round(INPUTLAG / TICK) + " ticks late")
     : "per-tick input only — an OS event has no tick to be late against");
-  out("aimmode-out", AIMDESC[AIMMODE]); // push has no option, but a code-set mode still reads out
+  out("aimmode-out", AIMDESC[AIMMODE]); // both modes have an option now — push retired with D30
   out("aimdist-out", AIMDIST + " px to " + (cursorAim() ? "triangle" : "target")); // locked draws the triangle too — only push rings a target
-  out("invert-out", "on = mouse aims; hold right to fly");
+  out("thrustframe-out", THRUSTFRAME === "ship"
+    ? "W is FORWARD along the nose · T toggles"
+    : "W is UP on the screen · T toggles");
   out("cool-out", BCOOL + " ms · " + (1000 / BCOOL).toFixed(1) + " shots/s");
   out("bspeed-out", BSPEED.toFixed(1) + " px/tick · " + Math.round((1000 / TICK) * BSPEED) + " px/s");
   out("bfactor-out", BFACTOR.toFixed(2));
@@ -5079,10 +6089,11 @@ function showTuner() {
   out("cammode-out", CAMDESC[CAMMODE]);
   out("camease-out", CAMEASE.toFixed(2) + " of the gap per tick");
   out("cambox-out", Math.round(CAMBOX * 100) + "% of the view");
-  out("camlead-out", CAMLEAD + " ticks of lead");
-  out("leadsrc-out", LEADDESC[LEADSRC]);
-  out("aimlead-out", AIMLEAD + " px of aim lead");
-  out("leadblend-out", "vel " + Math.round((1 - LEADBLEND) * 100) + "% / aim " + Math.round(LEADBLEND * 100) + "%");
+  out("camlead-out", CAMLEAD + " ticks of lead · " + Math.round(CAMLEAD * VMAX) + " px at top speed");
+  // The reading the owner needs is what the number DOES, and the gain is not
+  // self-evident: CursorPull 1 is his own Blend 0.5, the plain midpoint.
+  out("cursorpull-out", CURSORPULL === 0 ? "0 — the cursor moves the camera not at all"
+    : CURSORPULL.toFixed(2) + "× toward the cursor · 1 = halfway to it");
   out("leaddz-out", LEADDZ + " ms to commit a reversal · 0 = off");
   out("edgemargin-out", EDGEMARGIN + " px the ship keeps from the view edge");
   out("shakeamp-out", SHAKEAMP === 0 ? "0 — screen shake off" : SHAKEAMP.toFixed(1) + "× shake amplitude");
@@ -5106,6 +6117,8 @@ function showTuner() {
   out("comet-aoe-out", COMETAOE + " px of halo at a full pool · drawn only");
   out("comet-aoedmg-out", COMETAOEDMG === 0 ? "0 — the comet stays a pure body ram"
     : "+" + COMETAOEDMG + " px of damage reach at a full pool");
+  out("comet-aura-out", COMETAURA === 0 ? "0 — the halo is drawn only, and eats nothing"
+    : COMETAURA.toFixed(1) + " damage a tick to every body and enemy round inside the halo");
   out("comet-fury-out", "+" + Math.round(COMETFURY * 100) + "% comet damage per OVERLOAD rank at an empty pool");
   out("comet-cd-out", COMETCD + " ticks · " + (COMETCD * TICK / 1000).toFixed(2) + " s between COMET touches on one body");
   out("pvp-orbs-out", PVPORBS === 0 ? "0 — a death pays no bounty" :
@@ -5134,76 +6147,31 @@ function showTuner() {
                              : "off · every repeat cue byte-identical");
   out("sfxpan-out", Math.round(SFXPAN * 100) + "% width · shots and foes pan, ui and the engine stay centred");
   out("sfxtest-out", window.Sfx ? Sfx.state().line : "no audio module — the page is silent");
-  showEnemyTuner(); // the generated tab rides every refresh path the authored readouts do
 }
-// The enemies tab is generated, not authored: encounter.js loads after this
-// file, so Encounter.tuning does not exist at parse time and the rows can only
-// be built on first open. The schema is consumed generically — no group or row
-// name is known here — and each input id is enemy-<row.id> by contract.
-const ENEMY_ROWS = []; // { row, out } pairs the builder fills; showEnemyTuner() rewrites them
-function buildEnemyTab() {
-  const body = document.getElementById("enemies-body");
-  if (!body || body.childElementCount || !window.Encounter || !Encounter.tuning) return;
-  for (const g of Encounter.tuning.groups) {
-    const col = document.createElement("div"); // same .col/.row markup as the authored tabs
-    col.className = "col";
-    const head = document.createElement("div");
-    head.className = "grouphead";
-    head.textContent = g.label;
-    col.appendChild(head);
-    for (const row of g.rows) {
-      const id = "enemy-" + row.id;
-      const rowEl = document.createElement("div");
-      rowEl.className = "row";
-      const label = document.createElement("label");
-      label.htmlFor = id;
-      label.textContent = row.label;
-      const input = document.createElement("input");
-      input.id = id;
-      input.type = "range";
-      input.min = String(row.min);
-      input.max = String(row.max);
-      input.step = String(row.step);
-      input.value = String(row.get());
-      const out = document.createElement("output");
-      out.id = id + "-out";
-      out.setAttribute("for", id);
-      // phase 12: EVERY enemy row is sim-affecting, and the net client's
-      // presentation now reads these constants too — statsFor() supplies the
-      // overshoot guard's per-class ceiling. A locally dragged maxSpeed would
-      // silently widen or throttle the guard against a server running the file
-      // defaults, so the whole generated tab joins NET_LOCKED_IDS. The tab is
-      // built rather than authored, so it registers its own ids and carries its
-      // own gate instead of going through bind().
-      NET_LOCKED_IDS.add(id);
-      input.addEventListener("input", () => {
-        if (NET_LOCKED_IDS.has(id) && window.Net && Net.active()) {
-          input.value = String(row.get()); // snap the thumb back to the truth
-          showEnemyTuner();
-          return;
-        }
-        row.set(Number(input.value));
-        Encounter.tuning.refresh(); // the live wave re-resolves in place
-        showEnemyTuner(); // stats interact — every readout rewrites, not just this row's
-      });
-      rowEl.append(label, input, out);
-      col.appendChild(rowEl);
-      ENEMY_ROWS.push({ row, out });
-    }
-    body.appendChild(col);
-  }
-  showEnemyTuner();
-}
-// no-op until the tab is built — ENEMY_ROWS stays empty and showTuner() calls
-// this on every refresh path, built or not
-function showEnemyTuner() {
-  for (const r of ENEMY_ROWS) r.out.textContent = r.row.fmt(r.row.get());
-}
+// ---- THE ENEMIES TAB IS RETIRED (PORT-S S3b lane 3, commit D4) ------------
+// `buildEnemyTab`, `ENEMY_ROWS` and `showEnemyTuner` generated the dev panel's
+// enemies tab from `Encounter.tuning`, which was 203 slider rows over the nine
+// ECFG archetype blocks D9 replaced. The surface went with the table it drove
+// and the generator goes with the surface — a builder that reads a schema
+// nobody publishes is a tab that opens empty and says nothing about why.
+//
+// THE TAB, ITS BUTTON AND ITS SECTION go too (index.html). Every one of those
+// rows was in NET_LOCKED_IDS, so nothing is left half-gated behind.
+//
+// The successor plane's own tuning is js/demo-kernel.js's STATS table; giving
+// it a live slider surface is not a transcription this lane can make.
+//
+// STILL OPEN AFTER PORT-S S4. That round added DIALS of its own — `ESCALATE`
+// (D16's per-cycle rise), `CLEAR_HOLD` / `ECFG.clearHold` (the break) and
+// `ECFG.stallTicks` (D21(a)'s surface) — and every one of them is a source
+// literal with a stated first-pass value, waiting on the feel gate. A slider
+// surface for the STATS table and for those three is the same question, and it
+// is still nobody's.
 const CAMDESC = { // one-line reminders beside the camera selector
   lock: "hard-centers the ship",
   smooth: "eases toward center",
   deadzone: "moves at the box edge",
-  lookahead: "leads by the lead source",
+  lookahead: "leads by velocity and cursor",
   flip: "slides room to room",
 };
 // push keeps its entry and its whole code path, but no menu option: locked
@@ -5212,20 +6180,20 @@ const CAMDESC = { // one-line reminders beside the camera selector
 // resolve against). setAimMode("push") still works — the check suites stage
 // through it, because its aim is pure state with no cursor or camera in it.
 const AIMDESC = {
-  mouse: "visible pointer aim · right swaps roles",
-  push: "legacy relative / pointer lock",
+  mouse: "the visible pointer aims — no lock is taken",
   locked: "one held lock · a drawn cursor aims",
 };
-const INPUTDESC = { // the A/B the human flies — see INPUTMODE
-  event: "apply each OS mouse report — the shipped feel",
-  tick: "sum reports, apply once per tick — rate-independent",
-};
-const LEADDESC = { // the same, for lookahead's lead source
-  vel: "ahead of the velocity",
-  aim: "ahead of the aim",
-  blend: "a weighted mix of both",
-  add: "both leads, summed",
-  swap: "aim while aiming, else vel",
+// The A/B the human flies — see INPUTMODE. THE OLD COPY DESCRIBED THE MOUSE
+// REPORT RATE ("apply each OS mouse report", "sum reports, apply once per
+// tick"), and D30 deleted every DOM caller of inputThrust and inputAim: the live
+// mousemove path tracks the native pointer or moves the drawn cursor and thrusts
+// nothing. The three report-rate legs in the golden suite retired for exactly
+// that reason, and this selector was left teaching the plane they retired with.
+// What the two modes really differ in now is WHEN a tick's input is assembled
+// and whether a delay can be applied to it.
+const INPUTDESC = {
+  event: "act at once — no banked frame, so the delay slider does nothing",
+  tick: "bank keys, cursor and masks once per tick — the delay applies here",
 };
 // one binder for every control: write the tunable, then refresh the readouts
 // The phase-11 tunables seam: in NET MODE the sim-affecting rows are LOCKED
@@ -5235,10 +6203,10 @@ const LEADDESC = { // the same, for lookahead's lead source
 // prediction from the server's sim. View, camera, fx and audio rows stay
 // live; the ONE gate sits here so no slider needs its own guard.
 const NET_LOCKED_IDS = new Set(["vmax", "accel", "turn", "keythrust",
-  "wallloss", "cool", "autofire", "bspeed", "bfactor", "bmax", "blife",
+  "wallloss", "damp", "cool", "autofire", "bspeed", "bfactor", "bmax", "blife",
   "bounce", "contactcd", "pvp-rewind",
   "comet-acc", "comet-turn", "comet-vmax", "comet-dmg", "comet-drain",
-  "comet-hit", "comet-thr", "comet-aoe", "comet-aoedmg", "comet-fury",
+  "comet-hit", "comet-thr", "comet-aoe", "comet-aoedmg", "comet-aura", "comet-fury",
   "comet-cd", "pvp-orbs",
   "energy-max", "energy-regen", "energy-delay", "energy-arm", "energy-orb",
   "energy-cell", "energy-rech"]);
@@ -5256,11 +6224,15 @@ bind("accel", (v) => { ACCEL = v; }).value = String(ACCEL);
 bind("turn", (v) => { TURN = v; }).value = String(TURN);
 bind("keythrust", (v) => { KEYTHRUST = v; }).value = String(KEYTHRUST);
 bind("wallloss", (v) => { WALLLOSS = v; }).value = String(WALLLOSS);
+bind("damp", (v) => { DAMP = v; }).value = String(DAMP);
 bind("inputmode", (v) => { setInputMode(v); }).value = INPUTMODE;
 bind("inputlag", (v) => { INPUTLAG = v; }).value = String(INPUTLAG);
 bind("aimmode", (v) => { setAimMode(v); }).value = AIMMODE; // two options — AIMSENS left with push's
 bind("aimdist", (v) => { AIMDIST = v; }).value = String(AIMDIST);
-bind("invert", (v) => { setInvert(v); }).checked = INVERT;
+bind("thrustframe", (v) => { setThrustFrame(v); }).value = THRUSTFRAME;
+// the `invert right` checkbox is GONE from index.html with D30 — there is no
+// role to invert. bind() would throw on the missing element, so the row's
+// binding goes with its markup.
 bind("cool", (v) => { BCOOL = v; }).value = String(BCOOL);
 bind("autofire", (v) => { AUTOFIRE = v; }).checked = AUTOFIRE;
 bind("bspeed", (v) => { BSPEED = v; }).value = String(BSPEED);
@@ -5276,9 +6248,9 @@ bind("cammode", (v) => { setCamMode(v); }).value = CAMMODE;
 bind("camease", (v) => { CAMEASE = v; }).value = String(CAMEASE);
 bind("cambox", (v) => { CAMBOX = v; }).value = String(CAMBOX);
 bind("camlead", (v) => { CAMLEAD = v; }).value = String(CAMLEAD);
-bind("leadsrc", (v) => { LEADSRC = v; }).value = LEADSRC;
-bind("aimlead", (v) => { AIMLEAD = v; }).value = String(AIMLEAD);
-bind("leadblend", (v) => { LEADBLEND = v; }).value = String(LEADBLEND);
+// D11's own row. The `lead source` selector, `aim lead` and `lead blend` left
+// index.html with the mechanism they steered — see leadVec().
+bind("cursorpull", (v) => { CURSORPULL = v; }).value = String(CURSORPULL);
 bind("leaddz", (v) => { LEADDZ = v; }).value = String(LEADDZ);
 bind("edgemargin", (v) => { EDGEMARGIN = v; }).value = String(EDGEMARGIN);
 // the shake rows stay LIVE in net mode like every camera row — render-only
@@ -5287,7 +6259,6 @@ bind("shakeamp", (v) => { SHAKEAMP = v; }).value = String(SHAKEAMP);
 bind("shakedecay", (v) => { SHAKEDECAY = v; }).value = String(SHAKEDECAY);
 bind("stardens", (v) => { STARDENS = v; render(); }).value = String(STARDENS); // the idle sky repaints live
 bind("minimap", (v) => { MINIMAP = v; render(); }).checked = MINIMAP;
-bind("edgearrows", (v) => { EDGEARROWS = v; render(); }).checked = EDGEARROWS;
 bind("contactcd", (v) => { CONTACTCD = v; }).value = String(CONTACTCD);
 bind("pvp-rewind", (v) => { PVPREWIND = v; }).value = String(PVPREWIND); // phase 15's
                        // player-target rewind cap, in ms; NET-LOCKED like every other
@@ -5304,6 +6275,7 @@ bind("comet-hit", (v) => { COMETHIT = v; }).value = String(COMETHIT);
 bind("comet-thr", (v) => { COMETTHR = v; }).value = String(COMETTHR);
 bind("comet-aoe", (v) => { COMETAOE = v; }).value = String(COMETAOE);
 bind("comet-aoedmg", (v) => { COMETAOEDMG = v; }).value = String(COMETAOEDMG);
+bind("comet-aura", (v) => { COMETAURA = v; }).value = String(COMETAURA);
 bind("comet-fury", (v) => { COMETFURY = v; }).value = String(COMETFURY);
 bind("pvp-orbs", (v) => { PVPORBS = v; }).value = String(PVPORBS); // the PvP bounty, on the
                        // comet tab beside the ram that most often collects it; NET-LOCKED like
@@ -5406,8 +6378,37 @@ syncDevTabs(); // the markup already ships the four inactive sections hidden —
 // step maps to clientStep: a suite drives the CLIENT tick (bank + sim), the
 // same entry the frame loop uses — the raw camera-free step() is what a
 // headless host imports, and it takes frames, not a local pointer.
-window.__test = { G, players, cam, step: clientStep, setCamMode, render, WW, WH, FW, FH,
-  updateCamera, leadVec, aiming, fireDir, mouseAimDir, markerDir, cursorHidden, gate, setAimMode, setRightHeld, setInvert,
+window.__test = { G, players, cam, step: clientStep, setCamMode, render, WW, WH, FW, FH, SHIP_R,
+  // the successor field's ISOLATING LEVER — see drawSuccessorField
+  setSuccessorDraw: (on) => { SUCCESSOR_DRAW = !!on; },
+  // ...and the LETTERBOX FIT the world pass draws under. Published so a canvas
+  // claim can convert a WORLD point to a CANVAS point instead of restating the
+  // fit — a second copy of this arithmetic is a second layout to keep in step,
+  // which is the reason `identityRects` and `panelSpec` are published too.
+  viewFit: () => ({ scale, ox, oy }),
+  // cursorHidden, aiming, setRightHeld and setInvert all left this list with the
+  // role swap. Each removal was checked the way the rule requires — an
+  // accessor's contract is with ALL its readers, so every reader was restaged in
+  // the commit that took the accessor, never left calling a shim.
+  updateCamera, leadVec, fireDir, mouseAimDir, markerDir, gate, setAimMode,
+  // the FRAME: a suite pins it exactly as it pins the aim mode and the input
+  // path, and for the same reason — a fixture that let the page default decide
+  // would silently re-frame every trace that holds a key the day the default
+  // moves. thrustFrameMode reads it back so a leg can restore what it found.
+  setThrustFrame, thrustFrameMode: () => THRUSTFRAME,
+  // THE REFLEX HOLD, exposed because D30 took the old staging away. Until this
+  // commit a suite armed the comet with setRightHeld(true) and the button's own
+  // arm block did the rest; the button is unbound now, so the seam points at
+  // reflexHold — THE FUNCTION THE SHIPPED KEYDOWN BRANCH CALLS, not a reduced
+  // copy of it. That distinction is the whole reason it is this function and not
+  // setCometWant: a seam onto the want alone stages HALF a hold, and half a hold
+  // arms the comet for one tick in tick mode and then loses it to the next
+  // drain. It is a door onto live production code, which is what separates it
+  // from the seams this unit REFUSED to add.
+  //   A leg that means to prove the BINDING rather than the hold dispatches the
+  // real ShiftLeft keydown instead — tests/pause-ui-checks.js section K does,
+  // and it is what would notice if the branch stopped calling this.
+  reflexHold,
   // the paused screens: the state, the transitions, and a visibility snapshot.
   // getComputedStyle, never offsetParent — both screens are position:fixed, so
   // offsetParent is null even when they are plainly on screen.
@@ -5426,11 +6427,22 @@ window.__test = { G, players, cam, step: clientStep, setCamMode, render, WW, WH,
       sections: [...devpanel.querySelectorAll(".tabsec")].map((s) => ({ tab: s.dataset.tab, shown: getComputedStyle(s).display !== "none" })),
     }) },
   setMouseClient: (x, y) => { G.mouse.x = x; G.mouse.y = y; G.mouse.seen = true; refreshPointerWorld(); },
-  setLeadSrc: (v) => { LEADSRC = v; },
+  // setLeadSrc and setAimLead left this list with LEADSRC, AIMLEAD and
+  // LEADBLEND — D11's rule replaced the selector rather than retuning it. Both
+  // were checked the way the rule requires: ZERO readers across tests/, test/
+  // and server/ before the removal, so no instrument was left calling a shim.
   setLeadDz: (v) => { LEADDZ = v; },
   setEdgeMargin: (v) => { EDGEMARGIN = v; },
   setCamLead: (v) => { CAMLEAD = v; },
-  setAimLead: (v) => { AIMLEAD = v; },
+  // D11's dial and the term it scales, published together because a gate that
+  // could set the gain but not read the offset would be asserting the rule
+  // against its own re-spelling of half of it. THE SEAM MOVED HERE from
+  // js/demo-render.js's own __test — PORT-S-DEBT.md demanded that PORT-S say in
+  // writing whether the seam moves or dies, and this is the moving half: the
+  // camera the owner's rule now lives in is THIS one, so the oracle points here.
+  // test/tools/demo-aimlead.mjs is the reader, through server/sim-host.mjs.
+  setCursorPull: (v) => { CURSORPULL = v; },
+  cursorOffset,
   setVmax: (v) => { VMAX = v; },
   setContactCd: (v) => { CONTACTCD = v; }, // the contact-cadence checks drive the slider's whole range, floor included
   // the impact-fx system: the live burst list, the two entry points the
@@ -5486,8 +6498,6 @@ window.__test = { G, players, cam, step: clientStep, setCamMode, render, WW, WH,
   fieldToCanvas: (fx, fy) => ({ x: ox + fx * scale, y: oy + fy * scale }),
   // the edge arrows: their toggle, so the determinism check can force the
   // draw branch on however a human left the checkbox
-  setEdgeArrows: (v) => { EDGEARROWS = !!v; },
-  edgeArrowsOn: () => EDGEARROWS,
   // the first-run card: the gate and the load flag as two separate answers —
   // a check can assert the eligibility rules on a page whose PNG is still in
   // flight — plus the rect the UI pass draws, so nothing has to hardcode it
@@ -5535,6 +6545,14 @@ window.__test = { G, players, cam, step: clientStep, setCamMode, render, WW, WH,
   // call this itself), and the page-side instrument beside it. The phase
   // constants ride along so a check names them instead of copying 0/1/2.
   cometPres, cometView, cometPresTick,
+  // ---- THE AURA RADIUS SEAM (PORT-S S5, commit C) ---------------------------
+  // `auraRadiusOf` is the ONE derivation and `presentedAuraR` is the ONE
+  // authoritative read. They are published together because the claim the
+  // suites make is that DRAW, LIGHT and the kernel's COLLISION all answer the
+  // same number on the same tick, and a leg that recomputed the formula beside
+  // them would be a fourth answer rather than a check on the other three.
+  auraRadiusOf, presentedAuraR, auraCache: (s) => AURA_R[s],
+  auraFrac: (s) => AURA_F[s],
   cometPhases: () => ({ off: CP_OFF, wind: CP_WIND, live: CP_LIVE,
     windTicks: COMET_WIND_TICKS, flashTicks: COMET_FLASH_TICKS, hold: COMET_WIND_HOLD }),
   cometLog: () => ({ ...COMET_LOG, ring: COMET_LOG.ring.map((e) => ({ ...e })) }),
@@ -5551,8 +6569,12 @@ window.__test = { G, players, cam, step: clientStep, setCamMode, render, WW, WH,
   pauseLines, // the copy the idle screen would print — the card's text stand-in included
   // locked+tick+lag intentionally mixes the immediate pointer mirror with the
   // delayed simulation direction; consumers must not assert they agree.
-  aimState: () => ({ AIMMODE, mouse: { ...G.mouse }, direction: fireDir(), aiming: aiming(), rightHeld: G.rightHeld, cursorHidden: cursorHidden(), locked: locked() }),
-  camState: () => ({ CAMMODE, CAMEASE, CAMBOX, CAMLEAD, LEADSRC, AIMLEAD, LEADBLEND, LEADDZ, EDGEMARGIN }),
+  // three keys left this record with the role swap — `aiming`, `rightHeld` and
+  // `cursorHidden` — and each one's readers were restaged in the commit that
+  // took it. What remains is what a caller can still act on: which mode owns the
+  // aim, where the pointer is, where the shots go, and whether a lock is held.
+  aimState: () => ({ AIMMODE, mouse: { ...G.mouse }, direction: fireDir(), locked: locked() }),
+  camState: () => ({ CAMMODE, CAMEASE, CAMBOX, CAMLEAD, CURSORPULL, LEADDZ, EDGEMARGIN }),
   // the screen-shake machine, read-only: the two sliders and the live episode
   // state, so a check can assert the offset against drawn.camR
   shakeState: () => ({ SHAKEAMP, SHAKEDECAY, amp: SHAKE.amp, peak: SHAKE.peak,
@@ -5652,6 +6674,13 @@ function hashShip() {
     h.num(P.vel.x); h.num(P.vel.y);
     h.num(P.aimOff.x); h.num(P.aimOff.y);
     h.num(P.aimAngle); h.u32(P.aimed ? 1 : 0);
+    h.num(P.heading); // THE CONVERGED NOSE (D32) — it decides what the next tick
+                      // does twice over: the ship-relative frame rotates the
+                      // seat's thrust by it, and D29's parry will face it. That
+                      // is the allow-list contract's own test, so it folds
+                      // UNCONDITIONALLY rather than behind a guard: unlike an
+                      // ability record, every seat carries a nose at every tick
+                      // and there is no all-zero case to spare the bytes for.
     h.num(P.cool);
     h.u32(P.comet ? 1 : 0); // comet decides the seat's gains, cap and combat —
                             // simulation state by the allow-list contract
@@ -5792,9 +6821,14 @@ Object.assign(window.__test, {
   // no camera. pushInputFrame is the REAL producer function, not a wrapper:
   // pushInputFrame(seat, frame) feeds seat s's ring one stored world-point
   // record, exactly the record bankTickInput banks and a wire would deliver.
-  // thrustImpulse is the event-mode impulse the mousemove listener applies —
-  // the Node golden replay injects the same impulses the browser's
-  // dispatched events did, through the same function.
+  // thrustImpulse is the event-mode impulse — and after D30 the MOUSEMOVE
+  // listener no longer applies it. Its live caller is step()'s key-thrust block,
+  // which runs every tick a ring key is held, and that is the path the
+  // re-authored flight traces take in both hosts. This EXPORT has no reader
+  // left: test/node-golden.mjs called it for the mouse-delta traces and stopped
+  // when those were re-authored. It is kept rather than deleted because
+  // tx/ty/ax/ay are still WIRE fields the sim drains and frameIsActive reads, so
+  // the injection point stays reachable until R7 decides that field set.
   stepSim: step,
   pushInputFrame,
   thrustImpulse,
@@ -5868,6 +6902,17 @@ Object.assign(window.__test, {
   // because the light layer's cut verdict is FORWARDED from here now and a
   // layer driven with no capture behind it would never see one.
   capturePresent,
+  // ...and the caches' OWN BOOKKEEPING, read-only: the per-family maxes and the
+  // per-family record counts. Published because the id-monotonicity bill's
+  // proving leg is a claim ABOUT this bookkeeping — "the caches do not globally
+  // reset" is not observable from any pose, and a leg that inferred it from a
+  // drawn frame would be measuring an interpolation instead of a decision.
+  presState: () => ({ max: { enemies: { ...PRES.max.enemies }, missiles: { ...PRES.max.missiles },
+                             orbs: { ...PRES.max.orbs }, bullets: { ...PRES.max.bullets } },
+                      cuts: { ...PRES.cuts },
+                      sizes: { enemies: PRES.enemies.size, missiles: PRES.missiles.size,
+                               orbs: PRES.orbs.size, bullets: PRES.bullets.size,
+                               ships: PRES.ships.size } }),
   presTakeCut,     // ...and the latch itself, so a check can name the verdict
   // the FLIGHT KERNEL itself — the pure per-seat slices, so a check (and
   // phase 11b's predictor) can run them against a DETACHED kernel state
@@ -5887,7 +6932,7 @@ Object.assign(window.__test, {
   // a future failure is diagnosable as "the constants moved" vs "the code moved"
   flightTunables: () => ({ VMAX, ACCEL, TURN, FLICK, DAMP, KEYTHRUST, WALLLOSS,
                            COMETACC, COMETTURN, COMETVMAX,
-                           COMETDRAIN, COMETHIT, COMETTHR, COMETAOE, COMETAOEDMG, COMETFURY,
+                           COMETDRAIN, COMETHIT, COMETTHR, COMETAOE, COMETAOEDMG, COMETAURA, COMETFURY,
                            ENMAX, ENREGEN, ENDELAY, ENARM, ENORB, ENCELL, ENRECH }),
   // the ENERGY pool's whole API, so a check drives production code and never
   // re-implements the arithmetic. Every constant behind it has a slider, so
@@ -5926,6 +6971,31 @@ Object.assign(window.__test, {
     // range the server tunable coerces to, so the seam and the wire route are
     // the same lever. 0 is the row-8 control's off switch.
     if (k === "PVPREWIND") { PVPREWIND = Math.max(0, Math.min(200, Math.round(+v))); return true; }
+    // ---- THE TWO S5 DIALS (S5 FIX ROUND, Codex CX-5) --------------------
+    // Both are NET-LOCKED sliders, so in a net session the server tunable is
+    // the only route to them and this seam is where it lands. Each is clamped
+    // to its OWN slider's range, exactly as the two above are — a seam that
+    // accepted values the panel refuses would not be the same lever.
+    //
+    // D26's AURA DAMAGE. It reaches the kernel by itself: `poseKernelSeats`
+    // re-pushes `COMETAURA` across the seam every tick, so writing the
+    // variable here is the whole of it. BUILDSCALE's host-setter shape does
+    // NOT transfer — a host-side write is clobbered on the next tick.
+    if (k === "COMETAURA") { COMETAURA = Math.max(0, Math.min(3, +v)); return true; }
+    // ...and the drift retune, ruling 9's dial at its own default of 1. The
+    // range is the flight tab's own 0.9..1: below 0.9 is not a feel question,
+    // it is a ship that stops dead.
+    if (k === "DAMP") { DAMP = Math.max(0.9, Math.min(1, +v)); return true; }
+    // ---- D37's ENCOUNTERS-PER-REWARD-WAVE DIAL (PORT-S S7) --------------
+    // The one dial in this list that lives in ANOTHER FILE: it is the
+    // encounter's, so this branch forwards rather than holding a second copy
+    // of the number. DAMP's route, not BUILDSCALE's — there is no kernel half
+    // for a host setter to write. Clamped to the same 1..8 integer range the
+    // server tunable coerces to, so the seam and the wire route are one lever.
+    if (k === "ENCPERREWARD") {
+      const n = Math.max(1, Math.min(8, Math.round(+v)));
+      return !!(window.Encounter && Encounter.setEncPerReward && Encounter.setEncPerReward(n));
+    }
     return false;
   },
   // the bare read the tune suite pins the consumer against — the same

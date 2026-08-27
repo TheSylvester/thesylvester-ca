@@ -124,6 +124,27 @@
 //
 // APPEND ONLY, like the ability ids: a value here is a bit position, so
 // inserting one renumbers every class above it.
+// ---- THE WIRE'S ID PARTITION (PORT-S S3b lane 3, commit D) ------------------
+// ONE NUMBER, ONE AUTHORITY, because it is read on both sides of the wire and a
+// second copy would be a second answer to "which producer minted this".
+//
+// After the flip two simulations mint entity ids independently, each from 1:
+// js/encounter.js's `nextEntityId` and js/demo-kernel.js's `nextId`. ORBS is
+// the one wire array BOTH still fill — production pays a PvP death out in orbs,
+// the successor plane drops the enemy plane's — so without a partition two orbs
+// wear id 7 and the client's per-family Map keeps one of them.
+//
+// server/sim-host.mjs ADDS this to every successor-plane id as it gathers, and
+// js/game.js's presentation caches READ it to tell the two producers apart. It
+// is deliberately NOT applied inside either simulation: the kernel's own ids
+// are hashed state in tests/fixtures/demo-bounded-reference, and moving them
+// would re-key that fixture for a wire-layer problem.
+//
+// A POWER OF TEN WELL ABOVE ANY REACHABLE COUNTER. Production's advances once
+// per body, round, orb and shard and is reset by every restart; a match minting
+// a billion ids at 60 Hz would have run for centuries.
+const WIRE_ID_BASE = 1e9;
+
 const CLASS = {
   SHIP: 1,       // a pilot's ship — a seat's hull
   BODY: 2,       // an enemy combatant
@@ -275,7 +296,39 @@ MATRIX.blast[CLASS.SHIP][CLASS.ORDNANCE] = 0; // OFF: covers enemy rounds AND th
                                               // swept ordnance out of the air
                                               // would delete the harrier threat.
 MATRIX.blast[CLASS.SHIP][CLASS.ORB] = 0;      // OFF: an orb is a pickup, not a body
-// blast -> CONSTRUCT is deliberately NOT declared. Production ships no placed
+// ---- THE KERNEL'S OWN TWO BLAST SOURCES (PORT-S S5, the FIX ROUND) --------
+// A CRASH, NOT A BALANCE QUESTION, and the seat ruled it as one. Until this
+// line `blast` declared a SHIP source and nothing else, while the demo kernel
+// deals two blasts from NON-SHIP sources to a pilot — the hammerhead's
+// detonation (js/demo-kernel.js:5206, `SRC_BLAST`, CLASS.BODY, every alive
+// seat inside 100 px) and the mine's (`:5227`, `SRC_MINE`, CLASS.CONSTRUCT,
+// inside 57 px). `mayHit` THROWS on an undeclared SOURCE row, so either
+// detonation near a live pilot took the tick down. It has been reachable since
+// the flip made the kernel production's enemy plane, and it is byte-identical
+// at the S4 freeze `f5f820f`, so it predates PORT-S S5.
+//
+// THE DEMO THE OWNER FLEW AND PASSED DEALS BOTH, which is what makes this a
+// declaration rather than a decision: the VALUES are the kernel's own authored
+// 8 and 14, and the seam scales them to 0.24 and 0.42 of a production hull.
+// PORT-S plays like the demo (D7). A BURNING pilot takes them too — D28
+// refuses body CONTACT and nothing else, and neither of these is contact.
+//
+// THE THROW WAS RIGHT AND STAYS RIGHT. R5's rule is that an undeclared source
+// row is a PROGRAMMING ERROR and must fail loud rather than fold to a silent
+// zero — a silent zero here would have been a pilot who quietly stopped taking
+// mine damage, which is worse than a crash and far harder to find. The fix is
+// to declare what the kernel already deals, not to soften the guard.
+//
+// ONLY THE CELLS THE KERNEL ACTUALLY REACHES. `SRC_BLAST` and `SRC_MINE`
+// appear at exactly two sites, both `damagePlayer`, both SHIP targets — the
+// hammerhead's chain to another BODY goes through the `chain` kind above, not
+// through `blast`. So SHIP is declared and every other target in these two
+// rows is left undeclared, which is OFF.
+MATRIX.blast[CLASS.BODY] = {};
+MATRIX.blast[CLASS.BODY][CLASS.SHIP] = 1;      // the hammerhead's detonation, 8
+MATRIX.blast[CLASS.CONSTRUCT] = {};
+MATRIX.blast[CLASS.CONSTRUCT][CLASS.SHIP] = 1; // the mine's detonation, 14
+// blast -> CONSTRUCT as a TARGET is deliberately NOT declared. Production ships no placed
 // object for a splash to reach, so there is no "today's truth" to record, and
 // inventing a factor here would be a balance decision wearing a completeness
 // argument. Undeclared is OFF, and the day a construct exists in the blast's
@@ -366,6 +419,51 @@ const SELF_SPLASH = false;
 // refusal stays AT THE SITE, as a grandfather must; only the CLASSIFICATION
 // lives here, where the rest of the plane's vocabulary is.
 const CONTACT_KINDS = ["ram"];
+
+// ---- D29'S PARRY SCOPE, DECLARED AHEAD OF ITS READER (PORT-S S5, commit H) --
+// `PARRYABLE_KINDS` is the list of damage kinds a frontal parry arc may refuse.
+// TWO, and the complement is the point: a COMET IS NOT PARRYABLE, and neither
+// is a body contact, a blast, a persistent area or the aura. "A comet beats a
+// shield, always" is the owner's sentence and this array is where it lives.
+//
+// THE READER IS SCHEDULED, NOT IMAGINARY, and that is the answer to R5's own
+// counter-argument against declaring a thing nothing consumes. D29's parry was
+// OWNER-RULED on 2026-08-26 and is R8a's unit; this file already carries its
+// prose at the CLASS block above. A declaration that arrives with its reader
+// arrives too late to be checked against the round that shaped it.
+//
+// ---- V5'S COMPLETE PARRY CONTRACT, RECORDED FOR R8a -----------------------
+// First-pass dials: 70 degrees of half-angle, 10 active ticks, 12 energy, 45
+// ticks of cooldown. Arm-to-ready is exactly 55 ticks and READY requires a
+// FRESH EDGE; release does not truncate the pulse.
+//
+// GEOMETRY faces the SETTLED SHIP HEADING — not the aim, not the velocity —
+// includes the 70-degree boundary with epsilon 1e-7, and uses the SWEPT ENTRY
+// POINT's bearing rather than the carrier's current position. The arm tick is
+// INCLUDED in the window.
+//
+// A BLOCK CONSUMES ITS CARRIER (or zeroes a carrier-less beam) and NOT the
+// remaining window. There is no reflection, no damage, no velocity, no impulse
+// and no global grace: a parry is a refusal and nothing else.
+//
+// REAR, EPSILON-OUTSIDE, PERSISTENT, BODY, BLAST and UNKNOWN kinds all land
+// normally. An UNKNOWN kind increments the undeclared-source counter and fails
+// verification; it never becomes harmless and it never becomes accidentally
+// parryable. That is what keeps this array a WHITELIST.
+//
+// SAME-TICK POOL ARBITRATION settles PARRY BEFORE COMET — including the
+// 60-energy case, where both cannot be paid — and API or input CALL ORDER never
+// selects the winner.
+//
+// AND THE ONE STRUCTURAL DEMAND ON R8a: today's `energyStep` is a single
+// pre-combat pass, and the parry needs it SPLIT. A PREFLIGHT settles
+// parry-before-comet arms and the active pose; a POSTCOMBAT advances the
+// ongoing drain, the recharge, the delay and the parry clocks exactly once. If
+// R8a cannot make that phase seam, it RETURNS FOR A SEAT RE-RULING rather than
+// choosing a call order. EDGE is the brief's starting lifecycle and not a
+// measured winner (owner question 11).
+const PARRYABLE_KINDS = ["shot", "beam"];
+const isParryable = (kind) => PARRYABLE_KINDS.indexOf(kind) >= 0;
 const isContact = (kind) => CONTACT_KINDS.indexOf(kind) >= 0;
 
 // The lookup. Returns the FACTOR, and the three outcomes above are its whole
@@ -443,6 +541,33 @@ const ACQUIRE = {
   POINT_DEFENCE: CLASS.ORDNANCE,
 };
 
+// ---- THE DISTANCE METRICS, DECLARED (PORT-S S3a) ---------------------------
+// A selector that decides "which one is nearest" has to know what NEAR MEANS,
+// and that is a fact about the caller's WORLD rather than about selection. The
+// bounded world's answer is the straight line; a TOROIDAL world's answer is the
+// shorter of the two ways round the seam, and the two disagree by up to half an
+// arena. So the metric is INJECTED and this object is the declaration list.
+//
+// THE HARD-CODED `Math.hypot` WAS A LATENT SECOND AUTHORITY, which is the whole
+// reason this exists. `acquire` shipped with Euclid built in while the demo
+// kernel's own `distSq` was wrap-aware, so routing a toroidal caller through
+// the shared selector would have quietly given it a DIFFERENT answer from the
+// one every other line in that file computes — the exact three-copy drift the
+// primitive was written to prevent, arriving through the primitive itself.
+//
+// EUCLIDEAN IS DECLARED HERE AND PASSED EXPLICITLY BY THE CALLERS THAT WANT IT.
+// It stays the default so no existing call breaks, but a caller that means it
+// says so, because "the bounded world's metric is the straight line" is a claim
+// about that world and belongs where the world is known.
+const METRIC = {
+  // the straight line. Correct in a world with walls, wrong in one with seams.
+  EUCLIDEAN: function (x, y, c) { return Math.hypot(c.x - x, c.y - y); },
+};
+
+// The no-policy case, hoisted above `acquire` so the common call allocates
+// nothing and so the constant is initialised before any call can reach it.
+const EMPTY_POLICY = {};
+
 // The selection itself: the NEAREST admissible living candidate to a point, or
 // null when there is none.
 //
@@ -459,15 +584,70 @@ const ACQUIRE = {
 // Ties resolve to the EARLIEST candidate, because the scan keeps a strict `<` —
 // so a caller that supplies its list in ascending id order gets the
 // deterministic tie-break it already had.
-function acquire(x, y, candidates, mask) {
-  const m = mask === undefined ? ACQUIRE.DEFAULT : mask; // read at CALL time, so
-                                                         // the mask stays data
+//
+// ---- THE POLICY RECORD (PORT-S S3a) ---------------------------------------
+// The fourth argument WAS a bare mask. It is now a record, for the reason the
+// payload of `applyEffect` is one: the authority has four declarations to take
+// and a run of four positional arguments cannot say which of them a caller
+// meant to leave alone. `{ mask: ACQUIRE.POINT_DEFENCE }` is still the one-line
+// data edit D25 costed itself on; no shipped caller ever passed the fourth
+// argument, so nothing had to be re-audited to make the move.
+//
+//   mask       the D25 class mask. Unchanged, still read at CALL time.
+//   metric     how far away a candidate IS — see METRIC above. The caller owns
+//              this because the caller owns its topology.
+//   priority   a term ADDED to the metric before the comparison, so a policy
+//              can want a heavy before a nearer piece of chaff.
+//   exclude    a predicate that REFUSES a candidate outright.
+//
+// WHY POLICY LIVES HERE AND NOT IN A SECOND SELECTOR — this commit's whole
+// point. Two functions already answered "who is my target" with different
+// arithmetic: this one with Euclid and no ranking, the demo kernel's
+// `nearestTarget` with a wrap-aware squared distance, a priority table and a
+// mine exclusion. They also broke ties differently. Leaving them apart while
+// PORT-S gave the kernel real seats is precisely the drift the doc block above
+// names — *"three consumers of 'who is my target' will drift exactly as three
+// consumers of 'may this seat arm' did"* — so the policies MOVE INTO the one
+// authority as DECLARATIONS instead of staying behind as a second computer.
+//
+// A RANKING AND AN EXCLUSION ARE DIFFERENT THINGS, and both are needed. A
+// priority can always be won BY DEFAULT: when the only live body is a mine,
+// nothing outscores it however large its term, and the driver acquires the mine
+// it was ranked never to want. `exclude` is what says never. (node-golden
+// stages exactly that case, because cross-vendor review found it.)
+//
+// AND `exclude` IS NOT THE MASK. The mask says what a WEAPON may take — D25,
+// a rule about weapons — while an exclusion says what THIS caller refuses.
+// Expressing the AUTO driver's distaste for mines by narrowing ACQUIRE.DEFAULT
+// would re-rule D25 by side effect, which is a thing node-golden asserts
+// against by name.
+//
+// THE METRIC AND THE PRIORITY MUST SHARE THEIR UNITS, and the authority cannot
+// check it: a squared distance added to a priority expressed in plain pixels is
+// a policy that means nothing, and all this code sees are two numbers. The
+// kernel's driver keeps its own convention — squared distance, squared-unit
+// priority terms — because that convention is what its tuned numbers were
+// chosen against. The score is NOT a distance afterwards, and nothing outside
+// this function is given it.
+//
+// THE ORDER OF TESTS is mask, live, exclusion, then arithmetic — three cheap
+// booleans before the one expensive term, and no side effects anywhere, so the
+// order is a cost decision and never a semantic one.
+function acquire(x, y, candidates, policy) {
+  const pol = policy === undefined ? EMPTY_POLICY : policy;
+  const m = pol.mask === undefined ? ACQUIRE.DEFAULT : pol.mask; // read at CALL
+                                                  // time, so the mask stays data
+  const metric = pol.metric === undefined ? METRIC.EUCLIDEAN : pol.metric;
+  const priority = pol.priority;
+  const exclude = pol.exclude;
   let best = null;
   let bd = Infinity;
   for (const c of candidates) {
     if (!(c.cls & m)) continue; // the class mask, before anything else is read
     if (!c.live) continue;
-    const d = Math.hypot(c.x - x, c.y - y);
+    if (exclude !== undefined && exclude(c)) continue;
+    let d = metric(x, y, c);
+    if (priority !== undefined) d += priority(c);
     if (d < bd) { bd = d; best = c; }
   }
   return best;
@@ -548,6 +728,19 @@ function acquire(x, y, candidates, mask) {
 // walk, so a stray key there would be unhashed state sitting on a hashed
 // record. The day a ship-class effect wants a credit, the answer belongs in a
 // declaration beside the matrix, not in a condition here.
+//
+// THE SAME QUESTION CAME UP FROM THE OTHER SIDE AT PORT-S S3a, and it was ruled
+// WITHOUT a door change, which is why this paragraph is unchanged below the
+// line. The demo kernel's BODIES have the problem SEAT_HASH gives ships: they
+// hash through no allow-list at all — demo-serial.js emits every own key — so a
+// `lastAtk` arriving on one is new hashed state and re-keys the run (measured:
+// the bounded AUTO manifest diverges at tick 132). The ruling was that the
+// crediting seat lands at S3b WITH the readers that consume it, rather than
+// early as a key nothing reads; the fallback, if that unit ever needs the
+// identity sooner, is an explicit `credit: -1` at the call site, which the
+// guard above declines. A DECLARATION HERE remains the right shape for a
+// PERMANENT split — some target classes take credit, some never do — and
+// nothing in that ruling asks for one yet.
 //
 // NO NEW VALIDATION. The door does not test the amount for finiteness and does
 // not throw on a strange one. Today `e.hp -= NaN` quietly makes hp NaN; a throw
@@ -680,7 +873,39 @@ const PURPOSE = {
   FX: "fx",             // EVERY presentation draw. The census is why this one
                         // exists: FX dominate the stream at run time, so an FX
                         // substream is what actually kills the coupling.
+  MARKET: "market",     // the per-seat shop hand, dealt at a reward wave's
+                        // CLEAR (D37, PORT-S S7). Seventh and last, appended so
+                        // the six above keep their codes: purposeCode folds the
+                        // STRING, so a new member re-keys nothing already
+                        // drawn.
 };
+
+// ---- D37's FOUR-PART MARKET KEY, MAPPED ONTO THE SIX-PART CONTRACT ---------
+// The POR states the market's key as `(seed, seat, wave, loop)`. This mixer
+// takes six parts. The mapping is written here, ONCE, so no caller has to
+// re-derive which of D37's four rides which slot — and so a reader of either
+// document can check the other against it:
+//
+//   runSeed        <- ECFG.seed          (js/encounter.js:53 — the ONE constant
+//                                         both planes reset from, restart() and
+//                                         the wipe alike)
+//   waveId         <- rewardWave         (E.wave / ENCPERREWARD — the reward-wave
+//                                         index, NOT the setpiece number, and at
+//                                         the default dial of 1 they are equal)
+//   spawnOrdinal   <- seat               (the seat id: this is what makes each
+//                                         pilot's hand PRIVATE and reproducible)
+//   entityId       <- loop               (E.loop — arc turns and wipes since
+//                                         restart(); hashed production state)
+//   attackSequence <- 0                  (a hand has no attack; the slot is
+//                                         spent, not repurposed — a second
+//                                         meaning in one slot is how two draws
+//                                         collide)
+//   purposeTag     <- PURPOSE.MARKET
+//
+// Each of D37's four parts sits in its OWN slot, so no two of them can trade
+// places and produce the same key. Production draws through Engine.substream
+// below — never through a private copy of mulberry32, and never through the
+// encounter's own global `rand`, which every FX draw shares.
 
 // ONLY INTEGER OPERATIONS, and that is a cross-runtime requirement rather than
 // a style. Math.imul, xor, shift and the unsigned coercion are exact in every
@@ -730,34 +955,50 @@ function substream(runSeed, waveId, spawnOrdinal, entityId, attackSequence, purp
 // ---- THE KIND REGISTRY (P2 `unit-list`, P9 `present-class`) ----------------
 // The declaration plane for every entity the two simulations field. One row per
 // KIND, seven obligations per row, and the row is the place a later round reads
-// instead of re-deriving. R7 compiles its codec from here; PORT-S compiles the
-// merged list from here.
+// instead of re-deriving. R7 compiles its codec from here. PORT-S was to
+// compile the merged list from here and instead DELETED three of the four
+// arrays — see the block below.
 //
-// ---- WHAT THIS IS NOT, AND THE DEBT THAT BUYS IT --------------------------
+// ---- WHAT THIS WAS NOT, AND THE DEBT THAT IS NOW DISCHARGED ---------------
 // The plan's sentence is *"the four arrays (bullets, enemies, missiles, orbs)
-// become one registry-driven list"*. THE PHYSICAL MERGE IS NOT IN THIS ROUND,
-// and that is a seat ruling with a stated price rather than a corner cut. The
-// production reconnaissance found ten hazards under byte-identity and three of
-// them are structural:
+// become one registry-driven list"*. R6 built the DECLARATION plane over the
+// existing per-class storage and assigned the PHYSICAL merge to PORT-S as
+// NAMED DEBT, because production's reconnaissance found ten hazards under
+// byte-identity and three of them were structural. PORT-S S3b lane 3 paid it,
+// and the payment is recorded here rather than left for a reader to reconstruct
+// from four commit messages.
 //
-//   1. `hashEncounter`'s enemy walk folds `h.u32(i)` — the ENEMIES-ONLY ARRAY
-//      INDEX (js/encounter.js). Nothing else in the codebase folds a container
-//      index. A merged list must still answer "what is this body's dense index
-//      among enemies only, in enemies-only insertion order", and deriving it
-//      from a merged position is simply wrong.
-//   2. ENEMIES ARE NOT LENGTH-PREFIXED while missiles and orbs are, and the
-//      asymmetry is load-bearing: a type with zero live members folds NOTHING,
-//      which is what lets ROSTER grow without moving a committed hash. A
-//      uniform registry walk that added a per-KIND header re-keys every trace.
-//   3. FORTY-FIVE synthetic bullet pushes across tests/ and test/ carry no `id`
-//      at all. A registry keyed by id, or one assuming a fixed record shape,
-//      invalidates the very fixtures that prove byte-identity.
+//   HAZARD 1 — `hashEncounter`'s enemy walk folded `h.u32(i)`, THE ENEMIES-ONLY
+//     ARRAY INDEX. *"A merged list must still answer 'what is this body's dense
+//     index among enemies only, in enemies-only insertion order', and deriving
+//     it from a merged position is simply wrong."* ANSWERED AT COMMIT D4: the
+//     fold that asked the question is deleted. Nothing in this codebase folds a
+//     container index now.
+//   HAZARD 2 — ENEMIES WERE NOT LENGTH-PREFIXED while missiles and orbs were,
+//     and the asymmetry was load-bearing. ANSWERED AT COMMIT D4: gone with the
+//     asymmetric party. ORBS is what is left, length-prefixed, which is the
+//     shape the other two already had.
+//   HAZARD 3 — FORTY-FIVE synthetic bullet pushes across tests/ and test/ carry
+//     no `id` at all, so *"a registry keyed by id, or one assuming a fixed
+//     record shape, invalidates the very fixtures that prove byte-identity"*.
+//     ANSWERED AT COMMIT D5, and the answer is that it never has to be paid.
+//     The three arrays are DELETED; the two survivors keep the storage, the
+//     fold and the record shape they already had. Every one of those 45 pushes
+//     still constructs exactly what its fixture expects.
 //
-// So a physical merge re-keys every trace — which is exactly the cost D21's own
-// logic routes to PORT-S, where the 25-fixture bill and the ~700-check rewrite
-// are already priced. R6 builds the DECLARATION plane over the existing
-// per-class storage. **THE MERGE IS NAMED DEBT, ASSIGNED TO PORT-S**, and this
-// paragraph is the record of it.
+// SO THE MERGE IS THREE DELETIONS AND NOT A UNIFICATION, and the reason is that
+// the cost R6 priced was the ROSTER'S. Production fields TWO entity kinds now —
+// `bolt` and `orb` — and the sixteen body rows and the seeker's row are retired
+// from `KINDS.production` below. `G.bullets` and `E.orbs` are deliberately NOT
+// merged into one physical list: they live in two files, cross two wire rows,
+// two PRES rings and two hash folds, share no consumer, and R7 owns the codec
+// that would give a merged row its encoding.
+//
+// THE TWO SURFACES STILL STAND. `production` and `kernel` remain separate maps
+// with colliding `orb` names, because BOTH PLANES REALLY DO FIELD AN ORB —
+// production pays a PvP death out in them and the kernel drops the enemy
+// plane's — and R7 is the round whose codec decides whether one wire row can
+// carry both.
 //
 // ---- THE SEVEN OBLIGATIONS ------------------------------------------------
 // Every kind declares all seven. A kind missing one is RED (the completeness
@@ -811,17 +1052,26 @@ function substream(runSeed, waveId, spawnOrdinal, entityId, attackSequence, purp
 //   DESCRIPTIVE — recorded truth with no consumer in the tree yet
 //     hash      — a leg checks the NAMED list exists where the row says it
 //                 does, which is a spelling gate and not a contents gate. The
-//                 contents consumer is PORT-S's merged fold.
+//                 contents consumer was to be PORT-S's merged fold; there is
+//                 no merged fold, so this column STAYS DESCRIPTIVE and R7's
+//                 codec is the next round that could read it.
 //     wire      — R7 compiles the codec from this column. Nothing reads it now.
-//     present   — PORT-S's presentation plane reads it. Nothing reads it now.
-//     ownerDeath— PORT-S. Nothing reads it now, and the two divergences it
-//                 already records (see the kernel bullet row) are its first
-//                 pieces of work.
+//     present   — the retirement's own readers cross at `Encounter.mapState()`
+//                 rather than at this column, so it is still descriptive. R7.
+//     ownerDeath— still nothing reads it, and the two divergences it already
+//                 records (see the kernel bullet row) are still unpaid. It was
+//                 assigned to PORT-S; PORT-S deleted the plane whose bodies
+//                 would have exercised it, so the work moves to R7 with the
+//                 codec that gives those bodies rows.
 //
 // ---- TWO SURFACES, ON PURPOSE ---------------------------------------------
 // `production` and `kernel` are separate maps because they are separate entity
-// planes today with colliding names (both field an "orb"), and PORT-S is the
-// round that merges the two. A single flat map would have to invent a
+// planes with colliding names (BOTH REALLY DO FIELD AN "orb" — production pays
+// a PvP death out in them and the kernel drops the enemy plane's), and R7 is
+// the round whose codec decides whether one wire row can carry both. PORT-S was
+// named here and did not merge them: it deleted production's three OTHER
+// families instead, which left two kinds on this side and no collision to
+// resolve beyond the orb. A single flat map would have to invent a
 // namespacing convention this round cannot yet retire.
 const OBLIGATIONS = ["hash", "wire", "present", "clear", "cap", "ownerDeath", "hp"];
 
@@ -903,25 +1153,34 @@ function capAdmit(row, live) {
   return { admit: false, cue: "capDenied" };
 }
 
-// The registry. Rows are grouped by family, and a family whose seven answers are
-// identical is built by a named helper — so the ONE row that differs is visible
-// rather than buried in sixteen copies of the same literal. The helper spells
-// all seven itself, so a helper that dropped one reds the completeness leg for
-// every row it built at once.
-function prodBody(hp) {
-  return {
-    hash: { where: "js/encounter.js", fields: "ENEMY_HASH", guarded: [] },
-    wire: "server/snapshot.mjs encodeEnemy",
-    present: "PRES.enemies",
-    clear: { store: "E.enemies", onRestart: "cleared" },
-    cap: UNCAPPED,
-    ownerDeath: OWNER_DEATH.PERSIST,
-    hp: hp,
-  };
-}
+// (`prodBody` RETIRED at commit D4 — it built the sixteen ROSTER body rows.)
 // A kernel body. `hp` comes from the kernel's own STATS row, so the column names
 // that authority rather than copying the number out of it.
-function kernelBody(present) {
+// ---- D39: WHAT BLOCKS THE CLEAR GATE (the SEVENTH AMENDMENT, S4 fix 9) -----
+// *"Hostile BODIES block; ordnance, hazards, fields, cues and non-hostile
+// transit never block."* Owner-ruled 2026-08-26, option A — the enemy spec's
+// §5 rule (`.ai-reference/enemy-system-implementation-spec.md:189-192`),
+// promoted to the FIFTH harvested contract. Time-bounding a non-source blocker
+// was offered and DECLINED: a clock by the back door is what D21 forbids.
+//
+// THE ROLE IS A REGISTRY COLUMN, which is the spec's own shape and R6's:
+//   `blocker`      the default for every hostile body — it holds the room until
+//                  it dies. Hive drones and constructor turrets are hostile
+//                  CHILD bodies and block; so do the hive and the constructor.
+//   `never`        a HAZARD, field, cue or debris kind. A placed mine expires on
+//                  its own life and a room may clear around it. It is still a
+//                  body, still shootable, still deadly — it simply is not a
+//                  thing the room is waiting for.
+//   `untilAttack`  a FLY-BY: it blocks until it has COMMITTED its attack, and
+//                  is transit afterwards. The spent state is NAMED in the row
+//                  (`spentState`) and is read off the body's own hashed `state`
+//                  field, so no record grows a key and no fixture re-keys.
+//
+// A BODY KIND WITH NO ROLE THROWS AT LOAD — see the census under KINDS. There
+// is no silent default: "we decided this one never blocks" and "we forgot this
+// one" must not look alike in a table the clear gate reads.
+const CLEAR_ROLE = { BLOCKER: "blocker", NEVER: "never", UNTIL_ATTACK: "untilAttack" };
+function kernelBody(present, clearRole, spentState) {
   return {
     hash: { where: "test/tools/demo-serial.js", fields: "INCLUDED S.enemies (whole record, keys sorted)", guarded: [] },
     wire: null,
@@ -930,6 +1189,8 @@ function kernelBody(present) {
     cap: UNCAPPED,
     ownerDeath: OWNER_DEATH.PERSIST,
     hp: "js/demo-kernel.js STATS",
+    clearRole: clearRole,
+    ...(spentState !== undefined ? { spentState: spentState } : {}),
   };
 }
 // A kernel enemy ROUND. Every one of the 21 shares six answers; only `hp`
@@ -990,26 +1251,7 @@ const KINDS = {
       ownerDeath: OWNER_DEATH.PERSIST, // a dead seat's rounds fly on
       hp: 0, // production fields no destructible ordnance; nothing shoots a bolt
     },
-    // The harrier's seeker. Its own array, its own hash block, its own encoder.
-    missile: {
-      hash: { where: "js/encounter.js", fields: "MISSILE_HASH", guarded: [] },
-      wire: "server/snapshot.mjs encodeMissile",
-      present: "PRES.missiles",
-      clear: { store: "E.missiles", onRestart: "cleared" },
-      cap: capped(CAP.SHARED, 6, "js/encounter.js ECFG.missile.max / spawnMissile",
-        "rejectNewest: conforms, and the BILLING clause conforms too — the " +
-        "lockon branch sets e.cd = P.cooldown outside the launch, with the " +
-        "reason written beside it (\"a capped harrier cannot spin the lock over " +
-        "and over\"). DEBT: no capDenied cue."),
-      ownerDeath: OWNER_DEATH.PERSIST, // it ends on a hit, a wall or its fuse —
-                                       // never on the body that launched it
-      // A seeker IS shot down today, and it is the precedent D25 records: a
-      // player round that kills one pays "no orb, no XP, no entry in E.kills".
-      // Its hull is ECFG.missile.hp, so the column names that authority.
-      hp: "js/encounter.js ECFG.missile.hp",
-    },
-    // The XP pickup. It declares no damage pool at all (see POOL), so its `hp`
-    // is 0 in the strongest sense the column has: nothing in the game reduces it.
+    // (the harrier's seeker RETIRED at commit D4 with the plane that fired it)
     orb: {
       hash: { where: "js/encounter.js", fields: "ORB_HASH", guarded: [] },
       wire: "server/snapshot.mjs encodeOrb",
@@ -1019,27 +1261,21 @@ const KINDS = {
       ownerDeath: OWNER_DEATH.PERSIST,
       hp: 0,
     },
-    // THE ROSTER, in ROSTER order (js/encounter.js). ORDER IS A WIRE CONTRACT
-    // against server/snapshot.mjs's ENEMY_TYPES and server/snapshot.test.mjs
-    // pins the equality by reading the source, so this list is APPEND ONLY and
-    // R6 must not reorder it. Every hull is table-driven from statsFor(), which
-    // is why the column names the function instead of copying sixteen numbers.
-    dart: prodBody("js/encounter.js statsFor().hull"),
-    harrier: prodBody("js/encounter.js statsFor().hull"),
-    radarHarrier: prodBody("js/encounter.js statsFor().hull"),
-    charger: prodBody("js/encounter.js statsFor().hull"),
-    radarCharger: prodBody("js/encounter.js statsFor().hull"),
-    husk: prodBody("js/encounter.js statsFor().hull"),
-    anvil: prodBody("js/encounter.js statsFor().hull"),
-    shard: prodBody("js/encounter.js statsFor().hull"),
-    radarDart: prodBody("js/encounter.js statsFor().hull"),
-    packHusk: prodBody("js/encounter.js statsFor().hull"),
-    wardAnvil: prodBody("js/encounter.js statsFor().hull"),
-    eliteDart: prodBody("js/encounter.js statsFor().hull"),
-    eliteHarrier: prodBody("js/encounter.js statsFor().hull"),
-    eliteCharger: prodBody("js/encounter.js statsFor().hull"),
-    eliteHusk: prodBody("js/encounter.js statsFor().hull"),
-    eliteAnvil: prodBody("js/encounter.js statsFor().hull"),
+    // ---- THE SIXTEEN BODY ROWS ARE RETIRED (PORT-S S3b lane 3, D4) -------
+    // They were THE ROSTER, in ROSTER order, and the ORDER WAS A WIRE CONTRACT
+    // against server/snapshot.mjs's `ENEMY_TYPES`. D9 replaced the roster and
+    // this commit deletes it; the sixteen rows go with it, and so does
+    // `prodBody`, which existed to build them.
+    //
+    // WHAT THE WIRE CONTRACT BECOMES, stated because a contract does not
+    // simply evaporate: `ENEMY_TYPES` stays exactly as it is — append-only,
+    // sixteen rows — and every successor-plane body encodes `ty: -1` against
+    // it. That is the KNOWN LIE this lane records at three sites and asserts
+    // as the current contract in node-golden; `?mp` is undeployable until R7
+    // ships wire v11, which is the round that gives the successor plane's
+    // twenty-one types real rows and re-cuts this column with them.
+    //
+    // THE SEEKER'S ROW went at the same commit, with the seeker plane.
   },
   kernel: {
     // ---- the 21 enemy ROUNDS, in the kind ladder's own code order ----------
@@ -1134,18 +1370,55 @@ const KINDS = {
       ownerDeath: OWNER_DEATH.PERSIST, // a laid mine outlives its layer, which
                                        // is the point of laying it
       hp: 2,
+      // D39: A MINE IS A HAZARD AND NEVER BLOCKS THE CLEAR. It is the owner's
+      // own example — the demo-v4 lab shipped the strict reading and held a
+      // four-seat room open on one drifting mine while a D17 joiner waited in
+      // the lobby. A mine ends on its own `life` (updateMine: `killEnemy(e,
+      // "expiry")`), so the room it sat in is over before it is.
+      clearRole: CLEAR_ROLE.NEVER,
+      // ---- THE MINE IS A CONSTRUCT (PORT-S S5, commit D) ------------------
+      // D25's form: the class is declared ON THE KIND, and the matrix answers.
+      // `CLASS.CONSTRUCT`'s own comment has said so since it was written — "a
+      // placed object — the demo's drone today, `mine` after R6" — and this is
+      // where that sentence stops being a plan.
+      //
+      // IT IS THE ONE ROW IN `S.enemies` THAT IS NOT A BODY, and D26's aura is
+      // why it matters. A mine is an ordinary `S.enemies` member with hp 2, so
+      // an aura walk that classified by ARRAY would eat one in four ticks and
+      // DETONATE it — eight `mineShard` and a 14-damage blast — inside the halo,
+      // on the burning pilot. `aura -> CONSTRUCT` is undeclared and therefore
+      // OFF, so the mine is untouched BY DECLARATION rather than by an exclusion
+      // list somebody has to remember to keep.
+      //
+      // THE SHIPPED PLAYER-ROUND WALK IS NOT CHANGED HERE. `js/demo-kernel.js`'s
+      // `damageEnemy` still hands every `S.enemies` member `tgtCls: BODY`, so a
+      // bolt kills a mine exactly as it always has. That asymmetry is DEBT, not
+      // an oversight: making that walk read this row needs a `shot -> CONSTRUCT`
+      // cell declared first, and it is hash-neutral either way because only
+      // `mayHit`'s product enters the sim. Named for the intake lane.
+      targetClass: CLASS.CONSTRUCT,
     },
     // ---- the ~20 bodies, in STATS declaration order ------------------------
-    swarmling: kernelBody("demo-render drawEnemy"),
-    warden: kernelBody("demo-render drawEnemy"),
-    interceptor: kernelBody("demo-render drawEnemy"),
-    hammerhead: kernelBody("demo-render drawEnemy"),
-    hive: kernelBody("demo-render drawEnemy"),
+    swarmling: kernelBody("demo-render drawEnemy", CLEAR_ROLE.BLOCKER),
+    // THE ONE FLY-BY IN THIS KERNEL, and it is DERIVED rather than assumed:
+    // `updateWarden` orbits, enters `charge`, fires ONE heavy round at the end
+    // of the charge and enters `escape`, where it steers for the nearest exit
+    // and deletes itself — at the boundary (`updateEnemies`' own warden branch,
+    // whose comment reads "Wardens attack once, then leave instead of wrapping
+    // back in") or when its 4.5 s timer runs out. `escape` is entered on the
+    // same statement as the shot, so the state IS the record of the committed
+    // attack and nothing new has to be stored. It is the only body kind in the
+    // file with a leave path: the whole kernel has four `e.dead = true` sites
+    // and three of them are this one.
+    warden: kernelBody("demo-render drawEnemy", CLEAR_ROLE.UNTIL_ATTACK, "escape"),
+    interceptor: kernelBody("demo-render drawEnemy", CLEAR_ROLE.BLOCKER),
+    hammerhead: kernelBody("demo-render drawEnemy", CLEAR_ROLE.BLOCKER),
+    hive: kernelBody("demo-render drawEnemy", CLEAR_ROLE.BLOCKER),
     // The drone: the shipped shootable-projectile pattern, and the precedent
     // `mine` is promoted on. It already ships §6's denial-only reward — a drone
     // pays score and drops NO orb. Its cap is the hive's own six-child census,
     // the second conforming precedent commit B cites.
-    drone: Object.assign(kernelBody("demo-render drawEnemy"), {
+    drone: Object.assign(kernelBody("demo-render drawEnemy", CLEAR_ROLE.BLOCKER), {
       // Unlike the mine's, this one IS a true ceiling: the hive spawns
       // min(3, 6 - children), so an admission can never carry the population
       // past the number. Nothing bypasses it — a hive's death spawns nothing.
@@ -1155,20 +1428,20 @@ const KINDS = {
         "carry the count past 6. DEBT: no capDenied cue; the hive declines " +
         "silently, which is the one clause of the three it still does not keep."),
     }),
-    tracer: kernelBody("demo-render drawEnemy"),
-    minelayer: kernelBody("demo-render drawEnemy"),
-    myrmidon: kernelBody("demo-render drawEnemy"),
-    snapper: kernelBody("demo-render drawEnemy"),
-    bulwark: kernelBody("demo-render drawEnemy"),
-    cherub: kernelBody("demo-render drawEnemy"),
-    constructor: kernelBody("demo-render drawEnemy"),
-    turret: kernelBody("demo-render drawEnemy"),
-    vanguard: kernelBody("demo-render drawEnemy"),
-    pulsar: kernelBody("demo-render drawEnemy"),
-    omegaDefender: kernelBody("demo-render drawEnemy"),
-    spitfire: kernelBody("demo-render drawEnemy"),
-    stationOmega: kernelBody("demo-render drawEnemy"),
-    starEater: kernelBody("demo-render drawEnemy"),
+    tracer: kernelBody("demo-render drawEnemy", CLEAR_ROLE.BLOCKER),
+    minelayer: kernelBody("demo-render drawEnemy", CLEAR_ROLE.BLOCKER),
+    myrmidon: kernelBody("demo-render drawEnemy", CLEAR_ROLE.BLOCKER),
+    snapper: kernelBody("demo-render drawEnemy", CLEAR_ROLE.BLOCKER),
+    bulwark: kernelBody("demo-render drawEnemy", CLEAR_ROLE.BLOCKER),
+    cherub: kernelBody("demo-render drawEnemy", CLEAR_ROLE.BLOCKER),
+    constructor: kernelBody("demo-render drawEnemy", CLEAR_ROLE.BLOCKER),
+    turret: kernelBody("demo-render drawEnemy", CLEAR_ROLE.BLOCKER),
+    vanguard: kernelBody("demo-render drawEnemy", CLEAR_ROLE.BLOCKER),
+    pulsar: kernelBody("demo-render drawEnemy", CLEAR_ROLE.BLOCKER),
+    omegaDefender: kernelBody("demo-render drawEnemy", CLEAR_ROLE.BLOCKER),
+    spitfire: kernelBody("demo-render drawEnemy", CLEAR_ROLE.BLOCKER),
+    stationOmega: kernelBody("demo-render drawEnemy", CLEAR_ROLE.BLOCKER),
+    starEater: kernelBody("demo-render drawEnemy", CLEAR_ROLE.BLOCKER),
     // ---- the pickup --------------------------------------------------------
     orb: {
       hash: { where: "test/tools/demo-serial.js", fields: "INCLUDED S.orbs (whole record, keys sorted)", guarded: [] },
@@ -1181,6 +1454,63 @@ const KINDS = {
     },
   },
 };
+
+// ---- D39's ROLE CENSUS, AT LOAD (the SEVENTH AMENDMENT, S4 fix 9) ----------
+// EVERY KERNEL BODY KIND DECLARES A ROLE OR THE FILE DOES NOT LOAD. The clear
+// gate reads this column, and a kind that reaches the gate without one has to
+// be treated as SOMETHING — and whichever default is picked is wrong half the
+// time and silent both times. A throw at load is the one failure that cannot be
+// missed: it takes the page, the server, every suite and the capture tool with
+// it, on the first import, naming the kind.
+//
+// The scan is by STORE, not by a list: a body is a row whose `clear.store` is
+// `S.enemies`, which is the same test the hash and the wire columns key on. A
+// kind added to that store without a role reds here by name and cannot ship.
+// `untilAttack` carries a second obligation — the state its committed attack
+// leaves it in — because "it blocks until it has attacked" is not a fact a gate
+// can read unless the file says where the attack is recorded.
+// ---- THE TARGET CLASS OF A KERNEL KIND (PORT-S S5, commit D) ---------------
+// ONE published answer to "what class is this thing when something aims at it",
+// so D26's aura walk does not have to classify by which ARRAY a record came out
+// of. The default is the STORE: a row that clears out of `S.enemies` is a BODY
+// and a row that clears out of `S.bullets` is ORDNANCE, which is what every
+// walk in the kernel already assumes. A row may DECLARE otherwise, and today
+// exactly one does — `mine`, which is a CONSTRUCT.
+//
+// IT ANSWERS undefined FOR A KIND IT DOES NOT KNOW, and the caller decides. An
+// aura that folded an unknown kind to BODY would eat whatever arrives next
+// without anybody declaring that it should.
+function targetClassOf(name) {
+  const row = KINDS.kernel[name];
+  if (!row) return undefined;
+  if (row.targetClass !== undefined) return row.targetClass;
+  if (!row.clear) return undefined;
+  if (row.clear.store === "S.enemies") return CLASS.BODY;
+  if (row.clear.store === "S.bullets") return CLASS.ORDNANCE;
+  return undefined;
+}
+
+(function auditClearRoles() {
+  const roles = [CLEAR_ROLE.BLOCKER, CLEAR_ROLE.NEVER, CLEAR_ROLE.UNTIL_ATTACK];
+  const bad = [];
+  for (const name of Object.keys(KINDS.kernel)) {
+    const row = KINDS.kernel[name];
+    if (!row || !row.clear || row.clear.store !== "S.enemies") continue;
+    if (roles.indexOf(row.clearRole) < 0) {
+      bad.push("`" + name + "` declares clearRole " + JSON.stringify(row.clearRole));
+      continue;
+    }
+    if (row.clearRole === CLEAR_ROLE.UNTIL_ATTACK
+        && !(typeof row.spentState === "string" && row.spentState.length > 0)) {
+      bad.push("`" + name + "` is untilAttack and names no `spentState`");
+    }
+  }
+  if (bad.length) {
+    throw new Error("Engine: D39 requires a clearRole on every kernel BODY kind — one of "
+      + roles.join(" | ") + ", and an untilAttack kind must name the state its "
+      + "committed attack leaves it in. Offending rows: " + bad.join("; "));
+  }
+})();
 
 // ---- THE 14-PHASE REFERENCE TICK ORDER -------------------------------------
 // Harvested from the enemy spec into this round as the REFERENCE ordering. It
@@ -1323,9 +1653,23 @@ const Engine = {
   // admits ORDNANCE to DEFAULT, proves the nearer ordnance candidate is then
   // taken, and puts it back — that flip is the leg's sabotage.
   ACQUIRE,
+  // ...and the METRICS beside them, for a reason of their own: the injected
+  // metric is what stops the one authority from being wrong in a toroidal
+  // world, and a caller can only inject what it can name.
+  METRIC,
+  WIRE_ID_BASE,
   isContact,
+  CLEAR_ROLE,    // D39's role vocabulary, published so the kernel's gate and
+                 // node-golden's two-way census read the same three strings the
+                 // registry rows are written with
   CONTACT_KINDS, // published for the same reason MATRIX is: D28's scope is data,
                  // and the leg that proves the narrowed refusal edits it
+  PARRYABLE_KINDS, // D29's scope, published on CLEAR_ROLE's footing: the list
+                   // is DATA, so the leg that pins it and its complement reads
+                   // the same array R8a's reader will
+  isParryable,
+  targetClassOf, // PORT-S S5 commit D: the aura asks the ROW what a target is,
+                 // never the array it happened to be walking
 };
 
 window.Engine = Engine; // the vm sandbox and the page both reach it here; a

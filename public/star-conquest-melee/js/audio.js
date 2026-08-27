@@ -189,8 +189,27 @@
   // an enemy quieter for aiming at it. Squared falloff, one hypot per cue; a
   // result of 0 drops the cue before a single node is allocated, so the
   // world's far rooms cost nothing.
-  const NEAR = 260;  // px — full volume; about half a viewport
-  const FAR = 1100;  // px — silent; past this a body is barely on the corner map
+  // ---- RE-DERIVED FROM THE CONTRACT (FIX ROUND, S3BR-06) ----------------
+  // Both were literals — 260 and 1100 — and both stayed put through commit C's
+  // x2.5. THE CONTRACT WAS ALREADY WRITTEN HERE: "about half a viewport", which
+  // was true of 260 against the retired 512-px pane and false of it against the
+  // 1280-px one. At 640 px, half of the shipped pane, the old curve returned
+  // ~0.2999 instead of full gain, and cues were culled at 1100 while the source
+  // was still tactically near in a world 2.5x larger. Enemies at the same
+  // FRACTIONAL screen distance became much quieter and much narrower after the
+  // flip.
+  //
+  // SO THE CONTRACT IS THE CODE NOW, row by row:
+  //   NEAR is HALF THE PANE, exactly — the sentence that was already here. 640.
+  //   FAR keeps the pair's OWN RATIO against the true half-pane, and the ratio
+  //     is exact rather than fitted: 1100 / 256 = 4.296875, where 256 is half
+  //     the retired pane the 1100 was chosen against (the old 260 was that same
+  //     half-pane, rounded). 640 x 4.296875 = 2750, which is 1100 x 2.5 — the
+  //     mechanical answer and the derived one agree to the byte.
+  //   PAN_FULL is 2 x NEAR and was ALREADY derived, so it followed on its own.
+  // A future pane moves all three without anyone remembering to.
+  const NEAR = FW / 2;             // px — full volume; half a viewport, exactly
+  const FAR = NEAR * 4.296875;     // px — silent; past this a body is barely on the corner map
   function att(at) {
     const d = Math.hypot(at.x - localPlayer().ship.x, at.y - localPlayer().ship.y);
     if (d <= NEAR) return 1;
@@ -1012,6 +1031,15 @@
   }
 
   // ---- publish — one namespace, one assignment -----------------------------
+  // ---- THE REACH, PUBLISHED (FIX ROUND, S3BR-07) --------------------------
+  // `SHAKE_FAR` in js/game.js has always claimed to MIRROR this file's `FAR` —
+  // "FAR is audio's number deliberately, so the felt reach and the heard reach
+  // are one distance" — and it was a HAND COPY of it, which is the shape every
+  // mirror in this repository has eventually drifted into. It had already
+  // drifted on the NEAR side (400 against 260) before this round moved FAR.
+  //   So the reach crosses as a value rather than as a promise. ONE authority,
+  // read at declaration time by the one consumer that needs it.
+  window.SfxReach = { near: () => NEAR, far: () => FAR };
   window.Sfx = { cue, unlock, frame, state };
 
   // the test surface, hung off window.__test exactly as encounter.js hangs

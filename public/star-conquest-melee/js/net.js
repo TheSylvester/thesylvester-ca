@@ -64,8 +64,8 @@
 //
 // Classic script, like encounter.js: it reads game.js's top-level bindings
 // (players — seat 0's input bank included, in0, bankTickInput,
-// refreshPointerWorld, INPUTMODE, setInputMode, stepImpacts, spawnImpactFx,
-// stepShipFx, spawnShipBlast, BLASTR, BLASTGAIN) through the shared global
+// refreshPointerWorld, INPUTMODE, setInputMode, thrustFrame, stepImpacts,
+// spawnImpactFx, stepShipFx, spawnShipBlast, BLASTR, BLASTGAIN) through the shared global
 // lexical scope, and the
 // encounter's internals through the __test.enc surface exactly as
 // server/sim-host.mjs does.
@@ -415,6 +415,24 @@
   // already applies to an unknown type, never a throw on a live stream
   const wireType = (i) => WIRE_TYPES[i] || "dart";
   const wireMode = (i) => WIRE_MODES[i] || "seek";
+  // ---- AN R7 BILL, NAMED HERE (PORT-S S4, the HOLD round, fix 15) ----------
+  // EVERY successor-plane body arrives as `ty: -1` today — `server/snapshot.mjs`
+  // has no row for a kernel type since S3b commit D4 — so `wireType` answers
+  // `dart` for all of them and the decoded record carries `hp: 1` and NO
+  // `state`. That is harmless for the render (the fallback radius and the
+  // fallback ceiling are what the tail of this file uses) and it is NOT harmless
+  // for D39: the clear-role table is keyed on the KIND and the fly-by exception
+  // is read off the STATE, so a decoding client cannot apply either. A real
+  // decoded MINE and a real spent WARDEN both BLOCK and both count as FOES on
+  // `?mp`.
+  //
+  // THE SEAT DEFERRED IT TO R7 (the S4 scoped check, finding 1): the fix is the
+  // WIRE — a kind index and the body's state at v11 — which R7 owns and PORT-S
+  // does not, and `?mp` is undeployable until R7 regardless. The limit is
+  // asserted as the CURRENT CONTRACT by `tests/net-checks.js`'s `(R7 BILL)`
+  // legs, so the day the wire grows those fields, a green suite says so.
+  // The readers carry the same note: `js/encounter.js`'s `bodyBlocks` and
+  // `stallSignature`.
 
   // ---- state ---------------------------------------------------------------
   // The presentation buffer is ADAPTIVE at phase 12: DELAY_TICKS was a fixed 3
@@ -476,8 +494,6 @@
   let snaps = 0;
   let stale = 0;           // newest-wins drops — TCP delivers bursts after loss
   let lastOwnedSum = -1;   // a rank rising between snapshots is the buy cue
-  let statsWave = -1;      // per-wave statsFor cache for enemy body stamping
-  let statsSet = null;
   let blastIndex = -1;     // the BLAST CHARGE row, for the splash fx radius
   let attempts = 0;        // reconnect backoff exponent — an accepted snapshot resets it
   let reconnects = 0;      // sockets re-opened after the first, for stats
@@ -613,6 +629,14 @@
   function freshK() {
     return { ship: { x: 0, y: 0 }, vel: { x: 0, y: 0 },
       aimAngle: 0, aimOff: { x: 0, y: 0 }, aimed: false,
+      // THE CONVERGED NOSE (D32), and the predictor MUST carry it or own-ship
+      // prediction diverges on every ship-relative thrust: the frame rotates the
+      // key vector by this seat's nose, so a kernel without one would rotate by
+      // a default that is not the sim's and put every predicted W somewhere the
+      // server did not. It is a HAND-WRITTEN bank like the rest of this record —
+      // adding a field to makePlayer does NOT add it here, which is exactly why
+      // it is named.
+      heading: 0,
       cool: 0, comet: false, energy: 0, energyMax: 0, enIdle: 0,
       thrustAcc: { x: 0, y: 0 }, flame: { x: 0, y: 0 },
       // the ABILITY SLOT record — a HAND-WRITTEN bank, which is exactly why it
@@ -653,6 +677,13 @@
     const L = localAtTick.get(tick);
     if (L) {
       K.aimAngle = L.aimAngle; K.aimed = L.aimed;
+      K.heading = L.heading; // ...and the nose, which is the whole point of
+                             // carrying it: the convergence is RATE-LIMITED, so
+                             // a replayed tick that started from freshK's zero
+                             // would take the long way round to the same bearing
+                             // and thrust somewhere else for every tick of the
+                             // journey. A hard snap must not flip the frame for
+                             // one RTT, and this is what stops it.
       K.aimOff.x = L.aimOffX; K.aimOff.y = L.aimOffY;
       K.thrustAcc.x = L.thrustAccX; K.thrustAcc.y = L.thrustAccY;
       K.input.scur.x = L.scurX; K.input.scur.y = L.scurY;
@@ -666,14 +697,36 @@
       K.input.scur.x = in0.scur.x; K.input.scur.y = in0.scur.y;
       K.input.fireHeld = !!G.leftHeld;
       K.input.cometWant = !!in0.cometWant;
+      // ...and the NOSE from the live seat rather than freshK's zero. This is
+      // the first-base and post-hard-snap path, and zero is not an honest seed
+      // for a rate-limited value: it would point the predicted ship along +x
+      // and converge back over the half-second the rate allows, thrusting wrong
+      // the whole way. The seat record's own heading is what the sim last had.
+      // `players` is read through the shared global lexical scope, the same
+      // way this file already reads `in0` two lines up — not through __test,
+      // which is the seam for the ENCOUNTER's internals and not for game.js's
+      // own top-level bindings.
+      const P0 = players[0];
+      if (P0 && Number.isFinite(P0.heading)) K.heading = P0.heading;
     }
   }
   function recordLocal(K, tick) {
-    localAtTick.set(tick, { aimAngle: K.aimAngle, aimed: K.aimed,
+    localAtTick.set(tick, { aimAngle: K.aimAngle, aimed: K.aimed, heading: K.heading,
       aimOffX: K.aimOff.x, aimOffY: K.aimOff.y,
       thrustAccX: K.thrustAcc.x, thrustAccY: K.thrustAcc.y,
       scurX: K.input.scur.x, scurY: K.input.scur.y,
       fireHeld: K.input.fireHeld, cometWant: K.input.cometWant });
+  }
+  // the convergence, mirrored from game.js by VALUE for the reason game.js
+  // mirrors it from the kernel: same operations, same order, or the predicted
+  // nose and the simulated one drift apart in the last bits and the thrust
+  // rotation drifts with them.
+  const PRED_TAU = Math.PI * 2;
+  function predRotateToward(a, b, max) {
+    let d = (b - a) % PRED_TAU;
+    if (d > Math.PI) d -= PRED_TAU;
+    if (d < -Math.PI) d += PRED_TAU;
+    return a + (d < -max ? -max : d > max ? max : d);
   }
   const predTerms = () =>
     (window.Encounter && Encounter.termsFromOwned ? Encounter.termsFromOwned(myOw) : null);
@@ -796,7 +849,7 @@
   // one predicted kernel tick, in the server's exact per-tick order:
   // drain → energy → integrate, then the autofire pass. `fx.fire` decides
   // whether a fire press is a cue (incremental) or only a cool model (replay).
-  const PRED_CTX = { alive: true, terms: null, keyThrust: null, owned: null };
+  const PRED_CTX = { alive: true, terms: null, keyThrust: null, thrustFrame: null, owned: null };
   let pendingAutofireCue = false; // incremental-only: an autofire shot was
                         // modeled last tick — its cue shows THIS tick if the
                         // trigger is still held (see the trail note below)
@@ -813,6 +866,25 @@
     // rests on, restated here because this is a raw index into a trimmed vector.
     PRED_CTX.owned = myOw;
     PRED_CTX.keyThrust = () => (terms ? terms.keyThrust !== false : true);
+    // THE THRUST FRAME, MIRRORED — and it reads the PREDICTED kernel's nose, not
+    // the sim seat's. That distinction is the whole correctness of it: the
+    // replay walks the same banked frames the server will, and at each replayed
+    // tick the nose is whatever the replay has converged it to, so the rotation
+    // has to ask K. game.js's thrustFrame takes a SEAT because the sim has
+    // several; here there is exactly one kernel and it is K.
+    PRED_CTX.thrustFrame = (mode, kx, ky) => {
+      // the DRAINED FRAME's mode, exactly as the sim reads it — never
+      // THRUSTFRAME. The predictor replays the frames this client actually
+      // SENT, so reading the live global would make a mid-flight T flip
+      // re-predict every unacked tick under the new mode while the server
+      // still holds them under the old one. The frame is the record of what
+      // was asked for, and that is what a replay must obey.
+      if (mode === "screen" || (kx === 0 && ky === 0)) return { x: kx, y: ky };
+      if (!Number.isFinite(K.heading)) return { x: kx, y: ky };
+      const sa = Math.sin(K.heading);
+      const ca = Math.cos(K.heading);
+      return { x: -kx * sa - ky * ca, y: kx * ca - ky * sa };
+    };
     // `ability` shows the PICTURE and the SOUND on the press edge, exactly as
     // the gun's `fire` does. spawnCue reads the record's spawn block now, so
     // the cue flies the ability's own ballistics and wears its own ink — the
@@ -846,6 +918,18 @@
           thud: (x, y, gain) => { ownCue("thud", { x, y }, gain); } }
       : { fire: () => { modelFire(K, terms); }, ability: () => {}, thud: () => {} };
     Flight.drainSlice(K, frames, PRED_CTX, fx);
+    // THE NOSE TURNS, in the sim's own place in the order: after the drain's
+    // thrust and before the energy slice, which is exactly where game.js's
+    // headingStep() sits. Get that order wrong by one call and a ship-relative
+    // tick rotates by a nose one step ahead of the server's, which is a steady
+    // heading error rather than a visible glitch — the worst shape a desync
+    // takes. The aim ladder is predFireDir's, the same one the server resolves
+    // this seat's shots along, and a null answer HOLDS the nose exactly as the
+    // sim's does.
+    {
+      const d = predFireDir(K);
+      if (d) K.heading = predRotateToward(K.heading, Math.atan2(d.y, d.x), HEADRATE * (TICK / 1000));
+    }
     Flight.energySlice(K, PRED_CTX);
     Flight.integrateSlice(K, PRED_CTX, fx);
     // the AUTOFIRE cue TRAILS its model by one banked frame. The model stays
@@ -1176,6 +1260,12 @@
       // carries one the key stays undefined, which JSON drops: absence
       // survives the fold as absence
       vt: newer.vt !== undefined ? newer.vt : older.vt,
+      // ...and the THRUST FRAME takes the NEWEST too — the `ah` rule, because a
+      // mode is a LEVEL and not an event. It is deliberately NOT vt's rule: an
+      // older frame's `screen` must not survive a newer frame that carries no
+      // mode, because carrying no mode IS a statement (it means `ship`). Read
+      // the newest's key straight through and absence folds to absence.
+      tf: newer.tf,
     };
   }
 
@@ -1237,13 +1327,27 @@
   // THE reader every consumer of the old DELAY_TICKS constant now goes through
   const delayTicks = () => delayTarget;
 
-  function statsFor(wave) {
-    if (statsWave !== wave) {
-      statsWave = wave;
-      statsSet = enc().statsFor(wave);
-    }
-    return statsSet;
-  }
+  // ---- THE DECODED BODY'S STATS ARE RETIRED (S3b lane 3, commit D4) --------
+  // This cache read `Encounter.statsFor(wave)` — production's per-wave stat
+  // table — and stamped every decoded body with it, because the client's own
+  // draws (`drawAnvil`, the edge arrows) and its overshoot guard read it. D9
+  // replaced the roster and commit D4 deleted the table, so there is nothing
+  // to read and, after commit D2, nothing on this side that reads it.
+  //
+  // WHAT A DECODED BODY IS NOW, stated plainly because it is a KNOWN LIE and
+  // not an oversight: the wire has no row for the successor plane's twenty-one
+  // types, so every one of them arrives as `ty: -1`, decodes as "dart" and
+  // falls into the `seek` policy. `?mp` IS UNDEPLOYABLE until R7 ships wire
+  // v11 — the program's standing fact — and SOLO is the shipped surface. The
+  // decode is left INTACT rather than gutted so R7 has one place to re-cut: it
+  // is the round that gives those types real rows, and the stats they carry
+  // will come from the same declaration the codec is compiled from.
+  //
+  // THE FALLBACKS BELOW ARE THEREFORE LIVE, and each says what it stands in
+  // for: a body's RADIUS and its speed CEILING.
+  const BODY_R_FALLBACK = 20;      // px — the old dart's radius at commit C's x2.5
+  const BODY_CAP_FALLBACK = 12.5;  // px/tick — the old charger dash at the same ratio,
+                                   // which was the widest ceiling any body had
 
   function blastRadiusNow() {
     if (blastIndex < 0) blastIndex = enc().shopInfo().findIndex((r) => r.name === "BLAST CHARGE");
@@ -1472,6 +1576,14 @@
     // change here is a LOBBY change and reaches the early return and nothing
     // else. Folded in beside namesSame rather than given a paragraph of its own
     // because the two are one identity and every reader below treats them so.
+    // (R7 BILL) ...and D37's MARKET HAND is the roster's FIFTH count, on exactly
+    // the same rule (PORT-S S7): a fresh hand is a LOBBY change, it reaches the
+    // early return and nothing else, and it must be folded in here beside the
+    // two below rather than given a paragraph — a hand that changed while this
+    // guard ignored it would be a reroll the panel never drew. It carries no
+    // teardown for the same reason the names do not: the identity triple alone
+    // decides that, so a `you` that brings only a new hand can never clear the
+    // input ring. Nothing to compare yet — the wire has no hand at v10.
     const skinsSame = nextSkins.length === seatSkins.length &&
       nextSkins.every((v, i) => v === seatSkins[i]);
     if (identitySame && rosterSame && namesSame && skinsSame) return;
@@ -1917,18 +2029,14 @@
     const vcap = VMAX + (terms ? terms.speed : 0);
     return pr.comet ? vcap * COMETVMAX : vcap;
   }
-  // the class ceiling, px/tick. statsFor is the client's own derivation of the
-  // server's per-wave stats, and stepEnemy caps on max(maxSpeed, backSpeed).
-  function enemyCap(stats, type, cfg) {
-    const base = Math.max(stats.maxSpeed || 0, stats.backSpeed || 0);
-    // the dash is a CONSTANT across waves and far above any seek speed, so a
-    // charger's ceiling is the dash whatever mode it is currently in — the
-    // guard is a sanity bound, not a mode-dependent physics rule
-    if (type === "charger" || type === "radarCharger" || type === "eliteCharger") {
-      return Math.max(base, cfg.charger.dashSpeed);
-    }
-    return base;
-  }
+  // the class ceiling, px/tick. It derived from the server's per-wave stats and
+  // capped on max(maxSpeed, backSpeed), with the charger's dash as the floor
+  // because that constant was the widest ceiling any body had. The table
+  // retired at commit D4, so the guard falls back to that same widest ceiling —
+  // which is what a SANITY BOUND should be when it cannot ask a per-class
+  // question: generous enough never to clip an honest pose, tight enough to
+  // refuse a decode that has gone wrong. R7 re-cuts it per class.
+  function enemyCap() { return BODY_CAP_FALLBACK; }
   // the guard catches a SPIKE, not a rounding edge: a body travelling at
   // exactly its clamp prints a wire velocity that can round a hair over it, and
   // throttling that would be the guard inventing a lag of its own. The slack is
@@ -1989,6 +2097,25 @@
 
   // the MEASURED presentation lag, in ticks — the projection's horizon before
   // any per-body bound. See the formula in the table's note above.
+  // ---- THE CLIENT'S OWN DECODE TARGET (S3b lane 3, commit D5) -------------
+  // `E.enemies`, `E.missiles` and `E.groups` are DELETED from the simulation:
+  // production deals no bodies, fires no ordnance and schedules no waves. This
+  // client still DECODES all three off the wire, because the wire still
+  // carries all three rows — v10's shape is frozen until R7 ships v11 — so the
+  // decode needed somewhere to land that is not the sim's own state.
+  //
+  // IT IS NET-OWNED, and that is the point rather than a detail. A client
+  // writing into `E` was writing into the object the state hash walks and the
+  // sim steps; on a puppet client that read as harmless and it was never
+  // harmless, it was unnoticed. Here the ownership is in the name.
+  //
+  // AND WHAT REACHES IT IS A KNOWN LIE UNTIL R7. Every successor-plane body
+  // encodes `ty: -1` (commit C), so every decoded body reads back as the first
+  // ROSTER name and the `seek` policy. `?mp` IS UNDEPLOYABLE until v11 gives
+  // those twenty-one types real rows — the program's standing wire fact — and
+  // SOLO is the shipped surface. The decode is kept INTACT rather than gutted
+  // so R7 has one place to re-cut.
+  const NETV = { enemies: [], missiles: [], groups: [] };
   let starving = false; // set by present()'s starvation branch for the frame it
                         // drives — the projection stands down for that frame
   function leadTicks() {
@@ -2289,6 +2416,16 @@
     // sim reports, no client-side state machine
     E.state = s0.hud.state;
     E.wave = s0.hud.wave;
+    // (R7 BILL) `E.loop` — production's arc loop counter (PORT-S S7) — HAS NO
+    // SOURCE HERE. It is written by `applyKernelHud` watching the wave FALL and
+    // by the wipe, and a `?mp` client runs neither: it ASSIGNS E.wave from the
+    // snapshot on the line above, so a fall-watching derivation would fire on
+    // DECODE ORDER rather than on the sim. So a client's `E.loop` stays 0 until
+    // the wire carries it, and it rides the ROSTER message beside the seat's own
+    // market hand (server/server.js's `you`, the SEATED branch) — one message,
+    // two halves of one fact, because a hand is meaningless without the loop it
+    // was dealt in. Nothing on the client reads E.loop today, so the hole costs
+    // nothing until R7 opens it.
     E.clearTick = s0.hud.clearTick;
     E.waveTick = s1 ? lerp(s0.hud.waveTick, s1.hud.waveTick, k) : s0.hud.waveTick;
     // the buy cue reads the LOCAL seat's vector — a remote seat's purchase
@@ -2311,23 +2448,25 @@
     // death, one only in the newer appears when its snapshot becomes s0.
     // The client stamps e.stats via statsFor — drawAnvil and the edge arrows
     // read it, and a stats-less body throws.
-    const st = statsFor(s0.hud.wave);
+    // (the per-wave stat table retired at commit D4 — see the block at
+    // `BODY_R_FALLBACK`. Every decoded body takes the fallback radius and the
+    // fallback ceiling until R7 gives its type a wire row.)
     const e1by = s1 ? new Map(s1.enemies.map((e) => [e.id, e])) : null;
-    E.enemies = s0.enemies.map((e0) => {
+    NETV.enemies = s0.enemies.map((e0) => {
       const e1 = e1by ? e1by.get(e0.id) : null;
       // v5: the wire carries enum INDICES; the decode hands back exactly the
       // strings v4 carried, so stats lookup, render and every scorer bucket
       // downstream read the same values they always did
       const type = wireType(e0.ty);
       const mode = wireMode(e0.md);
-      const stats = st[type] || st.dart;
+      const stats = { r: BODY_R_FALLBACK };
       const pol = ENEMY_POLICY[mode] || ENEMY_POLICY.seek;
       // THE BOUNDARY. A mode change between the brackets is a discontinuity:
       // pose, countdown and facing all HOLD at s0, and nothing is projected
       // across it. (`t` is the load-bearing half — lerping a countdown through
       // a mode change manufactures values the sim never held.)
       const held = !!(e1 && pol.boundary === "hold" && wireMode(e1.md) !== mode);
-      const cap = enemyCap(stats, type, cfg);
+      const cap = enemyCap();
       // THE PER-BODY BOUND on the horizon. A mode that counts down may never be
       // led past its own remaining ticks: the tick after `t` runs out is a mode
       // the client has not been told about, and leading into it is the same lie
@@ -2367,7 +2506,7 @@
     // sample per presented tick, capped at the sim's own trail length
     const m1by = s1 ? new Map(s1.missiles.map((m) => [m.id, m])) : null;
     const liveIds = new Set();
-    E.missiles = s0.missiles.map((m0) => {
+    NETV.missiles = s0.missiles.map((m0) => {
       const m1 = m1by ? m1by.get(m0.id) : null;
       // v5: `age` rides the wire and the steering PHASE is derived from it
       // here — the same three segments stepMissile runs (ballistic under
@@ -2510,7 +2649,7 @@
 
     // --- spawn groups: the portals and the incoming markers draw from the
     // same fields the sim's own groups carry
-    E.groups = s0.groups.map((g) => ({
+    NETV.groups = s0.groups.map((g) => ({
       count: g.c, type: "dart", warnAt: 0, spawnAt: 0,
       spawned: !!g.s,
       points: g.w ? { anchor: { x: g.x, y: g.y }, pts: [] } : null,
@@ -2581,6 +2720,14 @@
       // same falloff js/audio.js attenuates this queue's sound with.
       if (window.Shake) Shake.cue(e.k, e.seat, at);
       if (!at) continue;
+      // (NO DAMAGE TAP HERE ANY MORE — fix 11. Fix 9 counted decoded `hit`,
+      // `boom` and `blast` events into D39's stall signature from this loop, and
+      // the scoped check found that a wall hit, a PvP blast and a shot into a
+      // nonblocking mine all arrive on this stream — so the term measured noise
+      // rather than combat. It is the kernel's blocker-damage count now, which a
+      // net client does not step: the client's signature is its blocking count
+      // alone until R7 puts a body's kind and state on the wire. See
+      // `js/encounter.js`'s `stallSignature` for the whole R7 bill.)
       if (e.k === "hit" || e.k === "boom") spawnImpactFx(at.x, at.y, 0, -1, "enemy");
       else if (e.k === "clang" || e.k === "wall") spawnImpactFx(at.x, at.y, 0, -1, "wall");
       else if (e.k === "blast") spawnImpactFx(at.x, at.y, 0, -1, "blast", blastRadiusNow());
@@ -2635,6 +2782,14 @@
 
   window.Net = {
     active: () => true,
+    // THE DECODED VIEW (commit D5) — the client's own bodies, ordnance and
+    // spawn portals, which used to be written straight into the simulation's
+    // state. `Encounter.mapState()` is the ONE reader: it is the accessor
+    // every presentation path already crosses to reach a body, so a net client
+    // and a solo one hand the renderer the same shape from different sources.
+    // Live references, never copies — the same contract `mapState` states for
+    // its own arrays: callers draw from these and never mutate them.
+    view: () => NETV,
     // the wire version this build speaks. Published so a suite can address the
     // live number instead of mirroring it by hand — a hand-written `v: 8` in a
     // test file is a FOURTH copy of a constant test/node-golden.mjs already
@@ -2714,6 +2869,11 @@
       // so publishing it costs nothing and a leg can assert the exact bound the
       // overshoot guard allowed rather than a generous one.
       leadTicks: starving ? 0 : leadTicks(),
+      // the decoded body's speed CEILING, published so a check can name the
+      // real bound instead of restating it — the `POINTER_MAX` idiom. It is a
+      // single fallback since PORT-S S3b lane 3 commit D4 (the per-wave stat
+      // table retired with the roster); R7 re-cuts it per class.
+      bodyCap: BODY_CAP_FALLBACK,
       open: !!(ws && ws.readyState === 1),
       // identity — and the input the server has RESOLVED: ack is the highest
       // contiguous n it banked or explicitly discarded, so ntick − ack is what
