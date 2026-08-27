@@ -29,9 +29,10 @@
   // The EIGHT the lab exposes, in two kinds — the count and the kinds both
   // matter, because a reader who takes the whole set for "production's numbers,
   // retuned" mis-reads three of the rows entirely:
-  //   5 PRODUCTION-EQUAL, all five since D11 — ease 0.05 and camLead 60, which
+  //   5 PRODUCTION-EQUAL, all five since D11 — ease 0.05 and camLead 30, which
   //     production shipped as 0.08 and 25 until the owner's feel gate of
-  //     2026-08-24 moved both; edgeMargin 60 and leadDz 200, which never moved;
+  //     2026-08-24 moved both and 2026-08-27 (D52) halved camLead to 30 and
+  //     took leadDz to 0; edgeMargin 60, which never moved;
   //     and cursorPull 1.0, which was the largest item on the PORT-S debt and
   //     which production expresses now;
   //   3 SEAT-SELECTED, and not camera numbers at all — starLit, starSize and
@@ -54,21 +55,25 @@
   // They are presentation-plane state: the kernel never reads one, and nothing
   // persists them, so a reload is these numbers again.
   const CAM_DIAL_DEFAULTS = {
-    ease: 0.05,             // owner 2026-08-24; production js/game.js:1699 CAMEASE — the same 0.05 since D11, over the 0.08 it shipped
-    edgeMargin: 60,         // js/game.js:1713 EDGEMARGIN — min px between ship and view edge (owner: unchanged)
-    camLead: 60,            // owner 2026-08-24; production js/game.js:1702 CAMLEAD — the same 60 since D11, over the 25 it shipped
+    // THE FOUR ANCHORS BELOW ARE PORT-L's. They read :1699/:1702/:1707/:1712/:1713
+    // until then, which were pre-PORT-S line numbers and had been wrong for
+    // several rounds. Line numbers drift; the NAMES do not, so grep the name.
+    ease: 0.05,             // owner 2026-08-24; production js/game.js:1961 CAMEASE — the same 0.05 since D11, over the 0.08 it shipped
+    edgeMargin: 60,         // js/game.js:1975 EDGEMARGIN — min px between ship and view edge (owner: unchanged)
+    camLead: 30,            // owner 2026-08-27 (D52); production js/game.js:1964 CAMLEAD — it was 60 from D11 until the owner flew the wider rail
     // THE OWNER'S OWN RULE, 2026-08-24 — and production's too since D11, where
     // it is CURSORPULL at js/game.js:1707. 1.0 is his
     // Blend 0.5 — the camera exactly halfway between the cursor and the ship
     // PLUS ITS VELOCITY LEAD. The plain ship-to-cursor midpoint holds only at
-    // rest: at vx 245 with camLead 60 the centre sits 122.5 px past it, because
+    // rest: at vx 245 with camLead 30 the centre sits 122.5 px past it, because
     // the velocity half is added before the pull, not blended against it. The
     // browser proof that measured 0.0 px error was run ship-at-rest, so it
     // proves the rest case and not the general one. (Codex vendor-cross, 03R.)
     // The whole derivation is at cursorOffset() and leadVec(); read it before
     // changing this number or its meaning.
-    cursorPull: 1.0,
-    leadDz: 200,            // js/game.js:1712 LEADDZ — ms a conflicting lead must persist to commit (owner: unchanged)
+    cursorPull: 1.0,        // js/game.js:1969 CURSORPULL
+    leadDz: 0,              // js/game.js:1974 LEADDZ — ms a conflicting lead must persist
+                            // to commit. 0 is GATE OFF, the owner's D52 choice; it was 200
     // ---- THE ZOOM IS GONE, and the five rows that were here went with it
     // (zoomWide / zoomRef / zoomDead / zoomEase, and zoomLW below them). The
     // owner ruled it out at the 2026-08-24 gate — "zoom / widen is something we
@@ -312,8 +317,14 @@
     ARENA_COLS = k.ARENA_COLS;
     ARENA_ROWS = k.ARENA_ROWS;
     BOUNDED = k.WORLD_BOUNDED === true;
-    C = k.C;
-    RGB = k.RGB;
+    // D46 (PORT-L): the demo table lives in js/palette.js now. The guard is
+    // js/game.js:379's idiom, and it is load-bearing: `PALETTE` is a
+    // script-lexical const (there is no window.PALETTE), and this file is also
+    // run inside vm boxes that load the kernel without the palette. Those boxes
+    // fall back to the kernel's own literal, which a source pin in
+    // server/names.test.mjs holds equal to PALETTE.demo byte for byte.
+    C = typeof PALETTE !== "undefined" ? PALETTE.demo : k.C;
+    RGB = typeof PALETTE !== "undefined" ? PALETTE.demo.RGB : k.RGB;
     WAVES = k.WAVES;
     STATS = k.STATS;
     TAU = k.TAU;
@@ -414,7 +425,7 @@
   // putting the rule where those pages reach it is exactly the failure
   // PORT-S-DEBT.md's "hazard" section describes: the camera would ease to the
   // ship centre with the leash and the arena clamp and NO LEAD AT ALL, and the
-  // owner's ease 0.05, camLead 60 and cursorPull 1.0 would be silently gone from
+  // owner's ease 0.05, camLead 30 and cursorPull 1.0 would be silently gone from
   // the build he passed.
   //
   // WHAT SURVIVES HERE, and why each one is a forwarder and not a re-spelling:

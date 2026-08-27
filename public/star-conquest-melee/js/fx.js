@@ -62,7 +62,12 @@
   // The playground's judged `t2` preset plus the Canvas2D bloom (its `t3lite`),
   // benchmarked on the user's RTX 5080 and priced at under ~1.2 ms per frame at
   // 4.37 Mpx. GL is not ported and there is no third canvas.
-  const GLOW = 1.2;        // halo radius/alpha multiplier
+  // A DIAL SINCE PORT-L (D44) — the owner asked for "a slider for how much
+  // everyone glows", and every halo in this file is already multiplied by it.
+  // `gl` is sampled ONCE per composite, so setGlow is live on the next frame
+  // with no plumbing. It is render-only: it is in no tunable record, no
+  // snapshot state and no hash.
+  let GLOW = 1.2;          // halo radius/alpha multiplier
   const PARTICLES = 1.5;   // emitter density — above 1.05 the embers come in
   const TRAILS = 1;        // trail length and alpha (commit 3)
   const PERSIST = 0.1;     // per-sim-frame phosphor fade
@@ -152,12 +157,21 @@
   // paints a full debris blast for a dying hull (drawShipBlasts), and a second
   // explosion on top of it would read as two.
   const KINDS = {
-    kill:       { hue: "clay",   big: false, flash: 1,    ring: 1,   parts: 1 },
-    killheavy:  { hue: "clay",   big: true,  flash: 1,    ring: 1,   parts: 1 },
+    // D45 (PORT-L) — THE CLAY EMITTERS RETIRE for the three cues a kernel body
+    // raises. `parts: 0`, NEVER a row deletion: an unmapped kind returns early
+    // and loses its FLASH, its RING and its cueCount increment too, and
+    // tests/fx-checks.js pins the membership of a KINDS row for exactly that
+    // reason. The row stays mapped, spawnBurst is skipped, and the "now" tell
+    // the owner reads a hit by is untouched. The body's OWN particles — the
+    // kernel's two per hit and its ten-plus-four per kill, in the body's own
+    // colour — are what is left, which is demo-v2/sim.js:2037-2038 and
+    // :2068-2071 exactly.
+    kill:       { hue: "clay",   big: false, flash: 1,    ring: 1,   parts: 0 },
+    killheavy:  { hue: "clay",   big: true,  flash: 1,    ring: 1,   parts: 0 },
     boom:       { hue: "clay",   big: false, flash: 0.7,  ring: 0.8, parts: 0.7 },
     blast:      { hue: "clay",   big: true,  flash: 0.9,  ring: 1,   parts: 0.8 },
     death:      { hue: "clay",   big: true,  flash: 1,    ring: 1,   parts: 0 },
-    hit:        { hue: "clay",   big: false, flash: 0.35, ring: 0,   parts: 0.25 },
+    hit:        { hue: "clay",   big: false, flash: 0.35, ring: 0,   parts: 0 },
     clang:      { hue: "steel",  big: false, flash: 0.3,  ring: 0,   parts: 0.2 },
     // THE TWO ENEMY-FIRE CUES, deliberately the quietest lit rows in the table.
     // They used to carry a kill-sized burst: `zap` at parts 0.3 sprayed 16
@@ -448,12 +462,18 @@
       // most of their path young, so their white window is the narrower one.
       const whiteLf = p.k === 0 ? 0.85 : 0.65;
       const name = (p.col === "bright" && lf < whiteLf) ? (p.hue || "clay") : p.col;
-      const pc = PAL[name] || PAL.clay;
+      // HARDENED AT D44: PAL now carries a NESTED `kernel` sub-table, so a
+      // dynamic name lookup can return an OBJECT and pass a `||` truthiness
+      // test. Every one of these four sites demands a STRING, or it hands
+      // sprite() something hexRgb parses to rgba(0,0,0,a) — invisible under
+      // "lighter", and silent.
+      const hex = (v) => (typeof v === "string" ? v : null);
+      const pc = hex(PAL[name]) || PAL.clay;
       if (p.k === 1) {
         const s = p.size;
         const gr = p.size * 2.2;
         g.globalAlpha = 0.3 * lf;
-        g.drawImage(sprite(PAL[p.hue] || pc), p.x - gr, p.y - gr, gr * 2, gr * 2);
+        g.drawImage(sprite(hex(PAL[p.hue]) || pc), p.x - gr, p.y - gr, gr * 2, gr * 2);
         g.globalAlpha = 0.85 * lf;
         g.fillStyle = pc;
         g.fillRect(p.x - s / 2, p.y - s / 2, s, s);
@@ -617,10 +637,17 @@
       }
     }
 
-    // bullets: a warm halo with a small hot core — off the frame's copies
+    // bullets: the ROUND'S OWN COLOUR at the demo's radius (D43). A round that
+    // declared a look wears its ink; the standard gun's is the demo's
+    // alternating cyan/ink pair, read off the SAME id parity the flat pass
+    // reads, so the two planes agree with no field between them. The kernel
+    // hues live nested under PAL.kernel — never merged into PAL, where `dim`
+    // and `bright` would collide with the hot table's own bytes.
     for (const b of (view && view.bullets) || G.bullets) {
       if (b.dead || b.spent) continue;
-      blob(b.x, b.y, 7.5 * gl, PAL.clay, 0.5);
+      const col = b.ink !== undefined ? b.ink
+        : (((b.id | 0) & 1) ? PAL.kernel.cyan : PAL.kernel.ink);
+      blob(b.x, b.y, 10 * gl, col, 0.22 * g1);
       blob(b.x, b.y, 3.2, PAL.bright, 0.7 * g1);
     }
 
@@ -642,9 +669,22 @@
           // missile records are tier-LESS on purpose and keep the NAME test:
           // a prefix match on an elite name would burn clay under a gold
           // plate — the hull-0 two-clays bug, one plane over.
-          const hue = L.tier
-            ? (L.tier >= 3 ? PAL.gold : L.tier === 2 ? PAL.radar : PAL.clay)
-            : (L.t.lastIndexOf("radar", 0) === 0 ? PAL.radar : PAL.clay);
+          // ---- D44: `col` OUTRANKS BOTH -----------------------------------
+          // The record may now carry the KERNEL's own colour NAME, and when it
+          // does it is the most specific authority on this halo's hue: the
+          // body's plate ink and its light are then the same decision, which is
+          // the whole of D44. It is tested FIRST because the two tests below are
+          // fallbacks for a record that cannot answer — `tier` is the OLD
+          // roster's plate table and `t` is a prefix guess.
+          //   THE NAME IS MAPPED AND NEVER PASSED THROUGH: blob takes HEX
+          // (hexRgb does parseInt(hex.slice(1), 16)), and a name handed straight
+          // in parses to rgba(0,0,0,a), which under "lighter" is INVISIBLE and
+          // reds nothing. The `|| PAL.clay` is the unknown-name arm.
+          const hue = L.col
+            ? (PAL.kernel[L.col] || PAL.clay)
+            : L.tier
+              ? (L.tier >= 3 ? PAL.gold : L.tier === 2 ? PAL.radar : PAL.clay)
+              : (L.t.lastIndexOf("radar", 0) === 0 ? PAL.radar : PAL.clay);
           blob(L.x, L.y, L.r * 2.6 * gl, hue, 0.4);
         }
       }
@@ -715,7 +755,8 @@
       // it is unit-free and follows every speed upgrade for nothing.
       //
       // ...CLAMPED to the distance the round has actually flown. K is a count of
-      // TICKS (3.24 of them, 48.6 world px at BSPEED 15), and a round one tick
+      // TICKS (3.24 of them, 121.5 world px at BSPEED 37.5 — the comment read
+      // 48.6 at the old BSPEED 15 until D43 swept it), and a round one tick
       // old has covered 15 of those px: the other 33 hung out the far side of
       // the muzzle, through and behind the ship that fired it. That is what the
       // owner saw and called bad, and it reads worst in ?mp, where an own shot
@@ -734,12 +775,17 @@
       // BEHIND the hull; the projection reads negative there and clamps to
       // zero. A round that folds must still re-stamp its origin at the fold,
       // which is what the BOUNCE branch of the bullet integrator does.
-      const streak = (x, y, dx, dy, flown) => {
+      //   THE COLOUR IS AN ARGUMENT since D43: the smear behind the standard
+      // round is the round's own bolt colour, and the ship trails and the
+      // speculative tracers still pass nothing and still burn clay. `K` is NOT
+      // an argument — the smear keeps the length it always had, so
+      // tests/fx-checks.js's tail arithmetic is untouched by this row.
+      const streak = (x, y, dx, dy, flown, col) => {
         if (!dx && !dy) return;
         const k = flown >= 0 ? Math.min(K, flown / Math.hypot(dx, dy)) : K;
         if (!(k > 0)) return; // a round still sitting on its own muzzle: the
                               // halo is its whole ink until it has moved
-        g.strokeStyle = PAL.clay;
+        g.strokeStyle = col || PAL.clay;
         g.globalAlpha = 0.2 * TRAILS;
         g.lineWidth = 3.4;
         g.beginPath();
@@ -768,7 +814,9 @@
         // is the interpolated pose and px the last tick's, so the difference is
         // alpha-scaled and the streak would pulse from nothing to full length
         // once per tick. vx/vy is the same vector at alpha 1 and constant under it.
-        streak(b.x, b.y, b.vx || 0, b.vy || 0, flownFrom(b, b.vx || 0, b.vy || 0));
+        streak(b.x, b.y, b.vx || 0, b.vy || 0, flownFrom(b, b.vx || 0, b.vy || 0),
+          b.ink !== undefined ? b.ink
+            : (((b.id | 0) & 1) ? PAL.kernel.cyan : PAL.kernel.ink));
       }
       // ...and the SPECULATIVE rounds, which is why every one of these is fresh.
       // A tracer can be matched, expire, be retracted mid-flight, or vanish in a
@@ -795,7 +843,7 @@
     // re-derived from (age) alone so a repeated render paints the same pixels
     for (const F of flashes) {
       if (F.flash > 0 && F.age < 9) {
-        const hue = PAL[F.hue] || PAL.clay;
+        const hue = (typeof PAL[F.hue] === "string" ? PAL[F.hue] : null) || PAL.clay;
         const ff = 1 - F.age / 9;
         blob(F.x, F.y, (F.big ? 26 : 14) * (0.4 + 0.6 * (1 - ff)) * Math.min(1.4, gl + 0.4),
              PAL.bright, 0.8 * ff * F.flash);
@@ -809,7 +857,7 @@
       if (!(F.ring > 0) || F.age >= F.life) continue;
       const rf = F.age / F.life;
       g.globalAlpha = (1 - rf) * 0.5 * F.ring;
-      g.strokeStyle = PAL[F.hue] || PAL.clay;
+      g.strokeStyle = (typeof PAL[F.hue] === "string" ? PAL[F.hue] : null) || PAL.clay;
       g.lineWidth = (F.big ? 3 : 2) * (1 - rf) + 0.5;
       g.beginPath();
       g.arc(F.x, F.y, (F.big ? 3.1 : 2.2) * F.age + 3, 0, TAU);
@@ -1070,6 +1118,9 @@
   // whatever else the layer happens to be drawing — which is exactly how the
   // first version of this suite's bloom leg passed on the nebula instead.
   function setBloom(v) { BLOOM_INT = Math.max(0, +v || 0); }
+  // ...and the halo dial beside it, same shape: a non-number parks at 0 rather
+  // than poisoning every radius in the file with NaN.
+  function setGlow(v) { GLOW = Math.max(0, +v || 0); }
 
   // ---- lifecycle ----------------------------------------------------------
   function reset() {
@@ -1096,10 +1147,10 @@
              flashes: flashes.length, parts: P.length,
              ring: rings[0] ? Math.min(rings[0].n, RING_N) : 0,
              bloom: BLOOM_INT > 0 ? (filterSupported() ? "filter" : "halving") : "off",
-             nebula: NEBULA, baked: nebCache.size, bloomInt: BLOOM_INT,
+             nebula: NEBULA, baked: nebCache.size, bloomInt: BLOOM_INT, glow: GLOW,
              layers: !!glowC, w: LW, h: LH, fade: fadeKeep, cam: camHas };
   }
 
   window.FX = { on: () => ON, setOn, cue, advance, composite, resize, reset,
-                nebula, setNebula, setBloom, snapshot };
+                nebula, setNebula, setBloom, setGlow, snapshot };
 })();

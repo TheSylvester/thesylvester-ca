@@ -258,10 +258,12 @@
           <output id="cambox-out" for="cambox"></output>
         </div>
         <div class="row">
-          <!-- the rail ran to 60 and the owner chose 60, so his number was the
-               END of it and not a measurement. 150 is the width the PORT-W lab
-               gave the same dial, carried here so the feel gate can go past his
-               floor instead of re-confirming it. -->
+          <!-- the rail ran to 60 at D11 and the owner chose 60, so THAT number
+               was the END of the rail and not a measurement. 150 is the width
+               the PORT-W lab gave the same dial, carried here so the feel gate
+               could go past his floor — AND IT DID: he flew the wider rail and
+               chose 30 (D52, 2026-08-27). The default is a measurement now.
+               This row carries no value attribute; js/game.js writes it. -->
           <label for="camlead">lookahead</label>
           <input id="camlead" type="range" min="0" max="150" step="1">
           <output id="camlead-out" for="camlead"></output>
@@ -306,6 +308,21 @@
           <label for="stardens">star density</label>
           <input id="stardens" type="range" min="0" max="10" step="0.5">
           <output id="stardens-out" for="stardens"></output>
+        </div>
+        <div class="row">
+          <label for="glow">glow</label>
+          <input id="glow" type="range" min="0.05" max="2.5" step="0.05">
+          <output id="glow-out" for="glow"></output>
+        </div>
+        <div class="row">
+          <label for="starsize">star size</label>
+          <input id="starsize" type="range" min="1" max="4" step="0.25">
+          <output id="starsize-out" for="starsize"></output>
+        </div>
+        <div class="row">
+          <label for="starlit">star light</label>
+          <input id="starlit" type="range" min="0.3" max="2" step="0.05">
+          <output id="starlit-out" for="starlit"></output>
         </div>
         <div class="row">
           <label for="reseed">starfield</label>
@@ -496,15 +513,15 @@
     </section>
   </div>
 </div>
-<script>window.BUILD="720b250";</script>
-<script src="js/palette.js?v=720b250"></script>
-<script src="js/abilities.js?v=720b250"></script>
-<script src="js/engine.js?v=720b250"></script>
-<script src="js/game.js?v=720b250"></script>
-<script src="js/encounter.js?v=720b250"></script>
-<script src="js/audio.js?v=720b250"></script>
-<script src="js/net.js?v=720b250"></script>
-<script src="js/fx.js?v=720b250"></script>
+<script>window.BUILD="f62db47";</script>
+<script src="js/palette.js?v=f62db47"></script>
+<script src="js/abilities.js?v=f62db47"></script>
+<script src="js/engine.js?v=f62db47"></script>
+<script src="js/game.js?v=f62db47"></script>
+<script src="js/encounter.js?v=f62db47"></script>
+<script src="js/audio.js?v=f62db47"></script>
+<script src="js/net.js?v=f62db47"></script>
+<script src="js/fx.js?v=f62db47"></script>
 <script>
 // THE FLIP (PORT-W, 2026-08-25). The demo pair below is DORMANT here — hosted by
 // PORT-R's reproduction gate, stepped by nothing this page runs. But the kernel
@@ -522,10 +539,10 @@
 // LITERAL is still nobody's business short of the instrument rework it forces.
 globalThis.DEMO_WORLD_BOUNDED = true;
 </script>
-<script src="js/demo-kernel.js?v=720b250"></script>
+<script src="js/demo-kernel.js?v=f62db47"></script>
 <!-- S3b lane 1: the adapter facade, SIM_FILES member 7. -->
-<script src="js/encounter-host.js?v=720b250"></script>
-<script src="js/demo-render.js?v=720b250"></script>
+<script src="js/encounter-host.js?v=f62db47"></script>
+<script src="js/demo-render.js?v=f62db47"></script>
 <script>
 // ---- THE FLIP (PORT-S S3b lane 3, commit C) --------------------------------
 // THE KERNEL IS THE ENCOUNTER ON THIS PAGE FROM THIS COMMIT. It was hosted

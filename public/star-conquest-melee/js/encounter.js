@@ -292,6 +292,20 @@
     rec.img.src = ICON_DIR + row.icon;
     return rec;
   });
+  // D48 (PORT-L) — THE LOADOUT RAIL'S OWN ART, keyed by js/abilities.js's own
+  // `key` field and NOT by a shop index: the rail lists abilities, the shop
+  // lists catalog rows, and the two sets only overlap by accident. Built at
+  // MODULE SCOPE for ICONS' own reason — server/dom-stub.mjs denies
+  // `new Image()`, addEventListener and a src write under its inSim guard, so
+  // this construction may never run inside the headless sim host.
+  const RAIL_ICON_FILE = { fire: "fire.png", comet: "comet.png", railshot: "railshot.png" };
+  const RAIL_ICONS = {};
+  for (const k in RAIL_ICON_FILE) {
+    const rec = { img: new Image(), ok: false };
+    rec.img.addEventListener("load", () => { rec.ok = true; render(); });
+    rec.img.src = ICON_DIR + RAIL_ICON_FILE[k];
+    RAIL_ICONS[k] = rec;
+  }
 
   // ---- upgrade terms — per seat, ONE derivation ---------------------------
   // stock is the non-purchase gear every seat carries. keyThrust is STOCK
@@ -1872,12 +1886,19 @@
         //     its sink, with its own crediting seat — one kill, one cue, and
         //     `reapDead`'s rule that the reap owns the canonical kill sound is
         //     the same rule seen from the other plane.
-        const bm = Math.hypot(b.vx, b.vy) || 1;
         const ix = b.px + (b.x - b.px) * bestT;
         const iy = b.py + (b.y - b.py) * bestT;
         b.dead = true; // consumed exactly once — the game sweep removes it
         if (EncounterHost.damageKernelBody(kb, b.dmg, ix, iy, shooter, "shot")) E.hitsDealt++;
-        spawnImpactFx(ix, iy, b.vx / bm, b.vy / bm, "enemy");
+        //   D45 (PORT-L): production's clay impact burst is GONE from this
+        // branch. A hit on a kernel body used to paint 23 particles, 21 of them
+        // production's own orange, over the two the kernel spawns in the body's
+        // colour. The kernel's pair is the whole tell now, which is what the
+        // demo draws. `const bm = Math.hypot(...)` went with the call — it had
+        // no other reader in this branch.
+        //   THE CUE STAYS. emit("hit") has FOUR consumers — the sound, the
+        // light layer's flash, the comet-ram inference in js/game.js, and the
+        // wire — and this row is a particle decision, not a channel one.
         emit("hit", { x: ix, y: iy }, undefined, shooter);
         blastAt(ix, iy, kb, b.dmg, shooter, b.blastR);
         continue;
@@ -3698,23 +3719,42 @@
     // its orbs all reach js/fx.js's one consumer through the accessor that was
     // always the seam for this.
     //
-    // TIERLESS ON PURPOSE. The `tier` field is the OLD roster's steel/radar/gold
-    // plate table, and a kernel body has no tier — so the halo falls through to
-    // the fx layer's NAME test, exactly as a missile's always has. A tier
-    // invented here would be a second colour authority for a plate this file no
-    // longer draws.
+    // TIERLESS ON PURPOSE, AND COLOURED SINCE D44. The `tier` field is the OLD
+    // roster's steel/radar/gold plate table, and a kernel body has no tier — a
+    // tier invented here would be a second colour authority for a plate this
+    // file no longer draws. What a kernel body DOES have is a colour, and that
+    // was always the more specific answer: every row below carries `col`, the
+    // kernel's own colour NAME, so the halo and the plate the successor plane
+    // draws under it are one decision. The fx layer's NAME test is still there
+    // and is now the LAST fallback, for a record that cannot answer.
     //
     // IT IS A LIVE READ, never a cached one, on this function's own rule: the
     // kernel REPLACES nothing but its arrays are re-read every frame anyway,
     // and the buffer below is refilled per call and never retained.
     if (typeof window !== "undefined" && window.EncounterHost && window.EncounterHost.installed()) {
       const K = window.DemoKernel;
+      // D44 — THE BODY NAMES ITS OWN LIGHT. `col` is the kernel's colour NAME
+      // (js/demo-kernel.js's `C` keys), not a byte: this file is a SIM file and
+      // the hot spelling lives in the render plane's palette, so the NAME
+      // crosses and js/fx.js does the lookup. It is the SAME field the
+      // successor plane's plate ink reads — STATS[type].color — so the halo
+      // cannot disagree with the hull it surrounds.
+      //   The lookup is guarded because bodies() is the HOST's list and not the
+      // STATS table: a type with no row (or a kernel that did not load) pushes
+      // no `col` at all and falls through to the name test unchanged.
+      const ST = (K && K.STATS) || null;
       for (const e of window.EncounterHost.bodies()) {
         if (e.dead || e.hp <= 0) continue;
-        LIGHTS.push({ x: e.x, y: e.y, r: e.r, t: e.type });
+        const row = ST ? ST[e.type] : null;
+        LIGHTS.push({ x: e.x, y: e.y, r: e.r, t: e.type, col: row ? row.color : undefined });
       }
       if (K && K.S) {
-        for (const b of K.S.bullets) if (!b.dead) LIGHTS.push({ x: b.x, y: b.y, r: b.r, t: b.kind || "bolt" });
+        // THE ORDNANCE IS THE CHEAPER HALF AND THE LOUDER ONE. Every kernel
+        // round already carries `.color` on its own record, so this costs a
+        // field and no lookup — and enemy ordnance is most of the moving ink in
+        // a wave, so a bodies-only D44 would leave the field orange.
+        for (const b of K.S.bullets) if (!b.dead) LIGHTS.push({ x: b.x, y: b.y, r: b.r, t: b.kind || "bolt", col: b.color });
+        // ORBS UNTOUCHED — the clay bounty stands, by D44's own ruling.
         for (const o of K.S.orbs) LIGHTS.push({ x: o.x, y: o.y, r: ECFG.orb.r, t: "orb" });
       }
     }
@@ -3877,10 +3917,17 @@
   // At 1280x720 and every taller window the panel is WIDTH-limited and the
   // band costs the cards nothing at all.
   const LOADOUTUI = {
-    railH: 56,       // the whole band, added to the panel's own height
+    railH: 98,       // the whole band, added to the panel's own height.
+                     // 2 * pad 6 + capH 8 + 3 * rowH 26 = 98. THE BUDGET IS
+                     // railH <= 251.26, and the live-fit leg in
+                     // tests/wave1-checks.js is its oracle; a NEW leg below
+                     // pins this identity itself, because nothing did.
     pad: 6,          // air inside the band, all four sides
     capH: 8,         // the LOADOUT caption's row
-    rowH: 12,        // ...and one ability row
+    rowH: 26,        // ...and one ability row. It was 12 — HALF the smallest
+                     // size this file says an icon may shrink to. 24 px of art
+                     // plus 1 px of air each way (D48, PORT-L).
+    iconW: 24,       // the SHOP's own icon floor, and the row's height budget
     markW: 3,        // the SELECTED row's square, the hull pips' own idiom
     dotW: 4,         // ...and the STATE DOT at the row's right edge
     priceW: 14,      // the budget a two-digit energy price takes at 9 px on
@@ -3946,14 +3993,19 @@
     const railTop = detailTop + detailH;
     const railX = S.pad, railW = S.w - 2 * S.pad;
     const markX = railX + R.pad;                     // the selection square's column
-    const nameX = markX + R.markW + 2;               // ...and the name's, past it
+    // ...and the ART's, past it. THE 4 px GAP IS MEASURED, not chosen: the mark
+    // probe in tests/wave1-checks.js blits FORWARD from Math.round(p.x), so at
+    // the suite's fit its 2-device-px patch spans 16.24..19.22 field px — an
+    // iconX of 19 would put real icon ink inside the mark probe's own patch.
+    const iconX = markX + R.markW + 4;               // 21
+    const nameX = iconX + R.iconW + 3;               // 48 — the name, past the art
     const dotX = railX + railW - R.pad - R.dotW;     // the state dot's, at the far edge
     const priceRight = dotX - 3;                     // the price hangs off the dot
     const railRect = {
       x: railX, y: railTop + R.pad,
       w: railW, h: R.railH - 2 * R.pad,
       capH: R.capH, rowH: R.rowH,
-      markX, markW: R.markW, nameX,
+      markX, markW: R.markW, iconX, iconW: R.iconW, nameX,
       dotX, dotW: R.dotW, priceRight,
       trackW: priceRight - R.priceW - nameX,
     };
@@ -4329,13 +4381,39 @@
     return s;
   }
 
+  // D48 (PORT-L) — THE TOP-LEFT COLUMN'S TWO SHARED DERIVATIONS. Both the draw
+  // and statusStackRight() call these, so the measured stack and the painted
+  // ink cannot disagree — the retired-third-copy lesson, one plane over.
+  //   THE hullMax TERM IN barW IS NOT DECORATION. statusStackRight() is what
+  // the hover channel's left edge derives from, and wave1's channel sweep walks
+  // hullMax until the panel stands down; a width that stopped answering hullMax
+  // would run that sweep 200 sterile iterations and the leg asserts it closes.
+  //   THE FLOOR IS LEGIBILITY: at hullMax 3 the pip row was 27 px, and a
+  // 0.06-hull kernel graze rendered as 0.05 px of ink. At 120 px it is 2.4.
+  function hullBarW(LS) { return Math.max(120, LS.hullMax * 10 - 3); }
+  // The number beside the bar is on a 100 SCALE and is DISPLAY ONLY — the sim
+  // keeps its own hullMax. `ceil` so a live sliver never reads 0 (the lie
+  // js/net.js used to ship), and max(1, …) so it never reads 0 either way.
+  function hullShown(LS) {
+    return LS.hullMax > 0 ? Math.max(1, Math.ceil((LS.hull / LS.hullMax) * 100)) : 0;
+  }
   function statusStackRight() {
     const wave = waveHeader(); // the DRAW's own string, not a second spelling
     const foes = "FOES " + foeCount();
+    const LS = localSeatRec();
+    const barW = hullBarW(LS);                 // ONE derivation with the draw
+    const POOL = presentedPool(localSeat());
+    const hullLine = "HULL " + hullShown(LS) + " / 100";
+    const enLine = "ENERGY " + Math.floor(POOL.en) + " / " + Math.round(POOL.enMax);
     return Math.max(
       8 + EMW * 10 * wave.length,
-      8 + (localSeatRec().hullMax * 10 - 3) + 1, // the energy bar's outer stroke edge
-      8 + EMW * 9 * ("XP " + localSeatRec().xp).length,
+      // the two numbers sit BESIDE their bars, at 400 8px — the band between
+      // the header's ink and XP's is 20.75 px and two bars plus two stacked
+      // text rows need ~24, and y 30 and y 57 are pinned baselines in two
+      // suites each
+      8 + barW + 5 + EMW * 8 * hullLine.length,
+      8 + barW + 5 + EMW * 8 * enLine.length,
+      8 + EMW * 9 * ("XP " + LS.xp).length,
       8 + EMW * 9 * foes.length);
   }
 
@@ -4514,7 +4592,15 @@
   // arrived. alpha is how the unaffordable and the unavailable read as such —
   // the icons are flat single-purpose art, so dimming them beats recolouring.
   function drawShopIcon(i, x, y, size, alpha) {
-    const rec = ICONS[i];
+    drawIconRec(ICONS[i], x, y, size, alpha);
+  }
+  // ...and the same draw addressed by RECORD rather than by shop index, which
+  // is what the loadout rail needs: its rows are abilities, not catalog rows.
+  // THE RAIL PASSES NO PLACEHOLDER — it calls this only when rec.ok, because
+  // the stroked X below is card-sized (x+9 .. x+size-9) and would be a scribble
+  // at 24 px. A rail that shipped a stroked X on the COMET row is worse than
+  // no art.
+  function drawIconRec(rec, x, y, size, alpha) {
     ctx.save();
     ctx.globalAlpha = alpha;
     if (rec && rec.ok) {
@@ -4728,7 +4814,10 @@
       const d = A.def(id);
       if (!d) continue;
       const top = R.y + R.capH + id * R.rowH;
-      const base = top + 8;
+      // the text baseline sits in the MIDDLE of the taller row now: top + 17
+      // against the icon's top + 1 .. top + 25 band. It was top + 8, which was
+      // the middle of a 12 px row.
+      const base = top + 17;
       // ---- THE THREE COOLDOWN SHAPES ARE NOT UNIFORM, DELIBERATELY --------
       // js/abilities.js:66-72 records why: FIRE and COMET carry `cd: 0` and a
       // null spawn, because re-encoding either into the slot record would move
@@ -4769,6 +4858,12 @@
         ctx.fillStyle = C.clay;
         ctx.fillRect(R.markX, base - 3, R.markW, R.markW);
       }
+      // THE ART, between the mark and the name, dimmed by the same arm rule the
+      // price and the state dot answer — the icons are flat single-purpose art,
+      // so dimming beats recolouring. Gated on the bytes having arrived: a
+      // missing PNG is a console error, and test/run.mjs fails a run on one.
+      const art = RAIL_ICONS[d.key];
+      if (art && art.ok) drawIconRec(art, R.iconX, top + 1, R.iconW, armed ? 1 : 0.4);
       ctx.textAlign = "left";
       ctx.font = "400 9px " + FONT;
       ctx.fillStyle = C.bright;
@@ -4777,11 +4872,16 @@
         // ...and a row whose whole state lives in the slot draws the slot: a
         // one-px track under the name, filled to what has already elapsed.
         const cd = PL && PL.slots && PL.slots[id] ? PL.slots[id].cd : 0;
+        // TWO logical px, not one. railH 56 -> 98 drops the suite's own panel
+        // fit from 0.713 to 0.671, so a 1 px track lands on 0.67 DEVICE px and
+        // the three legs that read it through a 2x2 blit were untested at that
+        // fit. Two px is the insurance, and it costs the row nothing: the band
+        // between the baseline and the next row is 9 px.
         ctx.fillStyle = C.dim;
-        ctx.fillRect(R.nameX, base + 2, R.trackW, 1);
+        ctx.fillRect(R.nameX, base + 2, R.trackW, 2);
         ctx.fillStyle = C.clay;
         ctx.fillRect(R.nameX, base + 2,
-                     Math.max(0, R.trackW * (1 - Math.min(1, cd / d.cd))), 1);
+                     Math.max(0, R.trackW * (1 - Math.min(1, cd / d.cd))), 2);
       }
       if (d.en > 0) {
         // the price, dimmed through the arm rule's OWN energy clause rather
@@ -5217,23 +5317,27 @@
   // a 30x20 strip glyph and a 14 px field hull are genuinely DIFFERENT DATA,
   // not one shape written twice. The strip glyph points RIGHT because a card is
   // read as a catalogue of ships and a catalogue draws them facing — and since
-  // the ruled roster the field agrees: every hull row sits at turn 0, nose on
-  // +x, and the OWN ship's plate now rotates that nose onto the aim (see
-  // drawShip). So the four glyphs are REDRAWN as the field's own shapes —
-  // circle, triangle, diamond, pentagon, all nose right — and the card and the
-  // field stop disagreeing about what a hull looks like. Calling drawHull from
+  // the ruled roster the field agrees: every hull row sits nose on +x, and the
+  // OWN ship's plate now rotates that nose onto the aim (see drawShip). So the
+  // four glyphs are REDRAWN as the field's own shapes — arrowhead, triangle,
+  // diamond, pentagon, all nose right — and the card and the field stop
+  // disagreeing about what a hull looks like. Calling drawHull from
   // here would still be wrong: it would paint field ink into a card at card
   // scale.
   //   What is NOT duplicated is the part that could drift: the id set and the
   // labels are read straight off js/game.js's HULLS, the one place a hull is
-  // declared. This table adds a glyph per id and nothing else — glyph 0 says
-  // `sides: 0` so the drawer gives the UFO its arc, every other glyph is a
-  // point list — so a hull can never be offered here under a name or an id
+  // declared. This table adds a glyph per id and nothing else — every glyph is
+  // a point list since D42 (PORT-L) gave hull 0 the demo's arrowhead, so the
+  // drawer's `sides: 0` arc branch below is now the SCHEMA'S documented
+  // fallback and nothing reaches it; the glyphs here are PRE-DIVIDED to
+  // circumradius 1 because drawSkinStrip multiplies by SKINCELL.r and no
+  // normalisation runs on this table — so a hull can never be offered here
+  // under a name or an id
   // the field does not know. (Classic scripts share one global lexical
   // environment and js/game.js loads first — index.html:496 — so HULLS is a
   // plain read here, as C and SHIP_R already are.)
   const SKINGLYPHS = [
-    { id: 0, sides: 0 },
+    { id: 0, pts: [[1, 0], [-0.470588, -0.529412], [-0.176471, -0.176471], [-0.764706, 0], [-0.176471, 0.176471], [-0.470588, 0.529412]] },
     { id: 1, pts: [[1, 0], [-0.5, 0.866], [-0.5, -0.866]] },
     { id: 2, pts: [[1, 0], [0, 1], [-1, 0], [0, -1]] },
     { id: 3, pts: [[1, 0], [0.309, 0.951], [-0.809, 0.588], [-0.809, -0.588], [0.309, -0.951]] },
@@ -5278,7 +5382,10 @@
         });
         ctx.closePath();
       } else {
-        // sides 0 — the UFO's arc, at the same reach the point glyphs use
+        // NO GLYPH ROW REACHES THIS SINCE D42 — every row carries `pts` now.
+        // It stays as the schema's declared fallback: a row added with `sides`
+        // and no point list draws a disc at the same reach the point glyphs
+        // use, instead of an empty cell under a live label.
         ctx.arc(x0 + SKINCELL.w / 2, cy, SKINCELL.r, 0, Math.PI * 2);
       }
       ctx.fill();
@@ -5377,16 +5484,21 @@
     // continuous with the banner the player just watched fade
     ctx.fillText(waveHeader(), 8, 16); // ...and statusStackRight() measures THIS
     const LS = localSeatRec(); // the LOCAL seat — every readout in this column is ITS state
-    for (let i = 0; i < LS.hullMax; i++) { // hull pips — the LIVE max, MAX HULL grows the row
-      if (i < LS.hull) {
-        ctx.fillStyle = C.clay;
-        ctx.fillRect(8 + i * 10, 21, 7, 7);
-      } else {
-        ctx.strokeStyle = C.dim;
-        ctx.lineWidth = 1;
-        ctx.strokeRect(8.5 + i * 10, 21.5, 6, 6);
-      }
-    }
+    // D48 (PORT-L) — THE PIPS RETIRE FOR A BAR AND A NUMBER, which is what
+    // demo-v2 draws (sim.js:3265-3273) and what V4 kept. A pip row cannot show
+    // a fractional hull at all, and the successor plane deals fractions: a
+    // kernel blow costs 0.06-0.78 of a hull. The bar shows it; the number says
+    // it out loud.
+    const barW = hullBarW(LS);
+    const hullFrac = LS.hullMax > 0 ? Math.max(0, Math.min(1, LS.hull / LS.hullMax)) : 0;
+    ctx.strokeStyle = C.dim;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(8.5, 21.5, barW, 4);
+    // the DEMO's own rule: red under 28 %, and DEMO.red is the demo table's
+    // byte — PALETTE.flat carries no red, and a literal here is the one thing
+    // js/palette.js exists to prevent
+    ctx.fillStyle = hullFrac < 0.28 ? DEMO.red : C.clay;
+    ctx.fillRect(9, 22, Math.max(1, (barW - 1) * hullFrac), 3);
     // the ENERGY bar, under the hull pips and on the same left margin and pip
     // width, so the two columns read as one instrument. The pool comes off the
     // PLAYER STRUCT, never off a fresh energyCap() call: on a net client the
@@ -5394,7 +5506,9 @@
     // presentedPool: the struct's wire mirror everywhere, the PREDICTED pool
     // for the local seat in net mode — the bar answers the stick, not the RTT
     const EB = presentedPool(localSeat());
-    const ebW = LS.hullMax * 10 - 3; // the hull row's own width: pips at 10 px, less the last gap
+    const ebW = barW; // THE SAME WIDTH AS THE HULL BAR, so the two align. It was
+                      // the pip row's own span (hullMax * 10 - 3) and it takes
+                      // the same floor now, through the same one derivation.
     const ebF = EB.enMax > 0 ? Math.max(0, Math.min(1, EB.en / EB.enMax)) : 0;
     ctx.strokeStyle = C.dim;
     ctx.lineWidth = 1;
@@ -5424,6 +5538,14 @@
     }
     ctx.fillStyle = C.dim; // the floor itself, one px wide
     ctx.fillRect(9 + (ebW - 1) * ENARM, 32, 1, 3);
+    // THE TWO NUMBERS, BESIDE THEIR BARS and never under them: y 30 and y 57
+    // are pinned baselines in two suites each, and the free band between the
+    // header's ink and XP's is 20.75 px — a stacked row would land on one of
+    // them. The hull number is on a 100 scale and is DISPLAY ONLY.
+    ctx.fillStyle = C.dim;
+    ctx.font = "400 8px " + FONT;
+    ctx.fillText("HULL " + hullShown(LS) + " / 100", 8 + barW + 5, 26);
+    ctx.fillText("ENERGY " + Math.floor(EB.en) + " / " + Math.round(EB.enMax), 8 + barW + 5, 36);
     ctx.fillStyle = C.dim; // the wallet — a flat count; an uncapped wallet has no denominator to bar
     ctx.font = "400 9px " + FONT;
     // the two readouts sit 6 px lower than they used to: the ENERGY bar took

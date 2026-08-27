@@ -1199,7 +1199,7 @@
   // without putting the rule somewhere those pages can reach it is precisely the
   // failure PORT-S-DEBT.md's own "hazard" section describes: the pages would
   // ease to the ship centre with the leash and the arena clamp and NO LEAD AT
-  // ALL, and ease 0.05, camLead 60 and cursorPull 1.0 would be silently gone
+  // ALL, and ease 0.05, camLead 30 and cursorPull 1.0 would be silently gone
   // from the build he passed.
   //
   // SO THIS IS A THIRD COPY OF THE ARITHMETIC, AND IT IS DECLARED AS ONE, WITH
@@ -1231,10 +1231,12 @@
   // three exactly as a wholesale retirement would take the owner's panel with
   // it. js/demo-render.js keeps the star three and ROUTES the camera five here.
   var CAM_EASE = 0.05;      // js/game.js CAMEASE — the owner's, 2026-08-24
-  var CAM_LEAD = 60;        // js/game.js CAMLEAD — the owner's, 2026-08-24
+  var CAM_LEAD = 30;        // js/game.js CAMLEAD — the owner's, 2026-08-27 (D52; it
+                            // was 60, chosen at the TOP of a 60-wide rail)
   var CURSOR_PULL = 1.0;    // js/game.js CURSORPULL — D11 itself; the gain B/(1-B)
   var EDGE_MARGIN = 60;     // js/game.js EDGEMARGIN
-  var LEAD_DZ = 200;        // js/game.js LEADDZ, in ms
+  var LEAD_DZ = 0;          // js/game.js LEADDZ, in ms — 0 is GATE OFF, the owner's
+                            // choice at D52; it was 200
 
   // 3a — setCursorStage's REPLACEMENT, and it takes the same STAGE point.
   // The page cannot hand over a world point: by the time a frame reads it the

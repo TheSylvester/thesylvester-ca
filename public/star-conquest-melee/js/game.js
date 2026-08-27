@@ -77,7 +77,12 @@ const TICK = 1000 / 60; // 60 Hz fixed timestep — twice the original's 30 Hz
 const SHIP_R = 17.5;    // x2.5, WAS 7. The kernel mirrors it off the pose — its own
                         // four seat-radius sites default to 7/8 and read this when a
                         // seat is pose-driven, so both planes hit the same hull
-let VMAX = 5;           // x2.5, WAS 2. px per tick — 120 px/s baseline; the pause-screen slider drives this live, and
+let VMAX = 5;           // x2.5, WAS 2. px per tick — 300 px/s (5 x 60). This line read
+                        // "120 px/s baseline" until PORT-L: 120 was the WAS-2 number and
+                        // never moved with the x2.5, and the camera header at leadVec()
+                        // inherited the same stale figure. D50 (PORT-F) takes this to
+                        // 4.0833 px/tick = 245 px/s, the demo's own cap.
+                        // The pause-screen slider drives this live, and
                         // Encounter.mods.speed (the AFTERBURNER upgrade) adds px/tick on top of it AT THE
                         // CLAMP in step() — a purchase never writes the tuner value
 let ACCEL = 0.0375;     // x2.5, WAS 0.015. speed gain — velocity px/tick per count ALONG the heading (slider); default is the settled feel
@@ -370,6 +375,18 @@ const FLAME_EASE = 0.3; // per-tick easing of the engine flame toward the thrust
 const FLAME_GAIN = 80;  // flame px per px/tick² of thrust
 const FLAME_MAX = 20;   // flame length cap, px
 
+// D43 (PORT-L) — THE STANDARD ROUND'S BOLT, from demo-v2/sim.js:3014-3027.
+// Render-only, in no hash and in no tunable record. The demo draws a bolt as a
+// 1.25 px SEGMENT 1.8 ticks long and NO body; the ±4.2 px is the demo's spawn
+// alternation (js/demo-kernel.js:3022), which the sim may not move here, so the
+// DRAW translates the whole flight line by it instead — perpendicular to v, so
+// every projection is unchanged by it exactly.
+//   1.8 ticks is 67.5 px at BSPEED 37.5 today and becomes 19.5 px when PORT-F
+// lands the demo's own 650 px/s. It is written as TICKS, so it follows.
+const BOLT_TICKS = 1.8;
+const BOLT_LW = 1.25;
+const BOLT_SIDE = 4.2;
+
 // The flat pass's ink, and the light layer's, both from js/palette.js — the
 // one file a game colour is spelled in. THE VM CONTRACT: js/game.js is a sim
 // file and js/palette.js is not, so the headless host loads this script with
@@ -378,6 +395,12 @@ const FLAME_MAX = 20;   // flame length cap, px
 // browser index.html loads js/palette.js first, so both tables are real.
 const C = typeof PALETTE !== "undefined" ? PALETTE.flat : {};
 const HOT = typeof PALETTE !== "undefined" ? PALETTE.hot : {};
+// The DEMO plane's ink, the third table js/palette.js carries since D46. The
+// port rounds draw production's ship and its rounds in the demo's own bytes,
+// and neither `ink` nor `cyan` exists in PALETTE.flat — writing `C.ink` here
+// would hand canvas an `undefined` strokeStyle, which it SILENTLY IGNORES,
+// leaving whatever colour was set last. Same vm guard, same reason.
+const DEMO = typeof PALETTE !== "undefined" ? PALETTE.demo : {};
 const FONT = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 
 const canvas = document.getElementById("field");
@@ -1788,6 +1811,11 @@ function resize() {
   pausemenu.style.maxHeight = Math.max(60, window.innerHeight - hintTop - DEV_MARGIN) + "px";
   placeDevPanel(); // the panel earns the hint space back — see below
   if (window.FX) FX.resize(); // the light layers follow the backing store
+  // D47: the star readout states the DEVICE side, which is a function of dpr —
+  // and dpr is re-read here on every browser-zoom change. Without this the
+  // readout goes stale the moment the window does. Guarded because resize()
+  // runs before showTuner is reachable on the first load.
+  if (typeof showTuner === "function") showTuner();
 }
 // The dev panel hangs from the pause menu's line too, but it also SUPPRESSES
 // the pause text, so that space is free while it is open. A short window used
@@ -1933,22 +1961,32 @@ let CAMMODE = "lookahead"; // lock | smooth | deadzone | lookahead | flip (pause
 // this file's are what a reader would otherwise take these lines to have always
 // said. The source is the PORT-W feel gate, 2026-08-24, recorded verbatim in
 // .ai-reference/prompts/port-w-20260824/FEEL-GATE.md and carried by
-// PORT-S-DEBT.md. EDGEMARGIN 60 and LEADDZ 200 were already his numbers and
-// did not move.
+// PORT-S-DEBT.md. EDGEMARGIN 60 was already his number and did not move.
+//   AND THEN HE FLEW IT AGAIN. D52 (the owner's panel, 2026-08-27): "The camera
+// settings look much better like this" — CAMLEAD 60 -> 30 and LEADDZ 200 -> 0.
+// LEADDZ was his number at the PORT-W gate and is not any more, which is the
+// whole reason both halves of that sentence are written out here.
 let CAMEASE = 0.05;     // smooth/lookahead — fraction of the gap closed per tick (slider).
                         // THE OWNER'S; this file shipped 0.08 until D11.
 let CAMBOX = 0.4;       // deadzone — the inner box, as a fraction of the viewport (slider)
-let CAMLEAD = 60;       // lookahead — ticks of velocity the target leads by (slider).
-                        // THE OWNER'S; this file shipped 25 until D11. He chose it at the
-                        // TOP of a rail that stopped at 60, so it is a FLOOR on his
-                        // preference and not a measurement — the slider below reaches 150
-                        // now, the width the lab gave it, so the feel gate can go past it.
+let CAMLEAD = 30;       // lookahead — ticks of velocity the target leads by (slider).
+                        // THE OWNER'S, AND MEASURED NOW. This file shipped 25 until D11 and
+                        // 60 until D52. At D11 he chose 60 at the TOP of a rail that stopped
+                        // at 60, so that number was a FLOOR on his preference rather than a
+                        // measurement. The rail reaches 150 since, he flew it, and he chose
+                        // 30 (2026-08-27). It is a measurement now, and it is a HALVING —
+                        // the earlier reading pointed the wrong way.
 let CURSORPULL = 1.0;   // lookahead — D11 ITSELF, and the one dial here with NO production
                         // counterpart before it: a GAIN on the cursor's offset from the
                         // pane centre. 1.0 is the owner's own Blend 0.5. See cursorOffset().
                         // NEVER FLOWN at this value — it was reached by algebra rather than
                         // by his hand on a slider, which is why the row exists.
-let LEADDZ = 200;       // lookahead — ms a conflicting lead direction must persist to commit; 0 = gate off (slider)
+let LEADDZ = 0;         // lookahead — ms a conflicting lead direction must persist to commit;
+                        // 0 = GATE OFF, and off is what the owner chose at D52. It was 200,
+                        // his own PORT-W number, until he flew the halved lead beside it:
+                        // a 30-tick lead reverses half as far, so the judder the gate was
+                        // built against is half as loud and the gate's own lag is what is
+                        // left. The commit gate below reads this and short-circuits at 0.
 let EDGEMARGIN = 60;    // smooth/lookahead leash — min px between the ship and every view edge (slider)
                         // EXEMPT FROM COMMIT C's x2.5, and it is the sharpest exemption on
                         // the table. This is the OWNER'S OWN DIAL, chosen at the PORT-W feel
@@ -2058,13 +2096,23 @@ function cursorOffset() {
 //
 // THE VELOCITY UNIT IS THE TRAP, AND IT POINTS THE OTHER WAY HERE. P.vel is px
 // per TICK, so `P.vel * CAMLEAD` is CAMLEAD ticks of it and there is no divide;
-// js/demo-render.js divides by 60 because the demo stores px per SECOND. The
-// number 60 means the same thing in both files, but only one of them may divide.
-// What genuinely differs is the THROW, and it differs because the WORLDS differ:
-// at VMAX 2 px/tick this ship tops out at 120 px/s against the demo's 245, so
-// CAMLEAD 60 buys about 120 px of lead here and about 245 px there. That is a
-// property of the world rather than a unit slip, and it is a FEEL-GATE flag —
-// not something to "correct" by rescaling the owner's number behind his back.
+// js/encounter-host.js divides by 60 because the kernel stores px per SECOND.
+// The number 60 means the same thing in both files, but only one may divide.
+// THE ARITHMETIC, AS SHIPPED TODAY: VMAX is 5 px/tick (see :80), i.e. 5 x 60 =
+// 300 px/s, and CAMLEAD is 30 (D52, the owner's panel 2026-08-27), so the throw
+// at top speed is 30 x 5 = 150 px — the number showTuner prints. The lab's own
+// cap is 245 px/s, so the same dial buys 30 x (245/60) = 122.5 px there.
+// AFTER D50 (PORT-F) THE TWO CONVERGE: VMAX becomes 4.0833 px/tick — the demo's
+// 245 px/s to the digit — and this ship's throw falls to 30 x 4.0833 = 122.5 px,
+// which the panel rounds to 122. Nothing here needs re-deriving when it does;
+// the print reads VMAX live.
+// THIS BLOCK PREVIOUSLY READ "at VMAX 2 px/tick this ship tops out at 120 px/s
+// ... CAMLEAD 60 buys about 120 px of lead here and about 245 px there", which
+// was stale twice over: VMAX has been 5 since commit C's x2.5, and D52 halved
+// CAMLEAD to 30. Anyone tuning from that text tuned in the wrong direction.
+// The remaining difference is the THROW, and it is a property of the world
+// rather than a unit slip — a FEEL-GATE flag, not something to "correct" by
+// rescaling the owner's number behind his back.
 //
 // AIMLEAD, LEADBLEND AND LEADSRC ARE GONE, and the reason is that the rule
 // replaced them rather than retuned them. They mixed the velocity lead with a
@@ -2076,11 +2124,29 @@ function cursorOffset() {
 // collapsed it onto "aim", and S1 left the option standing on purpose so that
 // this commit could retire it beside the rule that supersedes it, rather than
 // have a deletion smuggled into the commit that emptied it.
+// THE VELOCITY TERM IS CLAMPED, AND THE CLAMP IS NOT INERT (D52, PORT-L).
+// LEADCAP is a hash-free render-only guard: it is in no tunable record and gets
+// no panel row, and demo-host's dial alarm reads only the five `let NAME = n;`
+// lines, so a `const` here does not disturb it.
+//   THE NUMBERS. A rank-0 comet tops out at VMAX 5 x COMETVMAX 3 = 15 px/tick,
+// so its velocity lead is 30 x 15 = 450 px — inside the 580 px leash
+// (FW/2 - EDGEMARGIN). But AFTERBURNER is ADDITIVE px/tick on VMAX and is
+// UNCAPPED (js/encounter.js: speed = 2.5 x rank), and the comet multiplier
+// composes with it: rank 1 gives (5 + 2.5) x 3 x 30 = 675 px and rank 2 gives
+// 900 — both PAST the leash. "Both under 580 so the clamp buys nothing" is the
+// rank-0 reading and it is false for any pilot who bought the row.
+//   IT CLAMPS THE VELOCITY TERM AND NOT THE SUM. Clamping the returned vector
+// would bound the CURSOR PULL as well, which is a different rule with a
+// different owner ruling behind it.
+const LEADCAP = 450;
 function leadVec() {
   const P = localPlayer(); // VIEW: the lead belongs to the ship the camera follows
   const u = cursorOffset();
-  return { x: P.vel.x * CAMLEAD + CURSORPULL * u.x,
-           y: P.vel.y * CAMLEAD + CURSORPULL * u.y };
+  let vx = P.vel.x * CAMLEAD, vy = P.vel.y * CAMLEAD;
+  const m = Math.hypot(vx, vy);
+  if (m > LEADCAP) { const k = LEADCAP / m; vx *= k; vy *= k; }
+  return { x: vx + CURSORPULL * u.x,
+           y: vy + CURSORPULL * u.y };
 }
 // the commit gate between leadVec() and the camera target — lookahead only.
 // A quick left-right reversal flips the ideal lead by up to ~2 × VMAX ×
@@ -3414,12 +3480,35 @@ function clientStep() {
 // Math.random, so the sky is stable frame to frame — SEED randomizes once
 // per page load, and the "reseed" button deals a new one.
 let SEED = (Math.random() * 0x100000000) >>> 0;
-let STARDENS = 4;  // average stars per cell (slider) — the hash spreads 0..2× around it
+// D47 (PORT-L) — DEFAULT 4 -> 1, and the arithmetic that says why is in the
+// commit. In short: the star is a FLAT 2 device px now instead of 0.49-1.46, so
+// the sky carries 4.4x the ink at the same count; STARDENS 1 puts 218.6 stars
+// in a 1920x1080 view against the pre-flip sky's 220.44, within 0.8 %.
+//   THE COUNT LAW IS NOT LINEAR. E[round(((h>>>24)/255) * STARDENS * 2)] equals
+// STARDENS only when STARDENS x 2 is an INTEGER — every half step on the rail
+// is exact and every quarter step is not, which is why the rail keeps its
+// min 0 / max 10 / step 0.5 and only the DEFAULT moves.
+let STARDENS = 1;  // average stars per cell (slider) — the hash spreads 0..2× around it
+// The two look dials the pause panel drives (commit 7). They are RENDER-ONLY:
+// in no tunable record, no snapshot, no hash and no fixture.
+//   NO GLOBAL COLLISION: js/demo-render.js declares its own STARSIZE, STARLIT,
+// STAR_LAYER_LIT and STAR_MIN_PX INSIDE its IIFE, so these top-level lets are
+// legal beside it. Unchecked that is one SyntaxError from a page that will not
+// boot, and node-golden cannot see it — SIM_FILES never loads demo-render.
+let STARSIZE = 1;  // the drawn side is max(2, round(STARSIZE * 2 * dpr)) DEVICE px
+let STARLIT = 1;   // scales the whole field's alpha
 const CELL = 128;  // layer-space cell size, px
-const LAYERS = [   // parallax factor, base size, tone — far is small and dim
-  { f: 0.25, size: 1, color: C.dim },
-  { f: 0.5, size: 1.5, color: "#9aa3b2" },
-  { f: 0.75, size: 2, color: C.bright },
+const STAR_MIN_PX = 2; // the floor, in DEVICE px: peak coverage (min(s,2)/2)^2
+                       // is 1.00 at s >= 2 at EVERY subpixel offset, which is
+                       // what makes a fractional position safe below
+const LAYERS = [   // parallax factor, tone, depth ALPHA — no per-layer `size`
+  // The tone ladder stays: production paints in flat tones everywhere else, and
+  // three brightnesses is what still separates near from far once every star is
+  // the same size. #9aa3b2 was a bare literal here and IS js/palette.js's
+  // `steel` — one token, spelled once.
+  { f: 0.25, color: C.dim, lit: 0.65 },
+  { f: 0.5, color: C.steel, lit: 0.82 },
+  { f: 0.75, color: C.bright, lit: 1 },
 ];
 function hash32(x, y, l, s) {
   let h = (s ^ Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(l + 1, 2246822519)) | 0;
@@ -3436,30 +3525,55 @@ function drawStars() {
   const cby = FRAME.cam.y;
   drawn.star.x = cbx; // the probe records the base ACTUALLY scrolled by — the
   drawn.star.y = cby; // one local every layer reads, so a regressed read moves it
+  // D47 (PORT-L) — THE STAR IS A SCREEN-SPACE MARK. The pass used to run under
+  // the field matrix, so a star's drawn size was `L.size * scale` and the sky
+  // shrank whenever the viewport did: the FW flip divided it by 720/342 = 2.11
+  // and the field went from a sky to a dusting. The transform is the IDENTITY
+  // now and every number below is a DEVICE pixel (the backing store is sized by
+  // dpr at resize() and nothing scales the context by it), so the mark is the
+  // same physical size at every window. The clip render() installed still holds.
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const side = Math.max(STAR_MIN_PX, Math.round(STARSIZE * 2 * dpr));
   for (let li = 0; li < LAYERS.length; li++) {
     const L = LAYERS[li];
     const offX = cbx * L.f; // this layer's scroll — its own view of its own space
     const offY = cby * L.f;
-    ctx.setTransform(scale, 0, 0, scale, ox - offX * scale, oy - offY * scale);
     ctx.fillStyle = L.color;
+    ctx.globalAlpha = Math.min(1, Math.max(0, L.lit * STARLIT));
     const x1 = Math.floor((offX + FW) / CELL); // only cells the view intersects
     const y1 = Math.floor((offY + FH) / CELL);
     for (let cy = Math.floor(offY / CELL); cy <= y1; cy++) {
       for (let cx = Math.floor(offX / CELL); cx <= x1; cx++) {
         let h = hash32(cx, cy, li, SEED);
         const n = Math.round(((h >>> 24) / 255) * STARDENS * 2); // 0..2× density, ≈ STARDENS on average
-        for (let i = 0; i < n; i++) { // three LCG draws per star: x, y, size
+        for (let i = 0; i < n; i++) { // three LCG draws per star: x, y, and one
+                                      // advance kept but not read
           h = (Math.imul(h, 1664525) + 1013904223) >>> 0;
-          const px = cx * CELL + (h / 0x100000000) * CELL;
+          const fx = cx * CELL + (h / 0x100000000) * CELL;
           h = (Math.imul(h, 1664525) + 1013904223) >>> 0;
-          const py = cy * CELL + (h / 0x100000000) * CELL;
+          const fy = cy * CELL + (h / 0x100000000) * CELL;
+          // THE THIRD ADVANCE IS KEPT AND ITS VALUE DISCARDED. It used to deal
+          // the per-star size variance this pass no longer has; dropping it
+          // would re-phase the LCG and move every star's POSITION. Keeping it
+          // holds the sky byte-identical to the old one at the same SEED, so
+          // the owner's A/B is a size-and-brightness comparison and nothing else.
           h = (Math.imul(h, 1664525) + 1013904223) >>> 0;
-          const sz = L.size * (0.8 + (h / 0x100000000) * 0.4); // slight per-star variance
-          ctx.fillRect(px - sz / 2, py - sz / 2, sz, sz);
+          // FIELD -> DEVICE by hand, the map the old matrix composed.
+          const px = ox + (fx - offX) * scale;
+          const py = oy + (fy - offY) * scale;
+          // INTEGER SIZE, FRACTIONAL POSITION. A side >= 2 already pins peak
+          // coverage at 1.00 at every subpixel offset, so rounding the position
+          // buys nothing and costs motion: the far layer would advance a whole
+          // device pixel per 2 px of camera travel and the sky would STEP
+          // instead of sliding, on the layer whose only job is to sell motion.
+          ctx.fillRect(px - side / 2, py - side / 2, side, side);
         }
       }
     }
   }
+  // MUST. Nothing downstream resets it, and the alpha would leak into the world
+  // pass render() sets up on the next line.
+  ctx.globalAlpha = 1;
 }
 
 // ---- drawing -------------------------------------------------------------
@@ -3641,13 +3755,16 @@ function woundAt(x, y, seat, b, k) {
 // reaches the sim, the snapshot or a trace: flight, hull points and weapons are
 // identical for every row. A stats block hangs off the same id in a
 // post-milestone round, and pays a recapture then like any other sim change.
-//   THE ROSTER IS THE OWNER'S RULED SET: UFO the circle, DELTA the triangle,
-// DIAMOND the 4-gon, PENTAGON the 5-gon. Every row sits at `turn: 0`, so a
-// polygon's first vertex — its nose — points along +x, and the OWN ship's
+//   THE ROSTER IS THE OWNER'S RULED SET: UFO, DELTA the triangle, DIAMOND the
+// 4-gon, PENTAGON the 5-gon. THE NAMES ARE THE OWNER'S AND THEY DO NOT MOVE —
+// D42 (PORT-L) gave row 0 the demo's ARROWHEAD in place of the circle, and the
+// label stayed "UFO". Every polygon row sits at `turn: 0` and row 0's authored
+// points start at [17, 0], so every nose points along +x, and the OWN ship's
 // rotate (see drawShip) lands that nose on the aim under one plain
 // rotate(angle). The other three seats hold nose-right, frozen, until R7 puts
-// a heading key (`hd`) on wire v11. Hull 0 is still the fallback every no-pick
-// and no-Net path resolves to — the circle of C.bright with the clay rosette.
+// a heading key (`hd`) on wire v11 — a disc hid that; an arrowhead will not.
+// Hull 0 is still the fallback every no-pick and no-Net path resolves to — now
+// the near-black arrowhead with a cyan chevron and eye, and NO rosette.
 //   A ROW IS: `plate` and `mark`, the two inks on the flat layer; `glow`, the
 // colour js/fx.js burns this hull's halo in — see below, it is the channel
 // that actually carries at range; a SHAPE; and `ring`/`pips`/`dot`, the
@@ -3662,7 +3779,15 @@ function woundAt(x, y, seat, b, k) {
 // string dies loudly. Every silhouette draws at the SAME SHIP_R: identity and
 // never reach, so no row of the table can buy a bigger or a smaller ship than
 // another. The point list stays OPEN — no repeated first vertex; the fill
-// closes it.
+// closes it, and a `d` string closes itself with Z.
+//   A row may also carry `edge`/`edgeW` (an outline stroke) and `accent` plus
+// `chev`/`eye` (the accents inside it). The widths are FIELD px in both draw
+// arms: the `d` arm strokes under ctx.scale(SHIP_R) and DIVIDES them, the
+// fallback arm multiplies its coordinates instead. Absent keys draw nothing.
+//   `pips: 0` is a row with NO rosette at all — row 0 since D42 — and such a
+// row still declares `mark`, because the rosette's own fillStyle is set before
+// the loop and canvas silently ignores an undefined one. `dot: 0` is the same
+// statement about the centre dot, which the draw gates on.
 //   The rosette shrinks with the plate's INRADIUS and not with its radius: a
 // triangle inscribed in SHIP_R only has 3.5 px of room to its own edge, and
 // the eight dots at 4.4 the circle carries would spill straight off three
@@ -3673,7 +3798,10 @@ function woundAt(x, y, seat, b, k) {
 // it is the only one that survives a glance across a four-way brawl, and the
 // silhouette is the secondary one so the four stay attributable in a greyscale
 // capture, to a colour-blind reader, and to a player whose ship is half behind
-// somebody else's. The three added plates are deliberately BLUE, GREEN and
+// somebody else's. SINCE D42 ROW 0'S PLATE IS NEAR-BLACK, so an unpicked seat
+// carries its identity on `glow`, on the cyan accents and on the silhouette —
+// the two-channel doctrine holds, but the PLATE is no longer one of the two for
+// that row. The three added plates are deliberately BLUE, GREEN and
 // VIOLET: clay is attack (bullets, the crown, the rosette) and cyan is the
 // radar's sensor, and an identity that borrowed either would be answering a
 // question the palette already answers. Since the tier pass, cyan ALSO reads
@@ -3691,7 +3819,23 @@ function woundAt(x, y, seat, b, k) {
 // ink would cool its biggest mark while every flame beside it stayed hot. That
 // shipped once, in the clay era (glow: C.clay).
 const HULLS = [
-  { id: 0, label: "UFO",      plate: C.bright,  glow: HOT.bright, mark: C.clay, sides: 0, turn: 0, ring: 4.4, pips: 8, dot: 1.2 },
+  { id: 0, label: "UFO",      plate: "rgba(9,12,25,0.92)", glow: HOT.bright, mark: C.clay, ring: 4.4, pips: 0, dot: 0,
+    // D42 (PORT-L) — the demo's arrowhead, demo-v2/sim.js:3061-3105 drawPlayer.
+    // `pts` is the RAW demo px list: compileHulls divides by far = 17 exactly
+    // and 17/17 is 1.0 with no rounding, so the list stays self-documenting and
+    // the normalisation is exact. The `d` string is the same points in unit
+    // space, truncated at 6 dp — at worst 2.35e-7 unit = 4.12e-6 field px.
+    // The silhouette is 2.94 % bigger than the demo's (SHIP_R 17.5 against a
+    // circumradius of 17) and that CANNOT be compensated here: compileHulls
+    // re-normalises `pts` unconditionally, so a pre-shrunk list would make the
+    // two spellings disagree, and SHIP_R is read by ten sim sites. Absorbed.
+    //   NO ROSETTE: the demo ship carries a chevron and an eye, not eight pips.
+    // `mark` STAYS DEFINED so the rosette's own fillStyle is never undefined.
+    d: "M1,0 L-0.470588,-0.529412 L-0.176471,-0.176471 L-0.764706,0 L-0.176471,0.176471 L-0.470588,0.529412 Z",
+    pts: [[17, 0], [-8, -9], [-3, -3], [-13, 0], [-3, 3], [-8, 9]],
+    edge: DEMO.ink, edgeW: 1.65, accent: DEMO.cyan,
+    chev: [[0.411765, 0], [-0.235294, -0.235294], [-0.235294, 0.235294]],
+    eye: [0.117647, 0, 0.111765] },
   { id: 1, label: "DELTA",    plate: "#7fb2f0", glow: "#7fb2f0", mark: C.clay, sides: 3, turn: 0, ring: 2.2, pips: 3, dot: 1.1 },
   { id: 2, label: "DIAMOND",  plate: "#8fd18a", glow: "#8fd18a", mark: C.clay, sides: 4, turn: 0, ring: 3.6, pips: 4, dot: 1.2 },
   { id: 3, label: "PENTAGON", plate: "#c99adf", glow: "#c99adf", mark: C.clay, sides: 5, turn: 0, ring: 3.8, pips: 5, dot: 1.2 },
@@ -3780,17 +3924,72 @@ function drawHull(x, y, K, tint) {
                                    // paints today
   if (H.d && typeof Path2D === "function") {
     // the SVG spelling, browser only: the Path2D is built LAZILY, once per
-    // row, because the headless vm has no Path2D at all — there, and in every
-    // pixel probe, the `pts` fallback below is the shape that draws
+    // row, because the headless vm has no Path2D at all — THERE the `pts`
+    // fallback below is the shape that draws. The pixel probes run in headless
+    // Chrome, which HAS Path2D, so they measure THIS arm; nothing in the gate
+    // ever draws the fallback, which is why a SOURCE pin holds the two
+    // spellings equal instead of a probe.
     if (!H.p2d) H.p2d = new Path2D(H.d);
     ctx.save();
     ctx.translate(x, y);
     ctx.scale(SHIP_R, SHIP_R);
     ctx.fill(H.p2d);
+    // THE OUTLINE AND THE ACCENTS, in UNIT space. lineWidth rides the
+    // transform, so every width DIVIDES by SHIP_R to land the demo's own field
+    // pixels — 1.65 / 17.5 and 1 / 17.5.
+    if (H.edge) {
+      ctx.strokeStyle = H.edge;
+      ctx.lineWidth = H.edgeW / SHIP_R;
+      ctx.stroke(H.p2d);
+    }
+    if (H.chev) {
+      ctx.strokeStyle = H.accent;
+      ctx.lineWidth = 1 / SHIP_R;
+      ctx.beginPath();
+      ctx.moveTo(H.chev[0][0], H.chev[0][1]); ctx.lineTo(H.chev[1][0], H.chev[1][1]);
+      ctx.moveTo(H.chev[0][0], H.chev[0][1]); ctx.lineTo(H.chev[2][0], H.chev[2][1]);
+      ctx.stroke();
+    }
+    if (H.eye) {
+      ctx.fillStyle = H.accent;
+      ctx.beginPath();
+      ctx.arc(H.eye[0], H.eye[1], H.eye[2], 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.restore();
   } else {
+    // THE FALLBACK ARM SAVES AND RESTORES TOO. It did not before D42, because
+    // it set no state; it sets strokeStyle and lineWidth now, and without the
+    // pair it would LEAK them into the frame. withHeading saves only when `rot`
+    // is truthy, so nothing else would catch it — and nothing can measure this
+    // arm either, because headless Chrome has Path2D. Read, never measured.
+    ctx.save();
     platePath(x, y, SHIP_R, H);
     ctx.fill();
+    // THE SAME LOOK, UNSCALED: coordinates MULTIPLY by SHIP_R and the widths
+    // are the demo's own plain numbers. Two arithmetics, one look.
+    if (H.edge) {
+      ctx.strokeStyle = H.edge;
+      ctx.lineWidth = H.edgeW;
+      ctx.stroke();
+    }
+    if (H.chev) {
+      ctx.strokeStyle = H.accent;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + H.chev[0][0] * SHIP_R, y + H.chev[0][1] * SHIP_R);
+      ctx.lineTo(x + H.chev[1][0] * SHIP_R, y + H.chev[1][1] * SHIP_R);
+      ctx.moveTo(x + H.chev[0][0] * SHIP_R, y + H.chev[0][1] * SHIP_R);
+      ctx.lineTo(x + H.chev[2][0] * SHIP_R, y + H.chev[2][1] * SHIP_R);
+      ctx.stroke();
+    }
+    if (H.eye) {
+      ctx.fillStyle = H.accent;
+      ctx.beginPath();
+      ctx.arc(x + H.eye[0] * SHIP_R, y + H.eye[1] * SHIP_R, H.eye[2] * SHIP_R, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
   }
   ctx.fillStyle = H.mark; // the rosette ring, sized to THIS plate's room
   for (let i = 0; i < H.pips; i++) {
@@ -3799,9 +3998,15 @@ function drawHull(x, y, K, tint) {
     ctx.arc(x + Math.cos(a) * H.ring, y + Math.sin(a) * H.ring, H.dot, 0, Math.PI * 2);
     ctx.fill();
   }
-  ctx.beginPath();
-  ctx.arc(x, y, 1.4, 0, Math.PI * 2);
-  ctx.fill();
+  // THE CENTRE DOT IS GATED on the row carrying a rosette at all. It was
+  // unconditional until D42, which is fine while every row has one; row 0 has
+  // none now, and an ungated dot would paint H.mark's clay in the middle of a
+  // near-black arrowhead the demo draws clean.
+  if (H.dot > 0) {
+    ctx.beginPath();
+    ctx.arc(x, y, 1.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 // The plate's colour as it burns down. Fixed steps rather than a lerp: the
 // game draws in flat pixel tones everywhere else, and a ramp of computed greys
@@ -5085,7 +5290,9 @@ function render() {
   if (window.FX) FX.nebula(FRAME.cam); // the ONE base-ink effect: behind the starfield,
                                        // baked per SEED, deterministic per state, and
                                        // parallaxed off the PRESENTED camera like the stars
-  drawStars(); // sets per-layer fractional-camera transforms off FRAME.cam (phase 4)
+  drawStars(); // SCREEN-SPACE since D47: it sets the IDENTITY transform, draws
+               // every layer's stars parallaxed off FRAME.cam by hand (phase 4)
+               // and restores globalAlpha. The next line re-sets the world matrix.
   ctx.setTransform(scale, 0, 0, scale, ox, oy);
   ctx.translate(-FRAME.cam.x, -FRAME.cam.y);
   recordDrawnFrame(); // the camera transform is set — record what this frame draws
@@ -5163,34 +5370,96 @@ function render() {
   // the standard trail is clamped against: a rifle round is four times as
   // fast and its full-length streak would otherwise reach back BEHIND the ship
   // that fired it on the first frame of its life.
+  //   D43 (PORT-L) SPLITS THIS LOOP IN TWO, ON THE RECORD AND NOT ON THE
+  // SHOOTER. A round that DECLARED a look — js/abilities.js's rail, ink
+  // #d97757, streak 27.5 — keeps the code below byte for byte. A round with NO
+  // ink is the basic gun, and it is the demo's bolt.
+  //   The stamp is on the DRAW and not on fire(), deliberately: js/game.js runs
+  // under the headless sim host with no palette in scope (C falls back to {}),
+  // so a colour stamped at fire() would be `undefined` on the server and would
+  // also have to cross the wire. The draw default covers solo and every round
+  // that reaches this pass from the wire, because js/net.js hands back `ink`
+  // undefined for the basic gun.
+  //   THE ONE ROUND IT DOES NOT REACH is the ?mp own seat's SPECULATIVE tracer,
+  // which is not in this array at all — drawTracers paints it, and it keeps the
+  // old look until R7 does the wire hand-off.
   ctx.fillStyle = C.bright;
   for (const b of FRAME.bullets || G.bullets) {
     if (b.dead || b.spent) continue; // consumed or expired — the next sweep removes it
-    const h = b.streak > 0 ? Math.hypot(b.vx, b.vy) : 0;
+    if (b.ink !== undefined) {
+      const h = b.streak > 0 ? Math.hypot(b.vx, b.vy) : 0;
+      if (h > 0) {
+        // the flown distance is a SIGNED PROJECTION along the velocity, not a
+        // bare hypot: the muzzle sits at the NOSE, ahead of the spawn pose, so a
+        // newborn round reads ~-SHIP_R and a distance would paint that as a
+        // backward streak through the hull — the exact defect the clamp exists
+        // to prevent. Negative clamps to zero: no tail until the round clears
+        // its own nozzle.
+        const len = Math.min(b.streak,
+          Math.max(0, ((b.x - b.ox) * b.vx + (b.y - b.oy) * b.vy) / h));
+        if (len > 0) {
+          ctx.save(); // the line join and width may not leak onto the dots below
+          ctx.strokeStyle = b.ink;
+          ctx.lineWidth = (b.r || 2.2) * 1.1;
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          ctx.moveTo(b.x - (b.vx / h) * len, b.y - (b.vy / h) * len);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+      ctx.fillStyle = b.ink;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r || 2.2, 0, Math.PI * 2);
+      ctx.fill();
+      continue;
+    }
+    // ---- THE STANDARD ROUND IS THE DEMO'S BOLT ---------------------------
+    // A BOLT_LW segment BOLT_TICKS long in alternating cyan/ink, and NO disc:
+    // the demo's bolt has no body but its own line. The COLLISION radius is
+    // untouched — b.r is still 5.5 and is simply not read here, which is what
+    // "the draw radius is decoupled from r" means.
+    //   PARITY KEYS ON `id`, NOT ON THE TICK. BCOOL/TICK is 24, an EVEN number,
+    // so a tick key is CONSTANT between two shots of this gun. `id` comes from
+    // Encounter.nextId(), which orbs also mint from, so consecutive rounds
+    // alternate and an orb minted between two shots flips the phase — as
+    // arbitrary as the demo's own S.tick & 1, and the tell survives either way.
+    // `| 0` so a staged round with no id reads a stable 0 instead of NaN.
+    const s = ((b.id | 0) & 1) ? 1 : -1;
+    const h = Math.hypot(b.vx || 0, b.vy || 0);
     if (h > 0) {
-      // the flown distance is a SIGNED PROJECTION along the velocity, not a
-      // bare hypot: the muzzle sits at the NOSE, ahead of the spawn pose, so a
-      // newborn round reads ~-SHIP_R and a distance would paint that as a
-      // backward streak through the hull — the exact defect the clamp exists
-      // to prevent. Negative clamps to zero: no tail until the round clears
-      // its own nozzle.
-      const len = Math.min(b.streak,
-        Math.max(0, ((b.x - b.ox) * b.vx + (b.y - b.oy) * b.vy) / h));
+      const cap = h * BOLT_TICKS;
+      const known = typeof b.ox === "number" && typeof b.oy === "number";
+      const len = Math.min(cap, known
+        ? Math.max(0, ((b.x - b.ox) * b.vx + (b.y - b.oy) * b.vy) / h)
+        : cap); // the ONE forgiveness js/fx.js's flownFrom already grants
       if (len > 0) {
-        ctx.save(); // the line join and width may not leak onto the dots below
-        ctx.strokeStyle = b.ink || C.bright;
-        ctx.lineWidth = (b.r || 2.2) * 1.1;
+        const mx = (-b.vy / h) * s * BOLT_SIDE, my = (b.vx / h) * s * BOLT_SIDE;
+        ctx.save();
+        ctx.strokeStyle = s > 0 ? DEMO.cyan : DEMO.ink;
+        ctx.lineWidth = BOLT_LW;
         ctx.lineCap = "round";
         ctx.beginPath();
-        ctx.moveTo(b.x - (b.vx / h) * len, b.y - (b.vy / h) * len);
-        ctx.lineTo(b.x, b.y);
+        // TAIL FIRST, HEAD SECOND, AND IT IS LOAD-BEARING: tests/net-checks.js
+        // filters recorded segments by their moveTo point and asserts exactly
+        // TWO start on the round's own pose (js/fx.js's pair). A segment
+        // starting at the head would make three.
+        ctx.moveTo(b.x + mx - (b.vx / h) * len, b.y + my - (b.vy / h) * len);
+        ctx.lineTo(b.x + mx, b.y + my);
         ctx.stroke();
         ctx.restore();
+        continue;
       }
     }
-    ctx.fillStyle = b.ink || C.bright;
+    // NEVER NOTHING. A round still on its own muzzle draws no segment, and at
+    // ?fx=0 the halo is not there to stand in for it — so half the line width,
+    // exactly what that segment's round cap paints. Drawn at the round's own
+    // pose with NO lateral offset, so this branch paints the same bytes whether
+    // it was reached by len === 0 or by h === 0.
+    ctx.fillStyle = s > 0 ? DEMO.cyan : DEMO.ink;
     ctx.beginPath();
-    ctx.arc(b.x, b.y, b.r || 2.2, 0, Math.PI * 2);
+    ctx.arc(b.x, b.y, BOLT_LW / 2, 0, Math.PI * 2);
     ctx.fill();
   }
   // the SPECULATIVE tracers — net mode only, render-side, never in G.bullets:
@@ -5472,6 +5741,20 @@ function pause() {
   clearTickInput(); // a banked delta must never survive a pause and land on resume
   stopLoop();
   syncTuner();
+  // ...AND THE POINTER. This line is POR §2.14 item 7, and it is a defect that
+  // has been shipping since a3478cd. In the shipped `locked` aim mode Escape
+  // never reaches the game's own key handler — the BROWSER drops the lock and
+  // the pointerlockchange branch is what pauses. pause() releases the lock
+  // above, but nothing re-evaluated the canvas class, so `hide-cursor`
+  // (index.html's `cursor: none`) survived the pause and the player hunted for
+  // a pointer that was on the screen the whole time, visible only over
+  // #pausemenu, which carries its own cursor rules.
+  //   ITS OTHER EFFECT, NAMED RATHER THAN DISCOVERED LATER: syncCursor also
+  // clears `ui-cursor`, so a paused screen in MOUSE mode goes from the drawn
+  // crosshair's `cursor: default` back to `crosshair`. That is the same
+  // function's own rule for a stopped game and it was always going to be the
+  // answer here; it is written down because nobody asked for it.
+  syncCursor();
   render();
   // ...and the name editor, which the render above cannot take away: it is
   // canvas state, and a paused screen draws no further frames to show it with.
@@ -6099,6 +6382,15 @@ function showTuner() {
   out("shakeamp-out", SHAKEAMP === 0 ? "0 — screen shake off" : SHAKEAMP.toFixed(1) + "× shake amplitude");
   out("shakedecay-out", SHAKEDECAY + " ticks · " + (SHAKEDECAY * TICK / 1000).toFixed(2) + " s to settle");
   out("stardens-out", STARDENS.toFixed(1) + " stars per cell (avg)");
+  // D44/D47's three look rows. The star readout states the DEVICE side, because
+  // that is what the rule computes and because the notches are NOT all
+  // distinct: at dpr 1 the thirteen settings give seven sides, and at dpr 1.25
+  // StarSize 1.00 and 1.25 draw the identical 3 px mark. Saying the side out
+  // loud is the only way the owner can see which notches are the same notch.
+  out("glow-out", (window.FX ? FX.snapshot().glow : 0).toFixed(2) + "× halo radius and alpha");
+  out("starsize-out", STARSIZE.toFixed(2) + " → " + Math.max(STAR_MIN_PX, Math.round(STARSIZE * 2 * dpr))
+    + " device px at dpr " + dpr);
+  out("starlit-out", STARLIT.toFixed(2) + "× the depth ladder (0.65 / 0.82 / 1.00)");
   out("contactcd-out", CONTACTCD + " ticks · " + (CONTACTCD * TICK / 1000).toFixed(2) + " s between contact hits on one body");
   out("pvp-rewind-out", PVPREWIND === 0 ? "0 — shots hit only where players ARE now" :
     PVPREWIND + " ms · a shot may hit where a player WAS up to " +
@@ -6258,6 +6550,13 @@ bind("edgemargin", (v) => { EDGEMARGIN = v; }).value = String(EDGEMARGIN);
 bind("shakeamp", (v) => { SHAKEAMP = v; }).value = String(SHAKEAMP);
 bind("shakedecay", (v) => { SHAKEDECAY = v; }).value = String(SHAKEDECAY);
 bind("stardens", (v) => { STARDENS = v; render(); }).value = String(STARDENS); // the idle sky repaints live
+// D44's halo dial and D47's two star dials. Deliberately NOT net-locked, in the
+// stardens idiom: they are render-only and reach no sim value, so a client may
+// drag them in a live room exactly as it may drag the shake pair.
+bind("glow", (v) => { if (window.FX) FX.setGlow(v); render(); })
+  .value = String(window.FX ? FX.snapshot().glow : 1.2);
+bind("starsize", (v) => { STARSIZE = v; render(); }).value = String(STARSIZE);
+bind("starlit", (v) => { STARLIT = v; render(); }).value = String(STARLIT);
 bind("minimap", (v) => { MINIMAP = v; render(); }).checked = MINIMAP;
 bind("contactcd", (v) => { CONTACTCD = v; }).value = String(CONTACTCD);
 bind("pvp-rewind", (v) => { PVPREWIND = v; }).value = String(PVPREWIND); // phase 15's
@@ -6485,6 +6784,15 @@ window.__test = { G, players, cam, step: clientStep, setCamMode, render, WW, WH,
   compileHulls,
   setFxInt: (v) => { FXINT = v; },
   setFxDur: (v) => { FXDUR = v; },
+  // D47 (PORT-L) — the starfield's seed, so two pages can be photographed under
+  // ONE sky. SEED is randomised at parse time and the only other writer is the
+  // reseed button, which randomises too; there is no ?seed= anywhere. This is a
+  // render-only seam: SEED reaches no hash, no fixture and no tunable record.
+  setSeed: (v) => { SEED = (v >>> 0); },
+  starDials: () => ({ STARDENS, STARSIZE, STARLIT, dpr,
+    side: Math.max(STAR_MIN_PX, Math.round(STARSIZE * 2 * dpr)) }),
+  setStarSize: (v) => { STARSIZE = +v || 0; },
+  setStarLit: (v) => { STARLIT = +v || 0; },
   // the LIGHT LAYER's two seams: its suppression lever and its counters. Both
   // no-op rather than throw when js/fx.js is absent — the headless sim host
   // loads game.js without it.

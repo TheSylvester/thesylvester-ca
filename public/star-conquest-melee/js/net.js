@@ -1024,7 +1024,7 @@
       else if (ev.k === "termChange" && ev.seat === mySeat) termCut = true;
     }
     const down = (s.hud && s.hud.state === "dead") || (pr.rsp || 0) > 0 ||
-                 (pr.hull | 0) <= 0; // the HULL closes the gap the countdown left:
+                 pr.hull <= 0; // the HULL closes the gap the countdown left:
                  // a seat in its claim window, or unseated, sits at rsp 0 with no
                  // hull, and predicting flight for a wreck was the same latent bug
                  // the fx layer carried. The v8 PARKED record (isParked) is
