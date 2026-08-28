@@ -387,6 +387,33 @@
   // would be an allocation per tick for a plane that does not exist.
   var EMPTY_BODIES = [];
 
+  // ---- THE ORDNANCE HALF OF THE SAME DOOR (D51, PORT-F) -------------------
+  // `bodies()` is what production's rounds shoot AT; this is what they shoot
+  // at NEXT. D51 makes production's gun able to intercept the kernel's enemy
+  // ROUNDS — the thirteen hp-bearing kinds — and it is ROUTE H: the kernel is
+  // not edited at all. `kernel.S` is a published member (js/demo-kernel.js:5560)
+  // and this file already reads it twice, so the array is reachable without a
+  // new kernel accessor and `sha256 js/demo-kernel.js` does not move. That
+  // matters beyond tidiness: both bounded manifests carry a `kernelSha256`
+  // field whose only comparison sits inside a divergence branch, so a kernel
+  // edit here would leave a green gate and a false field.
+  //   UNFILTERED, and that is the mirror of `bodies()`. The kernel's own
+  // player-round pass filters its candidate list ONCE outside both loops
+  // because it is O(rounds²) otherwise; production's sweep reads the LIVE
+  // array, so the liveness terms travel with the CALLER (js/encounter.js) and
+  // are applied per candidate. The visible consequence is a one-tick
+  // disagreement about when a newborn shard becomes shootable, and it is
+  // named at the caller.
+  //   IT READS `S.bullets` AND NO OTHER MEMBER OF `S`, deliberately:
+  // test/node-golden.mjs:1548-1578 scans this file for stray `S.players`
+  // references, and the narrow read is what keeps that scan honest.
+  function rounds() {
+    var S = kernel && kernel.S;
+    var list = S && S.bullets;
+    return list && typeof list.length === "number" ? list : EMPTY_ROUNDS;
+  }
+  var EMPTY_ROUNDS = []; // EMPTY_BODIES' reason, not a second opinion about it
+
   // The guards are `routeHurt`'s, for `routeHurt`'s reason. The seat is an
   // ENUMERATION and is refused whole; the amount carries a floor and a LID,
   // because `damageEnemy` subtracts through `Engine.applyEffect` with no cap of
@@ -399,6 +426,47 @@
     if (typeof amount !== "number" || !isFinite(amount) || amount <= 0
         || amount > HURT_MAX) return false;
     return kernel.damageBody(body, amount, x, y, seat, cause) === true;
+  }
+
+  // The ordnance twin of `damageKernelBody`, and every difference from it is a
+  // ruling rather than a shortcut (D51, PORT-F).
+  //   SEATLESS, AND THAT IS A MEASUREMENT. js/demo-kernel.js:4787-4795 records
+  // that adding a `seat` to the kernel's own ordnance `applyEffect` DIVERGES
+  // the bounded AUTO fixture at tick 1952 — the tick a player round first
+  // destroys an enemy round — for a key nothing in that kernel consults. So
+  // this call mirrors :4798 exactly: a bare `{ cls: CLASS.SHIP }` source, no
+  // `lastAtk`, no seat write. There is therefore no `seat` guard here, because
+  // there is no seat: the whole enumeration check that `damageKernelBody`
+  // carries would be guarding an argument that does not exist.
+  //   IT GOES THROUGH `Engine.applyEffect` AND NOT THROUGH `o.hp -=`, and that
+  // is enforced: test/node-golden.mjs:200-223 counts direct hp/hull writes
+  // across the seven SIM_FILES and its own comment names this interaction as
+  // wanted. `Engine` is a global here — js/engine.js:1675 publishes it and
+  // js/demo-kernel.js:425 already calls it bare — and the Node host loads
+  // engine, kernel and this file into ONE vm context.
+  //   THE DEATH IS BARE, matching the kernel's own player-round pass
+  // (:4813-4814) rather than the aura's `explodeEnemyBullet`. The two idioms
+  // disagree today — burning a grenade fans seven clusters and shooting the
+  // same grenade fans none — and reconciling them is a balance decision that
+  // does not belong inside D51's arm. Bare also cannot move a kernel gameplay
+  // draw: the compaction at the end of the kernel's own updateBullets takes
+  // the corpse on ITS next step, so THE HOST NEVER SPLICES.
+  //   AND NO `burst`: the kernel's death FX is kernel-internal, so a host-side
+  // kill is visually silent. Named, not worked around from outside.
+  //   The AMOUNT guards are `damageKernelBody`'s, for its reason: a floor and
+  // a LID, because applyEffect subtracts with no cap of its own. The ROUND is
+  // checked here for existence only; liveness is the caller's, per candidate.
+  function damageKernelRound(round, amount) {
+    if (!kernel || !round) return false;
+    if (typeof amount !== "number" || !isFinite(amount) || amount <= 0
+        || amount > HURT_MAX) return false;
+    var dealt = Engine.applyEffect({
+      kind: "shot", target: round, tgtCls: Engine.CLASS.ORDNANCE,
+      source: { cls: Engine.CLASS.SHIP }, baseAmount: amount
+    });
+    if (dealt === null) return false; // the matrix refused: a SKIP, nothing happened
+    if (round.hp <= 0) round.dead = true;
+    return true;
   }
 
   // ---- THE DEATH WINDOW, ROUTED (S3b lane 3, FIX 1 / S3BR-01) -------------
@@ -995,13 +1063,17 @@
   //   neither crosses it.
   //
   //   AIM — an OFFSET FROM THE SEAT'S OWN SHIP, never an absolute world point.
-  //   That is a seam rule and it is forced twice over. First by size: the two
-  //   worlds are the SAME 6x11 grid of view-sized rooms and the rooms are
-  //   different sizes — production's field is 512x342 for a 3072x3762 world
-  //   (js/game.js:49-52), the kernel's play box is 1280x720 for a 7680x7920
-  //   bounded arena (js/demo-kernel.js:250-258) — so an absolute point lands
-  //   somewhere unrelated in both directions. Second by D13: an offset is
-  //   derived from the tick's own cursor and carries no history.
+  //   That is a seam rule and it was forced twice over. First by SIZE — and
+  //   that half is now DISCHARGED, which is why this line is re-authored
+  //   rather than left standing: the two worlds are the SAME 6x11 grid of
+  //   view-sized rooms and the rooms are now the SAME SIZE. Production's field
+  //   is 1280x720 for a 7680x7920 world (js/game.js:74-77) and the kernel's
+  //   play box is 1280x720 for a 7680x7920 bounded arena
+  //   (js/demo-kernel.js:250-258). This text said "512x342 for a 3072x3762
+  //   world" and had been false since the FW flip; nothing derived from it.
+  //   The rule stands on its SECOND leg alone, and that one is untouched —
+  //   D13: an offset is derived from the tick's own cursor and carries no
+  //   history, so an absolute point would smuggle one across the seam.
   //
   //   AIM SCALE — AIM_PX_PER_FIELD_PX below, and its derivation is written
   //   beside it because the choice is smaller than it looks. The kernel's aim
@@ -1429,6 +1501,10 @@
     // bullet plane shoots at, and the one door it shoots through.
     bodies: bodies,
     damageKernelBody: damageKernelBody,
+    // THE ORDNANCE SWEEP (D51, PORT-F) — the same door, the other class. See
+    // the two blocks above for the route ruling and the seatless measurement.
+    rounds: rounds,
+    damageKernelRound: damageKernelRound,
     // THE ATOMIC RESET (FIX 10) — a PAIR. Production resets, re-poses from its
     // own post-reset state, then lands those poses on the records, so a wipe
     // cannot leave a phantom native pilot standing behind a dead seat.

@@ -755,9 +755,10 @@
       // it is unit-free and follows every speed upgrade for nothing.
       //
       // ...CLAMPED to the distance the round has actually flown. K is a count of
-      // TICKS (3.24 of them, 121.5 world px at BSPEED 37.5 — the comment read
-      // 48.6 at the old BSPEED 15 until D43 swept it), and a round one tick
-      // old has covered 15 of those px: the other 33 hung out the far side of
+      // TICKS (3.24 of them, 35.1 world px at the shipped BSPEED of 650/60 —
+      // it read 121.5 at BSPEED 37.5 until D50 / OPEN 2, and 48.6 at the old
+      // BSPEED 15 until D43 swept it), and a round one tick
+      // old has covered 10.83 of those px: the other 24 hung out the far side of
       // the muzzle, through and behind the ship that fired it. That is what the
       // owner saw and called bad, and it reads worst in ?mp, where an own shot
       // flies as a speculative TRACER that starts life at the ship's own pose.

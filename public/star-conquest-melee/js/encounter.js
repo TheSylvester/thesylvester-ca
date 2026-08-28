@@ -222,8 +222,17 @@
     // was 2+1 = 3 and became 5+1 = 6 where scale-preserving is 5+2.5 = 7.5, and
     // rank 2 was 4 and became 7 where it should be 10. The DESC is the shop
     // card's own text and moves with the number it describes.
-    { name: "AFTERBURNER", desc: "max speed +2.5 px/tick", base: 4, curve: "double",
-      icon: "afterburner.png" },  // uncapped — the doubling price is the brake
+    // ---- AND WHAT A RANK IS ACTUALLY WORTH SINCE D50 (PORT-F) --------------
+    // The CAP rises by 2.5 per rank, uncapped. What a KEYBOARD pilot reaches
+    // does not: with DAMP 0.985 the keys' drag-terminal is a*d/(1-d) = 5.4512
+    // px/tick, so against a rank-1 cap of 6.5833 he gets 1.3679 of the 2.5
+    // (55 %), and rank 2 and above deliver NOTHING at all until the comet
+    // multiplies the cap out from under the drag. The card says "cap" now
+    // because "max speed" is the thing a pilot cannot get. NO NUMBER MOVED
+    // HERE: the re-price is R8a's, on the record, not this lane's.
+    { name: "AFTERBURNER", desc: "top-speed cap +2.5 px/tick", base: 4, curve: "double",
+      icon: "afterburner.png" },  // the CAP is uncapped — the doubling price is
+                                  // the brake, and since D50 the drag is a second one
     // The two hull rows act on the BUYING seat's record — can(seat) and
     // apply(rank, seat) both take the seat buy() hands through, defaulting
     // to 0 so every single-seat caller reads exactly as before.
@@ -333,11 +342,16 @@
   // and the derived numbers never fold in twice. A missing seat derives the
   // rank-0 stock terms (null-safe, cometActive's contract).
   //   cool   — multiplier on BCOOL: 1/(1 + 0.15 × RAPID LOADER rank)
-  //   speed  — ADDITIVE px/tick on VMAX: 2.5 × AFTERBURNER rank, uncapped.
-  //            THE 2.5 IS THE ARENA RATIO, the one named number of commit C's
-  //            rescale (1280/512), and it is written as a literal here for the
-  //            same reason every other row in that table is: a modifier on a
-  //            px-dimensioned base is itself px-dimensioned.
+  //   speed  — ADDITIVE px/tick on the VMAX CLAMP: 2.5 × AFTERBURNER rank,
+  //            uncapped. THE 2.5 IS THE ARENA RATIO, the one named number of
+  //            commit C's rescale (1280/512), and it is written as a literal
+  //            here for the same reason every other row in that table is: a
+  //            modifier on a px-dimensioned base is itself px-dimensioned.
+  //            SINCE D50 IT RAISES A CEILING THE KEYS CANNOT REACH: the
+  //            keyboard drag-terminal is 5.4512 px/tick against a rank-1 cap
+  //            of 6.5833, so rank 1 delivers 55 % of its 2.5 and rank 2+
+  //            delivers none of it. It is still the whole story under COMET,
+  //            where the cap is multiplied and the drag is outrun. R8a's row.
   //   blast  — the BLAST CHARGE rank, 0-3: 0 is off; the radius each rank
   //            reaches is BLASTR + BLASTGAIN × (rank − 1) off game.js's sliders
   //   enCell/enRech/fury — the ENERGY pool's stored RANKS: game.js turns them
@@ -1602,10 +1616,14 @@
   // is WRONG, and measurably so. The box is SHIP_R * 2 = 14 px, not the 28 a
   // "combined disc" reading suggests, and comet top speed is
   // (VMAX + terms.speed) x COMETVMAX with AFTERBURNER UNCAPPED (its shop row
-  // says so: "uncapped — the doubling price is the brake"). Two comets
+  // says so: "the CAP is uncapped — the doubling price is the brake"). Two comets
   // crossing at right angles miss each other outright under the attacker-only
   // sweep from 20 px of travel each per tick — AFTERBURNER rank 5, which is
-  // 124 XP and an ordinary mid-run purchase, not a whale. The relative frame
+  // 124 XP and an ordinary mid-run purchase, not a whale.
+  //   D50 (PORT-F) MOVED THE PARTS AND NOT THE ARGUMENT. VMAX is 4.0833 and
+  // COMETVMAX is 15/VMAX, so a rank-0 comet still travels 15 px per tick and
+  // rank 5 travels MORE than it did (16.5833 x 3.6735 = 60.9 against 55.0):
+  // the speeds this block calls too fast for an attacker-only sweep only rose. The relative frame
   // costs one subtraction per pair and has no such speed at all.
   //
   // Pacing is one bite per ORDERED pair per COMETCD window, held in E.pvpCd.
@@ -1824,6 +1842,7 @@
       //  array it was drawn from. Two winner classes are left.)
       let vs = -1;      // ...the VICTIM SEAT, when another player's hull is
       let kb = null;    // ...or the KERNEL BODY, when the successor plane's is
+      let kr = null;    // ...or the KERNEL ROUND, when D51's ordnance arm wins
       // ---- THE KERNEL ARM, FIRST IN THE ORDER (PORT-S S3b lane 3, commit B)
       // The successor plane's bodies join the SAME running `bestT` minimum, so
       // a round is still consumed exactly once whichever family it stopped on.
@@ -1849,17 +1868,65 @@
           const ke = kbodies[i];
           if (ke.dead || ke.hp <= 0) continue;
           const t = segCircleEntryT(b.px, b.py, b.x, b.y, ke.x, ke.y, ke.r + b.r);
-          if (t >= 0 && (bestT < 0 || t < bestT)) { bestT = t; kb = ke; vs = -1; }
+          if (t >= 0 && (bestT < 0 || t < bestT)) { bestT = t; kb = ke; kr = null; vs = -1; }
         }
       }
       // (the PRODUCTION-BODY sweep arm is DELETED at commit D5 with the array
       //  it walked. `hit` — the production-body winner — can no longer be set
       //  and every branch that reads it is dropped with it; `kb`, the kernel
       //  body, is the only body class a round can win against now.)
-      // (the ORDNANCE class is RETIRED — commit D4. The seeker plane went with
-      // the harrier that fired it; `E.missiles` is permanently empty and the
-      // successor plane's enemy ordnance has no wire representation until R7,
-      // so there is nothing here for a round to intercept.)
+      // ---- THE ORDNANCE ARM, UN-RETIRED (D51, PORT-F) --------------------
+      // The seeker plane retired at commit D4 and `E.missiles` is still
+      // permanently empty — but the SUCCESSOR plane's enemy rounds are a live
+      // array with thirteen hp-bearing kinds in it, and D51 rules that a
+      // pilot's gun may shoot them down. So there is something here to
+      // intercept again, and it reaches the same door `bodies()` does.
+      //
+      // BETWEEN THE BODIES AND THE SHIPS, AND THE POSITION IS THE RULE.
+      // Everything joins the same running `bestT` under a strict `<`, so the
+      // test ORDER is the tie order: a kernel BODY wins an exact tie against
+      // ordnance (bodies are tested first, which is also the kernel's own
+      // "BODIES FIRST" rule at js/demo-kernel.js:4772-4776), and ORDNANCE wins
+      // an exact tie against a rival HULL — which is the half
+      // tests/wave1-checks.js recorded as RETIRED at D4 and this commit
+      // restores. A round is still consumed exactly once whichever family
+      // stopped it.
+      //
+      // THE LIVENESS GATE IS THE KERNEL'S OWN, TERM FOR TERM (:4756):
+      // `!o.dead && o.team === "enemy" && o.hp > 0`. The `team` term is not
+      // decoration — `S.bullets` holds the kernel's PLAYER-team bolts too, and
+      // without it production would shoot down the demo pilot's own fire.
+      //
+      // AND THE TERMS ARE APPLIED HERE, PER CANDIDATE, because
+      // `EncounterHost.rounds()` is UNFILTERED and returns the live array. The
+      // kernel filters once outside both of its loops for an O(rounds²)
+      // reason it states, with the consequence that a round born inside the
+      // kernel's step this tick is NOT a candidate for the kernel's own pass
+      // until the next tick — while it IS one for this sweep, with px === x.
+      // The two passes therefore disagree by one tick about when a newborn
+      // mineShard becomes shootable. Deterministic, named, not a defect.
+      //
+      // NO SPLASH BRANCH, AND THAT IS A DECLARATION. MATRIX.blast[SHIP]
+      // [ORDNANCE] is 0 (js/engine.js:293-297), so a blast aimed at ordnance
+      // would be refused at the door; and whether a round TERMINATING on
+      // ordnance should still splash the bodies around it is a balance
+      // question with no ruling, so this branch asks none. R8a owns it.
+      //
+      // ONE PHASE LATE AGAINST THE ORACLE, deliberately. js/game.js:3354 steps
+      // the whole kernel — including its enemy-round-vs-hull pass — before
+      // :3355 runs this sweep, so on index.html a production round can never
+      // save a pilot on the SAME tick, where on demo-play.html the kernel's own
+      // pass can. One tick, deterministic, and it belongs here rather than in
+      // a playtest report.
+      const krounds = window.EncounterHost ? EncounterHost.rounds() : null;
+      if (krounds) {
+        for (let i = 0; i < krounds.length; i++) {
+          const ko = krounds[i];
+          if (ko.dead || ko.team !== "enemy" || !(ko.hp > 0)) continue;
+          const t = segCircleEntryT(b.px, b.py, b.x, b.y, ko.x, ko.y, ko.r + b.r);
+          if (t >= 0 && (bestT < 0 || t < bestT)) { bestT = t; kr = ko; kb = null; vs = -1; }
+        }
+      }
       // ...and the PvP class. A seat never shoots itself (v !== shooter), and
       // an UNOWNED bullet reaches no ship at all — the shooter < 0 continue
       // above already dropped it, so no unattributable round can take a hull.
@@ -1867,7 +1934,7 @@
         if (v === shooter || !seatAlive(v)) continue;
         const sh = players[v].ship;
         const t = segCircleEntryT(b.px, b.py, b.x, b.y, sh.x, sh.y, SHIP_R + b.r);
-        if (t >= 0 && (bestT < 0 || t < bestT)) { bestT = t; vs = v; kb = null; }
+        if (t >= 0 && (bestT < 0 || t < bestT)) { bestT = t; vs = v; kb = null; kr = null; }
       }
       if (kb) {
         // THE SUCCESSOR PLANE'S BODY TOOK IT. The block mirrors the old plane's
@@ -1901,6 +1968,33 @@
         // wire — and this row is a particle decision, not a channel one.
         emit("hit", { x: ix, y: iy }, undefined, shooter);
         blastAt(ix, iy, kb, b.dmg, shooter, b.blastR);
+        continue;
+      }
+      if (kr) {
+        // THE SUCCESSOR PLANE'S ROUND TOOK IT (D51, PORT-F). The branch is
+        // deliberately the SHORTEST of the three, and every absence is a rule:
+        //   - the damage goes through the HOST's one door, like the body arm,
+        //     and the door calls Engine.applyEffect with a SEATLESS source —
+        //     the kernel's own ordnance pass measured that adding a seat there
+        //     diverges the bounded AUTO fixture at tick 1952, for a key nothing
+        //     consults. This arm does not re-open that.
+        //   - the COUNTER is `E.missilesShot`, which is D51's reward model in
+        //     its own words at :683: "missiles a player bullet destroyed — NOT
+        //     a kill: no orb, no XP". It is hashed (:6385) and on snapState.
+        //     `E.hitsDealt` is deliberately NOT incremented: a denial is not a
+        //     registered hit on a body, and the two counters have separate
+        //     readers.
+        //   - NO `hit` CUE. The kernel's own ordnance pass emits nothing but a
+        //     burst, and production's `hit` has FOUR consumers including the
+        //     wire, for which R7 has given ordnance no row. Emitting one here
+        //     would put an unrepresented event on a channel. The body branch's
+        //     cue rule is untouched.
+        //   - NO IMPACT FX and no splash: see the arm's own block above.
+        //   - THE DEATH IS THE DOOR'S, and it is BARE. The host sets
+        //     `o.dead = true` and the KERNEL'S OWN next step compacts the
+        //     corpse out of `S.bullets`. This file never splices that array.
+        b.dead = true; // consumed exactly once — the game sweep removes it
+        if (EncounterHost.damageKernelRound(kr, b.dmg)) E.missilesShot++;
         continue;
       }
       if (vs >= 0) {

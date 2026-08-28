@@ -345,9 +345,15 @@
   // sound is tuned; the bus sliders are trims over them.
   const CUES = {
     // the reference's fire() verbatim — the sound this game's ancestor made.
-    // 45 ms gap (not 70): RAPID LOADER caps near 5.5/s at the stock BCOOL,
-    // but BCOOL is a live dev slider, and the gap must clear whatever cadence
-    // a retuned page fires at.
+    // 45 ms gap (not 70): the gap must clear whatever cadence a retuned page
+    // fires at, and BCOOL is a live dev slider. THE MARGIN IS NOW THIN AND IT
+    // IS NAMED (D50 / OPEN 2, PORT-F). At the stock BCOOL 400 a RAPID LOADER
+    // rank-5 pilot fired near 4.3/s and the gap had 188 ms of room. At the
+    // shipped BCOOL 130 rank 5 fires every 4 ticks — 66.67 ms — so the margin
+    // is 21.67 ms, and at the cool slider's own 50 ms floor it is NEGATIVE and
+    // cues are eaten. The gap is deliberately NOT moved: 45 ms is the cue's
+    // own length budget, and shortening it to chase a dev-slider floor would
+    // trade an audible gun for an unmeasured one. R8a owns the row.
     fire: { bus: "shot", gap: 45, pri: 0, vary: true, steps: [["b", 880, 380, 0.05, "square", 0.22, 0]] },
     // THE RIFLE, and it is deliberately fire's opposite in the one dimension
     // an ear separates fastest. fire is a short falling square at 880→380;

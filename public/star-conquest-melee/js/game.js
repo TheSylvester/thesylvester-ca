@@ -7,9 +7,11 @@
 // an acceleration impulse, velocity integrates it, and a *radial* speed cap
 // replaces the per-axis clamp, so a sideways push at full speed rotates the
 // heading into an arc instead of pinning the old axis.
-// Tuning began as the 30 Hz original rescaled to a 60 Hz sim, then feel
-// testing settled it: top speed 2 px/tick (120 px/s baseline — the slider
-// drives it live), gains 0.015/0.015 (~133 counts from rest to top), and a
+// Tuning began as the 30 Hz original rescaled to a 60 Hz sim, was rescaled
+// x2.5 with the field, and D50 (PORT-F) then took it to the demo's own
+// numbers: top speed 4.0833 px/tick (245 px/s — the slider drives it live),
+// gains 0.005/0.005 against KEYTHRUST 14.5 (0.0830125 px/tick², ~91 ticks
+// from rest to top), a per-tick velocity retention of 0.985, and a
 // flick curve that amplifies fast deltas — a quick flick snaps the heading
 // while slow motion stays precise. Impulses split against the current heading:
 // ACCEL drives the along component (speed up / brake), TURN the across one
@@ -77,37 +79,58 @@ const TICK = 1000 / 60; // 60 Hz fixed timestep — twice the original's 30 Hz
 const SHIP_R = 17.5;    // x2.5, WAS 7. The kernel mirrors it off the pose — its own
                         // four seat-radius sites default to 7/8 and read this when a
                         // seat is pose-driven, so both planes hit the same hull
-let VMAX = 5;           // x2.5, WAS 2. px per tick — 300 px/s (5 x 60). This line read
-                        // "120 px/s baseline" until PORT-L: 120 was the WAS-2 number and
-                        // never moved with the x2.5, and the camera header at leadVec()
-                        // inherited the same stale figure. D50 (PORT-F) takes this to
-                        // 4.0833 px/tick = 245 px/s, the demo's own cap.
+let VMAX = 4.0833;      // D50 (PORT-F) TOOK IT THERE. px per tick — 4.0833 x 60 = 244.998 px/s
+                        // against the demo's own 245 (demo-v2/sim.js:855, js/demo-kernel.js:2946):
+                        // a -0.0008 % deviation, and 4.0833 is the literal the POR names
+                        // (PLAN.md:1676). WAS 5 (itself the x2.5 of the original 2), and the
+                        // line read "120 px/s baseline" until PORT-L: 120 was the WAS-2 number
+                        // and never moved with the x2.5, and the camera header at leadVec()
+                        // inherited the same stale figure. The panel prints "4.1 px/tick .
+                        // 245 px/s" and the camera lead is 30 x 4.0833 = 122.5, rounded to 122.
                         // The pause-screen slider drives this live, and
                         // Encounter.mods.speed (the AFTERBURNER upgrade) adds px/tick on top of it AT THE
                         // CLAMP in step() — a purchase never writes the tuner value
-let ACCEL = 0.0375;     // x2.5, WAS 0.015. speed gain — velocity px/tick per count ALONG the heading (slider); default is the settled feel
-let TURN = 0.0375;      // x2.5, WAS 0.015. turn gain — the same, for the component ACROSS the heading (slider); equal gains = the old single-gain model
+let ACCEL = 0.005;      // D50 (PORT-F), the GRID pair with KEYTHRUST 14.5: the realised key
+                        // gain is 14.5 x 0.005 x (1 + 14.5 x 0.01) = 0.0830125 px/tick²,
+                        // -0.385 % from the demo's 300/3600 = 0.0833333 (demo-v2/sim.js:849,
+                        // js/demo-kernel.js:2940) and 0.35 ticks on a 91-tick ramp. WAS 0.0375
+                        // (x2.5 of 0.015). speed gain — velocity px/tick per count ALONG the heading (slider)
+let TURN = 0.005;       // D50 (PORT-F): TURN MOVES WITH ACCEL, always. WAS 0.0375. turn gain —
+                        // the same, for the component ACROSS the heading (slider); equal gains
+                        // = the old single-gain model, and only equal gains collapse the
+                        // along/across split in thrust() back to a heading-free push
 let FLICK = 0.01;       // flick curve — gain × (1 + |delta| × FLICK); a 100-count flick doubles its push.
                         // No slider — a let only so the measurement harness (__test.setFlick) can
                         // isolate the curve from the heading resample; the default never moves here
-let DAMP = 1;           // per-tick velocity retention — 1 = no friction, like the original.
-                        // ---- A DIAL AT ITS SHIPPED DEFAULT (PORT-S S5, commit G) ----
-                        // It was a `const` and it is a `let` with a slider now, at the
-                        // SAME 1, so the sim is byte-identical: this commit moves no hash.
+let DAMP = 0.985;       // per-tick velocity retention — the demo's own drag, not 1.
+                        // ---- A DIAL WHOSE DEFAULT THE OWNER HAS MOVED (D50, PORT-F) ----
+                        // It was a `const 1`, became a `let` with a slider at the SAME 1 in
+                        // PORT-S S5 commit G, and D50 takes it to 0.985 = Math.pow(0.985,
+                        // dt*60) at dt = 1/60 (demo-v2/sim.js:852, js/demo-kernel.js:2943).
                         //
-                        // AND THE PROGRAM'S PREMISE ABOUT IT IS INVERTED, which is why the
-                        // dial exists at all. The port program has been carrying "production
-                        // damps and the demo does not"; measured, it is the other way round.
+                        // THE PROGRAM'S PREMISE ABOUT IT WAS INVERTED, which is why the
+                        // dial existed at all. The port program carried "production damps
+                        // and the demo does not"; measured, it was the other way round.
                         // The demo kernel bleeds 1.5 % of a ship's speed per tick against a
-                        // hard cap; production has NO friction whatever, which is what a
+                        // hard cap; production had NO friction whatever, which is what a
                         // retention of exactly 1 means. A comet that never slows is a comet
-                        // whose only brake is the wall, and the owner's feel gate is the
-                        // right place to decide whether that is the feel — so the lever is
-                        // here and the number is not moved.
+                        // whose only brake is the wall — and that is the comet this default
+                        // has now retired: after D50 a released comet halves its speed every
+                        // 45.86 ticks (0.764 s) and is back to ordinary cruise 1.43 s later.
                         //
-                        // MOVING THE DEFAULT IS A 13-TRACE RECAPTURE PLUS SELFCHECK, and it
-                        // is the OWNER'S ruling at the gate, not this lane's (slider, flight tab)
-let KEYTHRUST = 16;     // keyboard thrust — synthetic mouse counts per tick, through the same impulse pipeline
+                        // MOVING THE DEFAULT WAS A 13-TRACE RECAPTURE PLUS SELFCHECK, and it
+                        // WAS the OWNER'S ruling at the gate, not a lane's. He made it on
+                        // 2026-08-27 — "the playfeel of the last demo that I could play,
+                        // based off demo-v2, felt a LOT better" — and PORT-F's own freeze
+                        // session pays that bill in one commit. The key drag-terminal
+                        // a*d/(1-d) = 5.4722 px/tick still exceeds VMAX, so the radial clamp
+                        // in integrateSlice() still binds (slider, flight tab)
+let KEYTHRUST = 14.5;   // D50 (PORT-F): the GRID half of the pair. 14.5 x ACCEL 0.005 x
+                        // (1 + 14.5 x FLICK 0.01) = 0.0830125 px/tick². WAS 16. The exact
+                        // pair (16 / 0.004489942528735632) hits 0.0833333 with zero error but
+                        // cannot be represented on the accel rail's 0.0025 grid; this one can,
+                        // on both rails, as shipped.
+                        // keyboard thrust — synthetic mouse counts per tick, through the same impulse pipeline
 let WALLLOSS = 0.5;     // fraction of the flipped velocity component the ship loses on a wall bounce
 let AIMSENS = 0.075;    // x2.5, WAS 0.03. push-mode aim gain — offset px per count. Code-only, like BMODE: push mode
                         // left the aim-control menu once locked mode covered it, so its one knob left
@@ -128,14 +151,40 @@ let INPUTLAG = 0;        // ms of artificial input delay — the playability pro
                          // never the render, the audio or the enemies. Tick mode only —
                          // a tick delay is a ring of per-tick sums, and an OS event has
                          // no tick to be late against, so event mode disables the slider
-let BCOOL = 400;        // ms between shots — 2.5 shots/s; one gate for click fire and autofire
+let BCOOL = 130;        // ms between shots — D50 / OPEN 2 (PORT-F) takes the demo's own cadence.
+                        // The demo's p.fire is 0.13 s (js/demo-kernel.js:2998, demo-v2/sim.js:873)
+                        // and its kernel decrements THEN tests, so it fires every 8 ticks. Here
+                        // `max(1, round(130/16.6667))` = round(7.8) = 8 ticks = 133.33 ms =
+                        // 7.500 shots/s. WAS 400 -> 24 ticks -> 2.500 shots/s. 130 is on the
+                        // cool rail's grid ((130-50)/10 = 8). One gate for click fire and autofire
 let AUTOFIRE = true;    // hold LEFT to keep firing at the cooldown rate
 let BMODE = "off";      // bullet physics — off | newtonian (adds ship vel × factor) | cq-scale (ship speed × factor); code-only, no menu knob
-let BSPEED = 37.5;      // x2.5, WAS 15. bullet speed, px per tick (off and newtonian modes)
+let BSPEED = 650 / 60;  // = 10.833333333333334 px/tick. D50 / OPEN 2 (PORT-F): the demo's own
+                        // 650 px/s (js/demo-kernel.js:3024, demo-v2/sim.js). Written as the
+                        // expression because 650 px/s is the number, and 3.4615x SLOWER than
+                        // what it replaces. WAS 37.5 (x2.5 of 15) = 2250 px/s.
+                        // bullet speed, px per tick (off and newtonian modes)
 let BFACTOR = 1;        // the ship-velocity factor — newtonian adds it, cq-scale multiplies by it
-let BMAX = 15;          // max live bullets (the original capped at 5)
-let BLIFE = 0.5;        // bullet lifetime, seconds
-let BDMG = 1;           // damage one player bullet deals — encounter.js reads it for the enemy side of a body
+let BMAX = 20;          // max live bullets (the original capped at 5). D50 / OPEN 2 (PORT-F):
+                        // WAS 15, and at BCOOL 130 a RAPID LOADER rank-5 pilot fires every 4
+                        // ticks against a ttl of 63, so he wants ceil(63/4) = 16 rounds in
+                        // flight. At 15 the sixteenth is REFUSED, silently (:2867 pays no
+                        // cooldown and makes no cue), on a row he paid 124 XP for. 20 covers it
+let BLIFE = 1.05;       // bullet lifetime, seconds. D50 / OPEN 2 (PORT-F): the demo's own 1.05
+                        // (js/demo-kernel.js:3031). ttl = max(1, round(1050/16.6667)) = 63, so
+                        // reach is 63 x 10.8333 = 682.5 px. WAS 0.5 -> ttl 30 -> 1125 px.
+                        // IT HAD TO MOVE WITH BSPEED: at BLIFE 0.5 the demo's muzzle speed
+                        // reaches 325 px — 29 % of today's — a gun neither build ever had.
+                        // (The demo bolt travels 671.67 px on the same numbers: its kernel
+                        // decrements, tests, THEN moves, so 1.05 s buys it 62 moves where
+                        // production's move-then-decrement buys 63. Production's round reaches
+                        // 1.6 % further than the demo it copies. Stated, not corrected.)
+let BDMG = 2;           // D50 / OPEN 2 (PORT-F): the demo's own `damage: 2` (js/demo-kernel.js:3031).
+                        // WAS 1. It is a BALANCE lever wearing a feel lever's costume and the owner
+                        // was told: sustained DPS against kernel hp goes 2.5 -> 15.0 (x6), a rocket
+                        // (hp 2) dies in ONE hit instead of two, and PvP time-to-kill against a hull
+                        // of 3 falls from 24x3 = 72 ticks (1.20 s) to 8x2 = 16 ticks (0.27 s), 4.5x.
+                        // damage one player bullet deals — encounter.js reads it for the enemy side of a body
                         // contact, so a ram costs exactly one bullet; code-only, no menu knob (a future
                         // Encounter.mods damage term must multiply into BOTH fire() and contactEvent)
 let CONTACTCD = 62;     // ticks before one enemy body can take contact damage again — mirrors the player's
@@ -157,9 +206,36 @@ let BLASTGAIN = 20;     // x2.5, WAS 8. px the radius grows per rank past the fi
 // the COMET* numbers here say what it costs and what it does, the EN* numbers
 // say what the pool is. That split is the whole point: the next skill prices
 // itself the same way without touching a line of this block.
-let COMETACC = 3;       // comet accel multiplier — scales ACCEL in thrustImpulse while comet is on (slider, comet tab)
-let COMETTURN = 3;      // comet turn multiplier — the same, for TURN (slider, comet tab)
-let COMETVMAX = 3;      // comet top-speed factor — the radial clamp becomes (VMAX + mods.speed) × this (slider, comet tab)
+// ---- THE COMET RE-DERIVED AT D50 (PORT-F, OPEN 1 = B — the owner's ruling) --
+// The ruling is KEEP THE COMET'S FEEL: the multipliers are not the thing the
+// owner flew, the ABSOLUTES are. So the three factors are re-derived against
+// the moved base and the comet's own numbers hold:
+//   held accel  2 x 0.0830125 x 25.1528 = 4.17599362 px/tick²  (was 4.176)
+//   coasting        0.0830125 x 25.1528 = 2.08799681           (was 2.088)
+//   rank-0 cap  4.0833 x (15/4.0833)    = 15 EXACTLY           (was 15)
+// Both terms carry the factor: the nose term at thrustImpulse routes through
+// the same Flight.thrust and inherits `ka`, and its `k === 0` gate is the FRAME
+// index, not "no key held" — so a held comet bills two terms and a coasting one
+// bills one. That is why the ratio is 25.1528 and not 50.
+//   WHAT THE RULING CANNOT HOLD, AND THE OWNER WAS TOLD: the release coast.
+// DAMP 0.985 is a D50 base value and nothing in this block can undo it. A
+// released comet now halves its speed every 0.764 s and is back to ordinary
+// cruise 1.43 s later; the dive-out has stopped existing, in every column.
+//   AND NOT EVERY AFTERBURNER RANK AT ONCE. Holding rank 0 at 15 RAISES rank 1
+// from 22.5 to 24.1837 and rank 2 from 30 to 33.3675, because the additive
+// +2.5 px/tick is a larger fraction of a smaller VMAX. Rank 0 is the rank held:
+// it is the number the S6 feel gate was flown at, by a pilot with no shop.
+let COMETACC = 25.1528;  // comet accel multiplier — scales ACCEL in thrustImpulse while comet is on (slider, comet tab).
+                         // = 2.088 / 0.0830125 = 25.15281..., written to 6 digits so it round-trips
+                         // on its own rail. WAS 3, against the retired ACCEL 0.0375 / KEYTHRUST 16.
+let COMETTURN = 25.1528; // comet turn multiplier — the same, for TURN (slider, comet tab). WAS 3.
+                         // It moves WITH COMETACC: thrust() splits along/across on ka and kt and
+                         // only equal factors keep the comet's push heading-free, as ACCEL/TURN do.
+let COMETVMAX = 15 / 4.0833; // comet top-speed factor — the radial clamp becomes (VMAX + mods.speed) × this
+                         // (slider, comet tab). WAS 3, against the retired VMAX 5. Written as the
+                         // EXPRESSION, not as 3.6734993755051057: `4.0833 * (15 / 4.0833) === 15` is
+                         // true in IEEE (verified: node -e 'console.log(4.0833 * (15 / 4.0833) === 15)'
+                         // -> true), and the expression is the only form that says WHY.
 let COMETDMG = 3;       // comet contact damage — encounter.js reads it the way it reads BDMG: a
                         // comet-mode touch costs the body this instead of one bullet (slider, comet tab)
 let COMETDRAIN = 1;     // pool spent per tick the comet is up (slider, comet tab)
@@ -192,8 +268,12 @@ let COMETAURA = 0.5;    // D26's AURA DAMAGE, per tick, to every hp-bearing BODY
                         // per-bite number, and at 3/tick an aura would be a switch rather than
                         // pressure and would deal 62x the ram inside one COMETCD window. The
                         // lab runs 1/tick against a FIRE hit of 2; production normalizes that
-                        // half-hit pressure against BDMG 1, which is 0.5. At 0.5, hp 1-2 chaff
-                        // dies in 2-4 ticks, a 4-hp swarmling in 8 and a 12-hp warden in 24:
+                        // half-hit pressure against a FIRE hit. At BDMG 1 that read 0.5; since
+                        // D50 / OPEN 2 (PORT-F) took BDMG to 2 the same half-hit is 1.0, and the
+                        // SHIPPED COMETAURA stays 0.5 — so the aura is now a QUARTER of a round,
+                        // not a half. At 0.5, hp 1-2 chaff dies in 2-4 ticks, a 4-hp swarmling in
+                        // 8 and a 12-hp warden in 24 (unchanged: the aura's own number did not
+                        // move). Whether it should follow BDMG is a BALANCE question and R8a's:
                         // pressure for bodies, a filter for chaff. It crosses the seam once per
                         // tick through EncounterHost.setAuraDamage — the kernel reads no
                         // production surface and may not hold a copy (slider, comet tab)
@@ -381,8 +461,9 @@ const FLAME_MAX = 20;   // flame length cap, px
 // alternation (js/demo-kernel.js:3022), which the sim may not move here, so the
 // DRAW translates the whole flight line by it instead — perpendicular to v, so
 // every projection is unchanged by it exactly.
-//   1.8 ticks is 67.5 px at BSPEED 37.5 today and becomes 19.5 px when PORT-F
-// lands the demo's own 650 px/s. It is written as TICKS, so it follows.
+//   1.8 ticks is 19.5 px at the shipped BSPEED of 650/60 — D50 / OPEN 2
+// (PORT-F) landed the demo's own 650 px/s, and it was 67.5 px at the retired
+// BSPEED 37.5. It is written as TICKS, so it followed with no edit here.
 const BOLT_TICKS = 1.8;
 const BOLT_LW = 1.25;
 const BOLT_SIDE = 4.2;
@@ -1242,6 +1323,8 @@ const Flight = {
     const flick = 1 + Math.hypot(dx, dy) * FLICK;
     const s = Math.hypot(K.vel.x, K.vel.y);
     let dvx, dvy;
+    // (REST_EPS is 0.125 px/tick and D50 widened this window from one tick to
+    // two — see the measured note at its declaration; it is hash-visible.)
     if (s < REST_EPS) { // at rest there is no heading — all input builds speed
       dvx = dx * ACCEL * ka * flick;
       dvy = dy * ACCEL * ka * flick;
@@ -1382,9 +1465,11 @@ const Flight = {
         // the same `COMETVMAX` radial cap in `integrateSlice`.
         //
         // ITS MAGNITUDE IS ONE FULL KEYBOARD VECTOR — `KEYTHRUST`. The lab's
-        // 300 is a lab unit against a lab's own ACCEL and does not translate;
-        // "as hard as holding W" does, and it is the number the owner's feel
-        // gate is being asked about.
+        // 300 used to be a lab unit against a lab's own ACCEL; since D50
+        // (PORT-F) production's own ACCEL IS the lab's, so 300 px/s² and "as
+        // hard as holding W" now name the same push to within -0.385 %. The
+        // magnitude is still written as one keyboard vector, because that is
+        // the quantity the owner's feel gate is being asked about.
         //
         // COMETTHR SEES IT FOR FREE. The burn is `COMETDRAIN + COMETTHR *
         // |thrustAcc|` and this term adds to `thrustAcc`, so at the shipped
@@ -1614,13 +1699,14 @@ const Flight = {
     // ---- THE DENOMINATOR RESCALES (FIX ROUND, S3BR-08) -----------------
     // It was 4 — `VMAX x 2` at the retired `VMAX` of 2 — so a base-cap wall
     // slam normalized to 2/4 = 0.5 and the band above it was for a boosted or
-    // comet impact. After the flip `VMAX` is 5 and the SAME ordinary collision
+    // comet impact. After the flip `VMAX` was 5 and the SAME ordinary collision
     // read min(1, 5/4) = 1: every full-speed wall contact saturated the cue and
     // sounded twice as strong in normalized terms, erasing the distinction the
     // gain exists to draw.
     //   THE RATIO IS THE INVARIANT AND IT IS DERIVED, not restated: `VMAX * 2`,
-    // which reads 10 at the shipped tuner and reproduces the old 4 at the old
-    // one. It is the LIVE tuner value, so dragging the max-speed slider moves
+    // which reads 8.1666 at the shipped tuner since D50 (PORT-F) and reproduced
+    // 10 before it and the old 4 at the old scale. And `wallHit` is read AFTER
+    // the damp on the same tick, so the whole cue rides DAMP too. It is the LIVE tuner value, so dragging the max-speed slider moves
     // the normalization with it — which is what "a base-cap slam is half" has
     // always meant.
     if (wallHit > 0) fx.thud(K.ship.x, K.ship.y, Math.min(1, wallHit / (VMAX * 2)));
@@ -2098,14 +2184,14 @@ function cursorOffset() {
 // per TICK, so `P.vel * CAMLEAD` is CAMLEAD ticks of it and there is no divide;
 // js/encounter-host.js divides by 60 because the kernel stores px per SECOND.
 // The number 60 means the same thing in both files, but only one may divide.
-// THE ARITHMETIC, AS SHIPPED TODAY: VMAX is 5 px/tick (see :80), i.e. 5 x 60 =
-// 300 px/s, and CAMLEAD is 30 (D52, the owner's panel 2026-08-27), so the throw
-// at top speed is 30 x 5 = 150 px — the number showTuner prints. The lab's own
-// cap is 245 px/s, so the same dial buys 30 x (245/60) = 122.5 px there.
-// AFTER D50 (PORT-F) THE TWO CONVERGE: VMAX becomes 4.0833 px/tick — the demo's
-// 245 px/s to the digit — and this ship's throw falls to 30 x 4.0833 = 122.5 px,
-// which the panel rounds to 122. Nothing here needs re-deriving when it does;
-// the print reads VMAX live.
+// THE ARITHMETIC, AS SHIPPED: VMAX is 4.0833 px/tick (see :80) since D50
+// (PORT-F), i.e. 244.998 px/s, and CAMLEAD is 30 (D52, the owner's panel
+// 2026-08-27), so the throw at top speed is 30 x 4.0833 = 122.5 px, which the
+// panel rounds to 122 — the number showTuner prints. THE TWO PLANES HAVE
+// CONVERGED: the lab's own cap is 245 px/s and the same dial buys 30 x (245/60)
+// = 122.5 px there, the same throw to the digit. Before D50 this ship ran at
+// VMAX 5 and threw 150 px. Nothing here needs re-deriving; the print reads
+// VMAX live.
 // THIS BLOCK PREVIOUSLY READ "at VMAX 2 px/tick this ship tops out at 120 px/s
 // ... CAMLEAD 60 buys about 120 px of lead here and about 245 px there", which
 // was stale twice over: VMAX has been 5 since commit C's x2.5, and D52 halved
@@ -2128,13 +2214,17 @@ function cursorOffset() {
 // LEADCAP is a hash-free render-only guard: it is in no tunable record and gets
 // no panel row, and demo-host's dial alarm reads only the five `let NAME = n;`
 // lines, so a `const` here does not disturb it.
-//   THE NUMBERS. A rank-0 comet tops out at VMAX 5 x COMETVMAX 3 = 15 px/tick,
-// so its velocity lead is 30 x 15 = 450 px — inside the 580 px leash
-// (FW/2 - EDGEMARGIN). But AFTERBURNER is ADDITIVE px/tick on VMAX and is
-// UNCAPPED (js/encounter.js: speed = 2.5 x rank), and the comet multiplier
-// composes with it: rank 1 gives (5 + 2.5) x 3 x 30 = 675 px and rank 2 gives
-// 900 — both PAST the leash. "Both under 580 so the clamp buys nothing" is the
-// rank-0 reading and it is false for any pilot who bought the row.
+//   THE NUMBERS, RE-DERIVED AT D50 (PORT-F). A rank-0 comet tops out at
+// VMAX 4.0833 x COMETVMAX (15/4.0833) = 15 px/tick EXACTLY — the ruling holds
+// that number — so its velocity lead is 30 x 15 = 450 px, exactly AT the clamp
+// and inside the 580 px leash (FW/2 - EDGEMARGIN). But AFTERBURNER is ADDITIVE
+// px/tick on VMAX and is UNCAPPED (js/encounter.js: speed = 2.5 x rank), and
+// the comet factor composes with it: rank 1 gives (4.0833 + 2.5) x 3.6735 x 30
+// = 725.5 px and rank 2 gives 1001.0 — both PAST the leash, and both HIGHER
+// than the 675 / 900 they were before D50, because holding the rank-0 cap at 15
+// against a smaller VMAX raises every rank above it. "Both under 580 so the
+// clamp buys nothing" is the rank-0 reading and it is false for any pilot who
+// bought the row.
 //   IT CLAMPS THE VELOCITY TERM AND NOT THE SUM. Clamping the returned vector
 // would bound the CURSOR PULL as well, which is a different rule with a
 // different owner ruling behind it.
@@ -4459,17 +4549,30 @@ function drawLockedCursor() {
 //   `LEAD_EPS` is PX — a lead vector shorter than this is treated as
 //     near-zero by the dead-zone gate, so the gate tracks live instead of
 //     holding.
-// At the retired scale 0.05 px/tick was 2.5 % of `VMAX 2`; at `VMAX 5` it is
-// 1 %, so a residual velocity in that band now chooses a different thrust basis
-// or a different fire-heading fallback than it did before the flip. Stock
-// 16-count keyboard thrust rarely reaches these boundaries; raw and banked
-// inputs can.
+// At the retired scale 0.05 px/tick was 2.5 % of `VMAX 2`; at `VMAX 5` it was
+// 1 %; since D50 (PORT-F) 0.125 is 3.06 % of `VMAX 4.0833`, so a residual
+// velocity in that band chooses a different thrust basis or a different
+// fire-heading fallback than it did before either move. Stock keyboard thrust
+// rarely reaches these boundaries; raw and banked inputs can.
 //   THEY JOIN THE GEOMETRY TABLE at the one named ratio, 2.5.
 //
 // NO BOUNDARY ORACLE IS BUILT, and that is a stated omission rather than an
 // oversight: NO epsilon in this tree has one, so building one here would be a
 // new class of instrument attached to the smallest of them. Carried as residue.
 const REST_EPS = 0.125;   // px/tick — "at rest". x2.5, WAS 0.05
+// ---- REST_EPS IS HASH-VISIBLE, AND D50 WIDENED ITS WINDOW (PORT-F) --------
+// The value is LEFT at 0.125. What moved is how long a ship sits inside it:
+// the key gain fell from 0.696 to 0.0830125 px/tick², so a ship starting from
+// rest used to clear the threshold on tick 1 and now takes TWO. MEASURED, not
+// reasoned, through server/sim-host.mjs's own Flight (one held key from rest):
+//   tick 1 |vel| = 0.0817673125          -> AT REST
+//   tick 2 |vel| = 0.16230811531249997   -> has a heading
+// That window is NOT cosmetic. `seatFireDir` (:2823) is `headingStep`'s only
+// source, and `P.heading` folds unconditionally into `hashShip` (:7105), so
+// one extra tick of a HELD nose is one extra tick in the state hash — a second,
+// independent reason the event-mode flight traces move at the freeze. The
+// behavioural site is the "at rest there is no heading" branch in
+// `Flight.thrust` (:1328).
 const LEAD_EPS = 2.5;     // px — a lead vector this short is near-zero. x2.5, WAS 1
 let MINIMAP = true;
 const MM_W = 76;
@@ -4959,7 +5062,8 @@ const PRES_SNAP = 70; // x2.5, WAS 28 (PORT-S S3b lane 3's arena rescale — the
                       // (row 4's bar). It is a LENGTH on the same field as
                       // every other length: left at 28 it would cut the
                       // presentation on an ordinary tick of travel, because a
-                      // ship at VMAX 5 now moves 5 px where it moved 2.
+                      // ship at VMAX 4.0833 moves 4.08 px where it moved 2 —
+                      // it moved 5 between the x2.5 flip and D50 (PORT-F).
 // ---- the CUT verdict, forwarded to the light layer ------------------------
 // PRES_SNAP is the ONE displacement predicate on this screen now. It used to
 // have a rival: js/fx.js carried its own TELEPORT of 80 px, measured per
@@ -5420,8 +5524,10 @@ function render() {
     // the demo's bolt has no body but its own line. The COLLISION radius is
     // untouched — b.r is still 5.5 and is simply not read here, which is what
     // "the draw radius is decoupled from r" means.
-    //   PARITY KEYS ON `id`, NOT ON THE TICK. BCOOL/TICK is 24, an EVEN number,
-    // so a tick key is CONSTANT between two shots of this gun. `id` comes from
+    //   PARITY KEYS ON `id`, NOT ON THE TICK. BCOOL/TICK is 8 since D50 / OPEN 2
+    // (PORT-F) and was 24 before it — an EVEN number either way, so a tick key
+    // is CONSTANT between two shots of this gun and the claim survives the
+    // retune untouched. `id` comes from
     // Encounter.nextId(), which orbs also mint from, so consecutive rounds
     // alternate and an orb minted between two shots flips the phase — as
     // arbitrary as the demo's own S.tick & 1, and the tell survives either way.
@@ -6345,9 +6451,30 @@ function sfxGainText() {
 function showTuner() {
   const out = (id, t) => { document.getElementById(id).textContent = t; };
   out("vmax-out", VMAX.toFixed(1) + " px/tick · " + Math.round((1000 / TICK) * VMAX) + " px/s");
-  out("accel-out", ACCEL.toFixed(3) + " · " + Math.round(VMAX / ACCEL) + " counts to top");
+  // FOUR DIGITS, NOT THREE (D50, PORT-F). The dial's own rail steps by 0.0025
+  // and the shipped default is 0.005, so toFixed(3) prints "0.005" for the
+  // whole first notch and "0.004" for a 0.004489 the exact D50 pair would have
+  // wanted — a 10.9 % misstatement of the number being tuned.
+  out("accel-out", ACCEL.toFixed(4) + " · " + Math.round(VMAX / ACCEL) + " counts to top");
   out("turn-out", TURN.toFixed(3));
-  out("keythrust-out", KEYTHRUST.toFixed(1) + " counts/tick · " + (VMAX / (KEYTHRUST * ACCEL * (1 + KEYTHRUST * FLICK)) / 60).toFixed(1) + " s to top");
+  // THE DRAG-AWARE CLOSED FORM (D50, PORT-F). This line divided the cap by the
+  // per-tick gain, which is the time to the top ONLY in a game with no
+  // friction. At DAMP 0.985 it printed "0.8 s to top" against a measured
+  // 1.52 s — and this is the string the owner reads while turning the dial at
+  // the feel gate, so it is the one readout that had to become true first.
+  //   v(n) = a*d*(1-d^n)/(1-d), so the tick that first reaches `cap` is
+  //   n = ln(1 - cap*(1-d)/(a*d)) / ln d
+  // and when the drag-terminal a*d/(1-d) is at or under the cap the ship never
+  // arrives at all — the log's argument goes non-positive and the honest print
+  // is "never", not a NaN or a number off the end of a scale.
+  out("keythrust-out", (() => {
+    const a = KEYTHRUST * ACCEL * (1 + KEYTHRUST * FLICK);
+    const head = KEYTHRUST.toFixed(1) + " counts/tick · ";
+    if (DAMP >= 1) return head + (VMAX / a / 60).toFixed(1) + " s to top";
+    const term = (a * DAMP) / (1 - DAMP);      // the drag-terminal speed
+    if (!(term > VMAX)) return head + "never reaches top (drags out at " + term.toFixed(2) + " px/tick)";
+    return head + (Math.log(1 - (VMAX * (1 - DAMP)) / (a * DAMP)) / Math.log(DAMP) / 60).toFixed(1) + " s to top";
+  })());
   out("wallloss-out", Math.round(WALLLOSS * 100) + "% speed lost per bounce");
   out("damp-out", DAMP === 1 ? "1 — no friction: a ship coasts until a wall stops it"
     : Math.round((1 - DAMP) * 1000) / 10 + "% of speed bled per tick");
@@ -6360,7 +6487,14 @@ function showTuner() {
   out("thrustframe-out", THRUSTFRAME === "ship"
     ? "W is FORWARD along the nose · T toggles"
     : "W is UP on the screen · T toggles");
-  out("cool-out", BCOOL + " ms · " + (1000 / BCOOL).toFixed(1) + " shots/s");
+  // THE QUANTISED TRUTH (D50, PORT-F). `1000 / BCOOL` is the rate the slider
+  // asks for; the sim fires on a TICK COUNT, max(1, round(BCOOL / TICK)), so at
+  // BCOOL 130 the panel said 7.7 shots/s while the ship fired 7.500. The gate
+  // it states is the gate the ship uses.
+  out("cool-out", (() => {
+    const ct = Math.max(1, Math.round(BCOOL / TICK));
+    return BCOOL + " ms · " + ct + " ticks · " + ((1000 / TICK) / ct).toFixed(3) + " shots/s";
+  })());
   out("bspeed-out", BSPEED.toFixed(1) + " px/tick · " + Math.round((1000 / TICK) * BSPEED) + " px/s");
   out("bfactor-out", BFACTOR.toFixed(2));
   out("bmax-out", String(BMAX));

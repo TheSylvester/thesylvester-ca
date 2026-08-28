@@ -81,8 +81,11 @@ const ABILITY_DEFS = [
     // for free, which is not a build choice. `en` spends from the SAME per-seat
     // pool the comet burns, so the two compete: a pilot who empties the pool on
     // rifle shots has no ram and no damage negation left. `cd` is the other half
-    // — 45 ticks against the basic gun's 24 — so the rifle is burst and reach
-    // bought with rate and fuel, not free damage on top.
+    // — 45 ticks against the basic gun's 8 since D50 / OPEN 2 (PORT-F), and
+    // against its 24 before that — so the rifle is burst and reach bought with
+    // rate and fuel, not free damage on top. The RATE half of that trade got
+    // 3x harder in one commit: the basic gun now fires 7.5 times a second and
+    // the rifle still fires 1.33. Named, not re-priced; the row is R8a's.
     // the spawn pattern, and every number the behavior needs. One round, four
     // times the standing muzzle speed, six ticks of life: it crosses about the
     // same distance as an ordinary round and gets there in a sixth of the time.
@@ -108,20 +111,29 @@ const ABILITY_DEFS = [
     // and a cue the ear cannot separate teaches nothing. A record with no
     // `cue` sounds as `fire`, so the two shipped rows are unchanged.
     cue: "rail",
-    // `dmg` is the fourth: 5.0 is FIVE TIMES the basic LMB round (BDMG 1) —
+    // `dmg` is the fourth: 5.0 was FIVE TIMES the basic LMB round at BDMG 1 and
+    // is TWO AND A HALF times it since D50 / OPEN 2 (PORT-F) took BDMG to 2 —
     // owner ruling 2026-08-22, "the railgun should just kill anything. Almost
     // anything." The 2.5 it replaces read as a merely-better bullet.
     // ---- RESCALED AT THE FIX ROUND (S3BR-04) --------------------------
     // `r` and `streak` are ARENA-PX and stayed at 40 % scale through commit C:
     // the ordinary production round moved 2.2 -> 5.5, and the rail's velocity
-    // already scaled itself through `BSPEED * spd` (37.5 x 4), so only its
+    // already scaled itself through `BSPEED * spd` (37.5 x 4 then; 650/60 x
+    // 13.846153846153845 = the same 150 px/tick now), so only its
     // COLLISION RADIUS and its render streak were left behind. A graze between
     // 2.2 and 5.5 px of the rail's swept centre missed, although the pre-flip
     // rail used the ordinary round's own radius.
     //   THE OTHER FOUR ARE CORRECTLY EXEMPT and it is worth saying which:
     // `spd` is a MULTIPLIER on an already-scaled speed, `ttl` is TICKS, `dmg`
     // is damage and `spread` is an angle. None has a length in it.
-    spawn: { n: 1, spd: 4, ttl: 6, r: 5.5, dmg: 5.0, spread: 0,
+    //   AND `spd` IS RE-DERIVED AT D50 / OPEN 2 (PORT-F). It is a multiplier on
+    // BSPEED, and BSPEED fell 37.5 -> 650/60. At `spd: 4` the rail would fly at
+    // 43.33 px/tick — 2600 px/s with a 260 px reach, SHORTER than the basic gun
+    // it is meant to out-reach, and the row's own "burst and reach" text would
+    // go false. The ruling keeps the rail's ABSOLUTE speed: 150 / (650/60) =
+    // 13.846153846153845, and `(650/60) * that === 150` exactly, so the rail
+    // still flies 150 px/tick = 9000 px/s with a 6 x 150 = 900 px reach.
+    spawn: { n: 1, spd: 150 / (650 / 60), ttl: 6, r: 5.5, dmg: 5.0, spread: 0,
              ink: "#d97757", streak: 27.5 }, // ...the two render-only ones sit in
                           // the SPAWN block beside `r`, because they describe
                           // the ROUND; `cue` above is the ABILITY's and stays

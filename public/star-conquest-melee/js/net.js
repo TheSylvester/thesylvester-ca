@@ -1093,6 +1093,10 @@
     // 400 ms BCOOL — three shots fired and never heard, 7.5%, with the
     // predictor up throughout (pred.on, !idle, unacked 0) and tracers 0 against
     // BMAX 15, which excludes both the stand-down and the budget-refusal paths.
+    // (Those are the numbers AS MEASURED, on a page whose BCOOL was 400 and
+    // whose BMAX was 15. D50 / OPEN 2 (PORT-F) moved them to 130 and 20, so the
+    // 0.40 s gaps become 0.133 s and the measurement is not re-runnable as
+    // written — the finding it supports is unchanged and the fix is shipped.)
     //   The old rejection measured a back-fill that spawned a TRACER, where an
     // over-cue is a visible broken promise. This one calls ownCue alone: no
     // tracer, no promise, and at worst a late pew — the sound the player was

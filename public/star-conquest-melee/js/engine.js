@@ -394,12 +394,12 @@ MATRIX.aura[CLASS.AURA][CLASS.SHIP] = 0;     // OFF, and PENDING rather than
 // factor is: a later flip is an edit here, never a code change.
 const SELF_SPLASH = false;
 
-// D10's row (shot -> ORDNANCE) is DECLARED AND INERT, and both halves are true
-// today. No ordnance carries `hp` until R6's seventh registry obligation, and
-// the collision pass that would consult this row is R6's as well, so nothing in
-// the tree reads it yet and no behavior changes. It is declared now because R5
-// is where the class list is written and D10's damage half was scheduled here:
-// the row is the declaration, the pass is R6's.
+// D10's row (shot -> ORDNANCE) WAS DECLARED AND INERT, and it is neither any
+// more. The kernel's own player-round pass has consulted it since R6
+// (js/demo-kernel.js:4796-4799), so a kernel bolt shoots down kernel ordnance
+// on the bounded page today. It was declared at R5 because R5 is where the
+// class list is written and D10's damage half was scheduled here: the row was
+// the declaration, the pass was R6's, and PORT-F's D51 adds production's own.
 
 // ---- BODY CONTACT (D28) ----------------------------------------------------
 // Which effect kinds are a physical hull-on-hull touch. Declared here, beside
@@ -524,7 +524,9 @@ function mayHit(kind, srcCls, tgtCls) {
 // can eat incoming rounds — while `acquire` may still NEVER TAKE ordnance, which
 // is the D25 mask. The same is true of the shipped gun: D10's
 // shot -> ORDNANCE row is already declared on, and manual interception is proven
-// play (js/encounter.js kills a seeker for "no orb, no XP, no entry in E.kills").
+// play. (The example this line used to give — js/encounter.js killing a seeker —
+// is RETIRED: the seeker plane went with the harrier at D4 and that branch is
+// gone. PORT-F's D51 restores the CLAIM on the successor plane's ordnance.)
 //
 // So the two rulings read the same class list and reach opposite conclusions,
 // and both are right, because they are answering different questions. What may
@@ -1239,8 +1241,11 @@ const KINDS = {
       wire: "server/snapshot.mjs encodeBullet",
       present: "PRES.bullets",
       clear: { store: "G.bullets", onRestart: "cleared" },
-      // BMAX 15, OWNER-SCOPED so one seat can never starve another.
-      cap: capped(CAP.OWNER, 15, "js/game.js BMAX / fire()",
+      // BMAX 20 (PORT-F / OPEN 2, WAS 15), OWNER-SCOPED so one seat can never
+      // starve another. A HAND MIRROR of js/game.js BMAX: engine.js loads before
+      // game.js, so it cannot read the live value; R7a's registry<->schema leg pins
+      // the pair. The ONLY other hand mirror in the tree is server.js DAMP_STOCK.
+      cap: capped(CAP.OWNER, 20, "js/game.js BMAX / fire()",
         "rejectNewest: conforms — fire() returns and nothing is evicted. " +
         "DEBT, two clauses: the attempted cooldown is NOT billed (P.cool is set " +
         "after the cap test, so a refused shot leaves the trigger hot and fires " +
@@ -1278,7 +1283,9 @@ const KINDS = {
     // THE SEEKER'S ROW went at the same commit, with the seeker plane.
   },
   kernel: {
-    // ---- the 21 enemy ROUNDS, in the kind ladder's own code order ----------
+    // ---- the enemy ROUNDS, in the kind ladder's own code order -------------
+    // (the count is 20 `kernelRound` rows; this header said 21 and nothing
+    //  derives from either number)
     // `hp` is D10's owner-ruled table (.ai-reference/ordnance-taxonomy.md §4)
     // AS AMENDED BY D27. Radius predicts the default and the encounter
     // overrides it: kineticLance is r 10 and stays at 0, because at 720 px/s it
