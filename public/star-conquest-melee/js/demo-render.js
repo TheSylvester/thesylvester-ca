@@ -1852,12 +1852,78 @@
       ctx.beginPath(); ctx.arc(p.x, p.y, b.r * 0.52, -S.time * 2 + b.id, -S.time * 2 + b.id + Math.PI * 1.35); ctx.stroke();
       ctx.strokeStyle = cssFor(b.color);
       ctx.beginPath(); ctx.arc(p.x, p.y, b.r + 4, S.time * 1.6, S.time * 1.6 + Math.PI); ctx.stroke();
+      // ---- D63: TWO OF THESE FIVE SAY WHAT THEY DO ----------------------
+      // The arm above is one silhouette for five kinds that behave nothing
+      // alike, and a player who cannot tell them apart cannot answer them.
+      // The three that keep it — spitOrb, omegaSphere, vortex — are BYTE FOR
+      // BYTE unchanged; the two with a rule worth reading get a mark, drawn
+      // OVER the shared body so the family still reads as a family.
+      if (b.kind === "splitter") {
+        // "MORE OF ME INSIDE" — two filled cores along the flight line, the
+        // children it is carrying. Along the VELOCITY, not the heading: the
+        // fan opens across the direction of travel, so the two cores sit
+        // where the halves will be.
+        const sa = Math.atan2(b.vy, b.vx);
+        ctx.fillStyle = cssFor(b.color);
+        ctx.beginPath();
+        ctx.arc(p.x + Math.cos(sa) * b.r * 0.45, p.y + Math.sin(sa) * b.r * 0.45, b.r * 0.35, 0, TAU);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(p.x - Math.cos(sa) * b.r * 0.45, p.y - Math.sin(sa) * b.r * 0.45, b.r * 0.35, 0, TAU);
+        ctx.fill();
+      } else if (b.kind === "plasma") {
+        // "DENY ME" — a second outline ring standing off the body. The plasma
+        // orb is the one round in this family that a shot can stop before it
+        // arms (js/demo-kernel.js's triggerPlasmaOrb), so its tell is a shell
+        // to aim at rather than a mass to run from.
+        lw(ctx, 1);
+        ctx.beginPath(); ctx.arc(p.x, p.y, b.r + 3, 0, TAU); ctx.stroke();
+      }
+    } else if (b.kind === "grenade") {
+      // ---- D63: THE GRENADE HAD NO ARM AT ALL ---------------------------
+      // It fell to the bare `else` below with ten other kinds — one flat disc,
+      // no way to know it is about to become a fan. "I WILL BURST": today's
+      // disc, plus a fuse on the TRAILING side (opposite the velocity, so it
+      // never hides under the streak the line above already drew) that
+      // BLINKS. The blink is off S.time and the round's own id, so two
+      // grenades in one frame are out of phase and the eye reads two.
+      ctx.fillStyle = cssFor(b.color);
+      ctx.beginPath(); ctx.arc(p.x, p.y, b.r, 0, TAU); ctx.fill();
+      const ga = Math.atan2(b.vy, b.vx);
+      ctx.save();
+      ctx.globalAlpha = 0.5 + 0.5 * Math.sin(S.time * 12 + b.id);
+      ctx.strokeStyle = cssFor(b.color);
+      lw(ctx, 1.25);
+      ctx.beginPath();
+      ctx.moveTo(p.x - Math.cos(ga) * b.r, p.y - Math.sin(ga) * b.r);
+      ctx.lineTo(p.x - Math.cos(ga) * b.r * 1.8, p.y - Math.sin(ga) * b.r * 1.8);
+      ctx.stroke();
+      ctx.restore();
     } else if (b.kind === "kineticLance" || b.kind === "rocket") {
       const a = Math.atan2(b.vy, b.vx);
       ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(a);
       ctx.fillStyle = b.kind === "kineticLance" ? C.ink : cssFor(b.color);
       ctx.beginPath(); ctx.moveTo(b.r * 1.6, 0); ctx.lineTo(-b.r, -b.r * 0.48); ctx.lineTo(-b.r * 0.5, 0); ctx.lineTo(-b.r, b.r * 0.48); ctx.closePath(); ctx.fill(); ctx.stroke();
       ctx.restore();
+    } else if (b.kind === "lightning") {
+      // ---- THE LANCE SILHOUETTE (OPEN 5, owner-ruled: the lance) ---------
+      // The Star Eater's blue bolt had NO arm: it fell to the bare `else`
+      // below and came out as a filled disc, the same shape as ten unrelated
+      // kinds. It is not a mass — it is a dart, and the owner ruled the dart.
+      //   NO DISC AT ALL. One line, thinner and 2.5x longer than the plain
+      // round's streak the chain drew above it: a lance reads as a direction
+      // and a length, and a body drawn at its head would only argue with
+      // that. The line is drawn back along the SAME prev-pose vector the
+      // streak uses, so it cannot disagree with the round's own motion.
+      //   b.r AND b.color ARE UNTOUCHED — both are hashed, and the halo in
+      // the glow pass is floored at Math.max(13, b.r * 2.6) anyway, so a
+      // radius change would dim nothing. The colour move ("cyan" -> "blue")
+      // and the ladder row are P-SIM batch 2's, not this lane's.
+      lw(ctx, 1);
+      ctx.beginPath();
+      ctx.moveTo(p.x - 2.5 * (p.x - prevX), p.y - 2.5 * (p.y - prevY));
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
     } else if (b.kind === "asteroid") {
       ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(S.time * 0.8 + b.id);
       polygon(ctx, 7, b.r, b.id * 0.17); ctx.fill(); ctx.stroke();

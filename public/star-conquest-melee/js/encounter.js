@@ -3848,8 +3848,14 @@
         // field and no lookup — and enemy ordnance is most of the moving ink in
         // a wave, so a bodies-only D44 would leave the field orange.
         for (const b of K.S.bullets) if (!b.dead) LIGHTS.push({ x: b.x, y: b.y, r: b.r, t: b.kind || "bolt", col: b.color });
-        // ORBS UNTOUCHED — the clay bounty stands, by D44's own ruling.
-        for (const o of K.S.orbs) LIGHTS.push({ x: o.x, y: o.y, r: ECFG.orb.r, t: "orb" });
+        // ORBS ARE GOLD NOW — D56 REVERSED D44 for the bounty: the demo draws
+        // the orb as a GOLD diamond, so a clay halo under a gold plate is the
+        // same disagreement D44 was written to end, one body class later.
+        //   AND THE KERNEL'S OWN ORB WALK IS DELETED HERE, not re-coloured. It
+        // was a DOUBLE PUSH: solo, `view.orbs` is `E.orbs.concat(ko)` (the
+        // kernel's orbs are already in the view), so this walk lit every solo
+        // orb twice; on a net client this whole block never runs. The surviving
+        // walk below is the one push, and it carries the colour.
       }
     }
     // ---- PRODUCTION'S OWN BODY AND ORDNANCE LIGHTS ARE DELETED (D5) ------
@@ -3860,9 +3866,11 @@
     // sim no longer keeps, and the whole of that decode is R7's to re-cut
     // against wire v11. Lighting a `ty:-1` body here would be inventing a
     // colour for a type the wire cannot yet name.
-    //   THE ORB WALK BELOW IS UNTOUCHED and still reads the view — orbs cross
-    // the wire honestly and a client's own bounty must glow.
-    for (const o of (view && view.orbs) || E.orbs) LIGHTS.push({ x: o.x, y: o.y, r: ECFG.orb.r, t: "orb" });
+    //   THE ORB WALK BELOW IS THE ONLY ORB PUSH and still reads the view —
+    // orbs cross the wire honestly and a client's own bounty must glow. It
+    // names its colour like every other row (D44's field, D56's hue), so the
+    // halo agrees with the gold diamond js/demo-render.js draws inside it.
+    for (const o of (view && view.orbs) || E.orbs) LIGHTS.push({ x: o.x, y: o.y, r: ECFG.orb.r, t: "orb", col: "gold" });
     return LIGHTS;
   }
 
@@ -3886,17 +3894,14 @@
     // with a PORTAL of its own, drawn in js/demo-render.js's world pass under
     // production's camera — which commit D2 already recorded when it declined
     // to rebuild the off-screen tracker for the same reason.
-    // XP orbs
-    for (const o of (view && view.orbs) || E.orbs) {
-      ctx.fillStyle = C.clay;
-      ctx.beginPath();
-      ctx.arc(o.x, o.y, ECFG.orb.r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = C.bright;
-      ctx.beginPath();
-      ctx.arc(o.x, o.y, 1.2, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    // ---- THE XP ORB DISC IS RETIRED (D56) --------------------------------
+    // Ten lines of clay disc plus a 1.2 px bright centre, drawn under the
+    // successor plane's own orb: js/demo-render.js draws the bounty as a
+    // pulsing GOLD diamond with its own glow, in this function's own slot and
+    // under the same camera, so the disc was a second, older orb showing
+    // through the first. The diamond IS the demo's look and it is the one
+    // that stays; the halo around it is the light layer's, and it went gold
+    // in lights() above.
     // (the body walk and the ordnance walk are RETIRED — commit D2. The
     // successor plane's twenty-one silhouettes are js/demo-render.js's and
     // js/game.js's render() draws them in THIS FUNCTION'S OWN SLOT, under
@@ -3923,23 +3928,145 @@
     ctx.restore();
   }
 
-  // ---- THE ENEMY HUD IS RETIRED (PORT-S S3b lane 3, commit D2) -----------
-  // `drawIncomingMarker`, `computeEdgeArrows`, `drawEdgeArrows` and their two
-  // tables — 155 lines — drew the OLD roster's off-screen chevrons and its
-  // spawn-announcement markers. Both read a body's `type` off that roster and
-  // its `mode` off the seven-value vocabulary D9 replaced, so neither survives
-  // the roster it was written against.
+  // ---- THE OFF-SCREEN CHEVRONS RETURN (D58) -------------------------------
+  // WHAT WAS RETIRED, and why the retirement was right at the time: commit D2
+  // deleted `drawIncomingMarker`, `computeEdgeArrows`, `drawEdgeArrows` and
+  // their two tables — 155 lines that read a body's `type` off the OLD roster
+  // and its `mode` off the seven-value vocabulary D9 replaced. Neither
+  // survived the roster it was written against, and D2 said in writing that
+  // an off-screen threat indicator for twenty-one successor types was a HUD
+  // DESIGN question rather than a port. `drawIncomingMarker` and the spawn
+  // marker stay retired: their call site went with `E.groups`.
   //
-  // WHAT IT WAS FOR IS NOT SETTLED HERE. An off-screen threat indicator for
-  // twenty-one successor types is a real HUD question — which types earn one,
-  // what "hot" means without a `lockon` mode — and it is a DESIGN question
-  // rather than a port. It belongs with the rest of the HUD work at S4, and
-  // saying so is more honest than shipping a chevron table that answers it by
-  // accident.
+  // D58 ANSWERS THE DESIGN QUESTION and the geometry comes back. The owner's
+  // words: a player must be able to see what is off the screen. The answer is
+  // deliberately NOT the old table:
   //
-  // `EDGEARROWS` (the tunable) and its call site go with them; the spawn
-  // marker's call site in encDrawHud goes with `E.groups`, which is empty from
-  // commit C and deleted at D4.
+  //   ONE COLOUR PER CLASS, never per body. Foes wear C.clay, XP orbs wear
+  //   C.gold. The frame view carries NO colour — a kernel body record has no
+  //   `color` field — so per-body ink would mean a second colour authority in
+  //   a HUD file, keyed on STATS[type]; and a `?mp` client's decoded bodies
+  //   are all `ty: -1` until R7 re-cuts the decode, so per-body colour is
+  //   BROKEN on the wire today and one colour per class is not. (Per body is
+  //   a post-R7 option, and the two-class split is what the owner asked for.)
+  //
+  //   NO "HOT" GRADE. The old code had a third state for `lockon`/`windup`
+  //   telegraphs — a vocabulary D9 deleted. Inheriting it would be inheriting
+  //   a dead branch, so the alpha is CONSTANT and there is no distance fade.
+  //   `ARROWS.far`, the old alpha ramp, does not come back either.
+  //
+  //   THE CULL IS NEW. The old `track()` had no distance test at ANY radius;
+  //   D58 asks for one, so `interestR()` below is a new line, not a port, and
+  //   it has its own leg.
+  //
+  // WHERE IT DRAWS: inside encDrawHud, at the retired pass's own slot, so the
+  // chevrons paint in SCREEN space (js/game.js sets the field transform with
+  // no camera translate before calling drawHud) and UNDER the top-left status
+  // column, which lives at x 8-60 while the chevrons live on the inset rect.
+  //
+  // NO PANEL TOGGLE. The chevrons are unconditional — `EDGEARROWS` and its
+  // world-tab row do not come back with them. A toggle is a five-place census
+  // move in tests/pause-ui-checks.js and this is a render-only lane; and an
+  // indicator that answers "what can reach me" is not a taste setting.
+  const ARROWS = { inset: 14, cap: 16, buckets: 48 };
+  const NO_ARROWS = []; // the frozen empty answer — never filled, never returned
+                        // to a caller that could push into the live list
+  // THE INTEREST RADIUS, DERIVED AND NEVER SPELLED. `Math.max(PLAY_W, PLAY_H)
+  // * 1.2` is the kernel's own live formula (js/demo-kernel.js:4087 uses it
+  // for a dash ray), read through the kernel's exports on the guard idiom
+  // js/encounter-host.js:1418-1421 already ships. There is deliberately NO
+  // literal here: R7's server-side INTEREST_R (r7c, R3.1) is the same formula
+  // over the same two numbers, and two copies of a FORMULA stay equal when
+  // PLAY_W moves while two copies of its ARITHMETIC RESULT do not.
+  //   THE NO-KERNEL FALLBACK IS Infinity — that is NO CULL, every off-screen
+  // body earns its chevron. A page that failed to load the kernel should draw
+  // too many indicators, never none.
+  function interestR() {
+    const K = window.DemoKernel;
+    return K && Number.isFinite(K.PLAY_W) && Number.isFinite(K.PLAY_H)
+      ? Math.max(K.PLAY_W, K.PLAY_H) * 1.2 : Infinity;
+  }
+  function computeEdgeArrows(view) {
+    // view is game.js's presentation FRAME: the camera AND the roster read the
+    // presented instant together, so an arrow's visibility cut and its bearing
+    // agree with the world pass. A caller with NO view (the __test export, a
+    // headless page, every drawHud(null) leg in tests/wave1-checks.js) keeps
+    // the live state — same geometry, tick camera. Dropping that fallback is
+    // what makes those legs throw.
+    const c = (view && view.cam) || cam;
+    if (!c) return NO_ARROWS;
+    // the roster comes off the frame, which has ALREADY merged both planes:
+    // solo, mapState() answers presentedBodies() + E.orbs.concat(kernel orbs);
+    // on a net client it answers the decoded rows. So there is no direct reach
+    // into EncounterHost or DemoKernel here — that read is host-installed-only
+    // and would leave a net client with no enemy chevrons at all.
+    const foes = (view && view.enemies) || presentedBodies() || NO_ARROWS;
+    const orbs = (view && view.orbs) || E.orbs || NO_ARROWS;
+    const vx = c.x + FW / 2; // the view centre — position and heading share
+    const vy = c.y + FH / 2; // this ray, so an arrow points where it sits
+    const R = interestR();
+    const slots = new Array(ARROWS.buckets).fill(null); // fixed slot order — deterministic
+    const step = (2 * Math.PI) / ARROWS.buckets;
+    // one bucket claim, shared by both classes so they fold into the SAME
+    // merge and the same nearest-wins rule
+    const track = (o, kind) => {
+      const r = o.r || 0;
+      const sx = o.x - c.x;
+      const sy = o.y - c.y;
+      if (sx >= -r && sx <= FW + r && sy >= -r && sy <= FH + r) return; // any part visible — no arrow
+      const dx = o.x - vx;
+      const dy = o.y - vy;
+      const dist = Math.hypot(dx, dy);
+      if (dist > R) return; // THE CULL (D58) — beyond the interest radius a
+                            // body is not a threat yet, and a rim of chevrons
+                            // for the whole 7680x7920 world is noise
+      const bi = ((Math.round(Math.atan2(dy, dx) / step) % ARROWS.buckets) + ARROWS.buckets) % ARROWS.buckets;
+      const s = slots[bi];
+      if (!s) slots[bi] = { dx, dy, dist, n: 1, kind, bi };
+      else {
+        s.n++;
+        if (dist < s.dist) { s.dx = dx; s.dy = dy; s.dist = dist; s.kind = kind; } // nearest wins the bucket
+      }
+    };
+    for (const e of foes) if (bodyIsLive(e)) track(e, "foe");
+    for (const o of orbs) if (o) track(o, "orb");
+    const hw = FW / 2 - ARROWS.inset;
+    const hh = FH / 2 - ARROWS.inset;
+    return slots.filter(Boolean)
+      .sort((a, b) => a.dist - b.dist || a.bi - b.bi) // nearest first; the bucket
+      .slice(0, ARROWS.cap)                           // index is the explicit
+      .map((s) => {                                   // tie-break — deterministic
+        // an off-screen body always overshoots one half-extent, so k < 1 and
+        // the arrow lands exactly ON the inset rect — inside the field clip,
+        // never in the letterbox bars
+        const k = Math.min(hw / Math.max(Math.abs(s.dx), 1e-9), hh / Math.max(Math.abs(s.dy), 1e-9));
+        return { x: FW / 2 + s.dx * k, y: FH / 2 + s.dy * k,
+          ang: Math.atan2(s.dy, s.dx), dist: s.dist, n: s.n, kind: s.kind };
+      });
+  }
+  function drawEdgeArrows(view) {
+    for (const a of computeEdgeArrows(view)) {
+      // the count scales the chevron — a bucket holding four bodies reads
+      // bigger than one holding one, which is the only crowding cue a single
+      // flat colour per class can carry
+      const sc = 1 + Math.min(a.n - 1, 3) * 0.15;
+      ctx.save();
+      ctx.globalAlpha = 0.75; // CONSTANT — see the header: the old ramp and its
+                              // `hot` branch belonged to a deleted vocabulary
+      ctx.translate(a.x, a.y);
+      ctx.rotate(a.ang);
+      ctx.scale(sc, sc);
+      ctx.fillStyle = a.kind === "orb" ? C.gold : C.clay;
+      ctx.beginPath(); // the incoming-marker chevron, the old proportions
+      ctx.moveTo(7, 0);
+      ctx.lineTo(-4, 5);
+      ctx.lineTo(-1, 0);
+      ctx.lineTo(-4, -5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
 
   // ---- the shop panel's geometry ------------------------------------------
   // ONE table, one derivation, one SPACE. The hit test and the draw both read
@@ -5560,10 +5687,10 @@
     if (E.state === "idle") return;
     ctx.save();
     const wt = E.waveTick;
-    // (the off-screen tracker pass is RETIRED — commit D2. See the block where
-    // the three functions stood: an off-screen threat indicator for the
-    // successor plane's twenty-one types is a HUD design question and belongs
-    // at S4, not a chevron table that answers it by accident.)
+    // the off-screen tracker pass, back at its own slot (D58). It paints FIRST
+    // in this function so the status column below draws over it, and it takes
+    // the same presentation view every other reader here would.
+    drawEdgeArrows(view);
     // --- viewport HUD, top left ---
     // (No suppression gate any more. This column used to stand down whenever a
     // row's big opaque explainer bitmap was up, because that art's rect sliced
@@ -6480,6 +6607,14 @@
       advance: (n) => { for (let i = 0; i < n; i++) { clientStep(); drainStep(); } }, // the full CLIENT tick
                     // (bank + camera-free step), encounter included — drained
                     // per step, exactly as the frame loop drains
+      edgeArrows: computeEdgeArrows, // D58's resolved chevron list off any view
+                                     // (or off live state with none) — the seam
+                                     // the bucket, cap and cull legs read
+      arrowCfg: ARROWS,              // inset/cap/buckets — a check reads these,
+                                     // it never copies them
+      interestR,                     // ...and the derived cull radius, so a leg
+                                     // can stage a body just inside and just
+                                     // outside it without spelling the formula
       recordEvents, // start recording the (tick, kind, gain) stream the drain forwards
       stopEvents,   // ...and stop, returning the recorded list
       state: snapState,

@@ -659,7 +659,14 @@
     if (window.Encounter && Encounter.lights) {
       for (const L of Encounter.lights(view)) {
         if (L.t === "orb") {
-          blob(L.x, L.y, 9 * gl, PAL.clay, 0.4);
+          // D56 — THE ORB TAKES THE ENEMY'S OWN TREATMENT. One RENDER radius:
+          // the pushed record's `L.r` through the same `* 2.6 * gl` the body
+          // arm below uses, so the hard-coded 9 is gone and there is a single
+          // place a halo size is decided. The hue rides the record's `col`
+          // (D44's field, D56's gold) through PAL.kernel exactly as the body
+          // arm resolves it; `|| PAL.clay` is the unknown-name arm, and a name
+          // handed straight to blob would parse to rgba(0,0,0,a) — invisible.
+          blob(L.x, L.y, L.r * 2.6 * gl, (PAL.kernel[L.col] || PAL.clay), 0.4 * g1);
           blob(L.x, L.y, 2.4, PAL.bright, 0.5 * g1);
         } else {
           // enemy records carry `tier` and the halo picks off the SAME field
@@ -685,7 +692,11 @@
             : L.tier
               ? (L.tier >= 3 ? PAL.gold : L.tier === 2 ? PAL.radar : PAL.clay)
               : (L.t.lastIndexOf("radar", 0) === 0 ? PAL.radar : PAL.clay);
-          blob(L.x, L.y, L.r * 2.6 * gl, hue, 0.4);
+          // D57 — the alpha takes the clamped dial too. `gl` carried the
+          // halo's RADIUS and this alpha carried nothing, so at a low GLOW the
+          // ring shrank and stayed as bright; g1 is min(1, GLOW), so the dial
+          // dims what it also narrows and 1.20 is byte-unchanged.
+          blob(L.x, L.y, L.r * 2.6 * gl, hue, 0.4 * g1);
         }
       }
     }
@@ -827,7 +838,10 @@
       // the net-mode namespace — the same guard render() uses at its own call.
       if (window.Net && Net.active() && Net.tracers) {
         for (const tr of Net.tracers()) {
-          blob(tr.x, tr.y, 7 * gl, PAL.clay, 0.35);
+          // D57 again — the speculative tracer's glow, the third and last
+          // bare alpha in this file. Its bright core at the next line already
+          // took g1; the two halves of one cue now answer to one dial.
+          blob(tr.x, tr.y, 7 * gl, PAL.clay, 0.35 * g1);
           blob(tr.x, tr.y, 2.8, PAL.bright, 0.45 * g1);
           // a tracer has carried its muzzle since the cue was written — the flat
           // pass draws its two-frame glow there (js/game.js drawTracers). It is

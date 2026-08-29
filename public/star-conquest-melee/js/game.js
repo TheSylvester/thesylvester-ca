@@ -4625,10 +4625,13 @@ function drawMinimap() {
   ctx.fillRect(sx, sy, 2, 2);
 }
 
-// the other tracking layer: chevrons on the field's inner edge pointing at
-// enemies the viewport has lost. The geometry and the drawing live in
-// encounter.js beside the enemy list; this flag is the world-tab switch it
-// reads, declared here with the rest of the HUD toggles.
+// THE OTHER TRACKING LAYER HAS NO FLAG HERE. Chevrons on the field's inner
+// edge, pointing at the enemies and the XP orbs the viewport has lost, came
+// back at D58 — geometry, draw and all — but they came back UNCONDITIONAL.
+// `EDGEARROWS` is not re-declared: an indicator that answers "what can reach
+// me from off the screen" is not a taste setting, and a world-tab row would
+// be a five-place census move for a switch nobody should want. Everything the
+// layer is lives in js/encounter.js's encDrawHud, beside the roster it reads.
 
 // ---- the first-run controls card -------------------------------------------
 // One cached bitmap that teaches the shipped control contract — the visible
