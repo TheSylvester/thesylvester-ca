@@ -305,6 +305,9 @@
   // frame — the camera the point rides on moves between the pointermove and the
   // frame that reads it, which is 03M-D and D13's law.)
 
+  let netRounds = null;
+  function setNetRounds(list) { netRounds = list || null; }
+
   function setKernel(k) {
     kernel = k;
     S = k.S;
@@ -2103,9 +2106,31 @@
     if (lit) drawShockwaves(lx, true);
     drawOrbs(wx, alpha, false);
     if (lit) drawOrbs(lx, alpha, true);
-    for (let i = 0; i < S.bullets.length; i++) {
-      drawBullet(wx, S.bullets[i], alpha, false);
-      if (lit) drawBullet(lx, S.bullets[i], alpha, true);
+    // THE ROUND LIST, and since R7 it may come from somewhere other than the
+    // kernel. A NET client steps no kernel: its rounds arrive on the wire (the
+    // homing CONSTRUCTS) or are derived from spawn events (everything else),
+    // and js/net.js hands the presented list through setNetRounds. The draw is
+    // the SAME draw — a round is a round, and inventing a second one for the
+    // wire is how two planes start looking different.
+    //   THE HANDLE IS GATED ON A LIVE NET CLIENT, and that is not tidiness — it
+    // was MEASURED, TWICE. This is a MODULE-LEVEL handle and it OUTLIVES A
+    // SUITE: the net suite sets it, a later suite runs on the same page, and
+    // the round draw then reads a list belonging to a client that is no longer
+    // there. The fx suite's BOLT leg red INTERMITTENTLY on the full gate while
+    // passing 3/3 on its own — and it kept doing so after a first fix that only
+    // fell back on an EMPTY list, because js/net.js reassigns NETV.rounds to a
+    // NEW ARRAY on every deal while this handle still points at the old one.
+    // Disabling the handle entirely made three full runs green, which is what
+    // named the coupling as ours.
+    //   `Net.active()` is the same condition js/game.js's drawSuccessorField
+    // asks, so the two arms of DRAW-1 agree by construction rather than by two
+    // conditions kept in step. js/net.js ALSO clears the handle at both
+    // discontinuity cuts and at close; this is the outer lock.
+    const netLive = !!(window.Net && Net.active && Net.active());
+    const rounds = (netLive && netRounds && netRounds.length) ? netRounds : S.bullets;
+    for (let i = 0; i < rounds.length; i++) {
+      drawBullet(wx, rounds[i], alpha, false);
+      if (lit) drawBullet(lx, rounds[i], alpha, true);
     }
     for (let i = 0; i < S.enemies.length; i++) {
       drawEnemy(wx, S.enemies[i], alpha, false);
@@ -2125,6 +2150,10 @@
 
   window.DemoRender = {
     setKernel: setKernel,
+    // R7: the NET client's round list, presented. null means "read the
+    // kernel's own store", which is every solo page and every suite that does
+    // not set it — so this costs the shipped path one null test.
+    setNetRounds: setNetRounds,
     render: render,
     getCamOrigin: getCamOrigin,
     // Kept EXPORTED AND UNCHANGED for compatibility. New callers want

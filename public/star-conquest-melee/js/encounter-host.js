@@ -290,7 +290,12 @@
   // dropped to "nobody" rather than folded to seat 0 — `emit`'s own `seat`
   // argument reaches `att()` and the audio layer's per-seat buckets, and the
   // kernel spells "nobody" as -1 exactly as production does.
-  function routeCue(name, at) {
+  // `rec` (r7b) is the WIDE record the four split kinds carry. THIS ROUTE
+  // DISCARDED EVERY FIELD BUT x/y/seat until r7b: `pos` below is built from two
+  // numbers and `enc.emit` was called with four arguments, so a roundSpawn's
+  // id, kind, velocity and life all died here. It rides as a trailing argument
+  // rather than inside `pos`, so the narrow route's shape does not move.
+  function routeCue(name, at, rec) {
     var enc = productionEncounter();
     if (!enc || typeof enc.emit !== "function") return false;
     if (typeof name !== "string" || !name) return false;
@@ -298,7 +303,7 @@
     var pos = a && Number.isFinite(a.x) && Number.isFinite(a.y) ? { x: a.x, y: a.y } : undefined;
     var seat = a && typeof a.seat === "number" && isFinite(a.seat)
       && Math.floor(a.seat) === a.seat && a.seat >= 0 && a.seat <= SEAT_MAX ? a.seat : undefined;
-    enc.emit(name, pos, undefined, seat);
+    enc.emit(name, pos, undefined, seat, undefined, undefined, undefined, rec);
     return true;
   }
 
@@ -925,7 +930,10 @@
       // `y` and `seat`; a payload with neither coordinate crosses as undefined.
       cue: function (name, at) {
         // D55: `pickup` is STAGGERED per seat; every other cue routes at once.
-        if (name === "pickup") queuePickup(at); else routeCue(name, at);
+        // r7b: the kernel's payload carries `rec` for the four split kinds and
+        // nothing else — every other cue forwards `undefined` and routes exactly
+        // as it did.
+        if (name === "pickup") queuePickup(at); else routeCue(name, at, at && at.rec);
         sink.cue(name, at);
       },
       credit: function (seat, value, at) {

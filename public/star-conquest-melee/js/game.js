@@ -2961,6 +2961,41 @@ function ordnanceStep(b) {
 // one gate for click fire and autofire: cooldown, the bullet cap, the mode.
 // The cap counts the FIRING seat's own live bullets (owner-scoped), so one
 // seat can never starve another — with one seat that count IS the list length.
+// ---- THE PLAYER ROUND'S SPAWN RECORD (r7b FIX 1, O2.8 / A6-NO) ------------
+// r7a's commit 10b took player bullets into the ballistic split: `bullets[]` is
+// `full`-only on the wire and the client DERIVES the straight flight from a
+// reliable `shot` event. It built the row, the store and the step; NOTHING
+// EMITTED THE EVENT, so a ?mp client drew no player round at all between two
+// full snapshots. This is that emit, and it is the SEAT'S ruling (hop 1) rather
+// than a lane's improvisation.
+//
+// IT RIDES THE SAME WIDENED CHANNEL r7b's four kernel kinds ride — the trailing
+// `rec` on `Encounter.emit`, spread FLAT, because js/wire.js's `payloadOf` reads
+// a payload's fields off the EVENT ITSELF. `fire` STAYS the cosmetic cue (O6):
+// this is a second, RELIABLE event beside it and never a replacement for it.
+//
+// THE POSE IS POST-REBATE, which is the schema's own semantic (js/wire.js's
+// ROW_SHOT block says so): `Encounter.rebate` advances a round up to `delta`
+// ticks AT SPAWN and collapses px/py, so a record taken before it would put
+// every shot most of a round trip behind the server's. Both call sites emit
+// AFTER the rebate has had its chance.
+//   ...and the fill site re-records `x/y/vx/vy/ttl` from the live bullet at
+// drain time (server/server.js), because a bullet fired on tick T has ALREADY
+// MOVED one step by the end of T — MEASURED at this tip, 6 of 6 first-seen
+// bullets moved exactly one step (10.8333 px at BSPEED). `t` means "the tick at
+// which the round was at the recorded pose", so the drain-time read is what
+// makes that true. See the S-A row for the same rule on `roundSpawn`.
+function cueShot(b, seat) {
+  if (!window.Encounter || !b) return;
+  Encounter.emit("shot", { x: b.x, y: b.y }, undefined, seat,
+    undefined, undefined, undefined,
+    { id: b.id, seat: seat, x: b.x, y: b.y, vx: b.vx, vy: b.vy,
+      // `rk` and not `k`: the EVENT row's own `k` is the EVENT KIND, and a
+      // payload field of the same name would overwrite it (js/wire.js's own
+      // note). `b.k` is R8a's byte and nothing sets it at this tip.
+      ttl: b.ttl | 0, rk: b.k | 0 });
+}
+
 function fire(seat = 0) {
   if (window.Encounter && Encounter.frozen()) return; // overlays own the field
   if (!seatAlive(seat)) return; // a dead seat's turret is cold until phase 08 revives it
@@ -3058,6 +3093,9 @@ function fire(seat = 0) {
   // server's for the rest of the run.
   P.shots = (P.shots + 1) >>> 0;
   P.cool = Math.max(1, Math.round(BCOOL * (em ? em.cool : 1) / TICK));
+  // r7b FIX 1: the RELIABLE spawn record, beside the cosmetic cue and after the
+  // rebate above — the two are different channels for the same shot.
+  cueShot(G.bullets[G.bullets.length - 1], seat);
   if (window.Encounter) Encounter.emit("fire", P.ship, undefined, seat); // after every gate above —
                                           // a refused shot is silent. Pinned on the firing seat's
                                           // ship: the audio listener IS that ship (attenuation 1,
@@ -3150,6 +3188,12 @@ function abilityFire(seat, id) {
                      // record that declares none, which is what makes the draw
                      // a single `|| C.bright` and not a branch per ability.
                      ink: sp.ink, streak: sp.streak });
+    // r7b FIX 1: ONE record per PUSHED bullet, inside the loop, because a
+    // volley pushes `sp.n` of them and each is its own round on the field. It
+    // sits inside rather than after the loop for the same reason the cap test
+    // does: a bullet that was pushed is live whatever the rest of the volley
+    // does, and the `if (!spawned) return` below gates only the SOUND.
+    cueShot(G.bullets[G.bullets.length - 1], seat);
     spawned++;
   }
   // NO LAG REBATE, and it is a stated gap rather than an oversight. fire() calls
@@ -3525,7 +3569,24 @@ let SUCCESSOR_DRAW = true;
 
 function drawSuccessorField() {
   if (!SUCCESSOR_DRAW) return;
-  if (!window.DemoRender || !window.EncounterHost || !EncounterHost.installed()) return;
+  if (!window.DemoRender) return;
+  // ---- DRAW-1, THE NET ARM (R7 / r7a commit 8, §2.5(m)3) -------------------
+  // MEASURED, and the measurement is the reason this line moved. In `?mp` no
+  // EncounterHost is installed, so this guard returned and NOTHING drew a
+  // kernel round on a net client — which is server/sim-host.mjs's own note said
+  // from the other end ("KERNEL ENEMY ORDNANCE HAS NO WIRE REPRESENTATION.
+  // That is R7's to give it"). R7 gives it the wire; without this arm the wire
+  // would arrive and draw nothing.
+  //   DemoRender's round loop walks ONE list, and since commit 8 that list may
+  // be the wire's: js/net.js hands its presented rounds through the SETTER
+  // DemoRender.setNetRounds, and the loop reads them when Net.active(), else
+  // the kernel's own S.bullets. NO NEW DRAW is written — the rule for a WIRE
+  // round. THE FIRST FORM wrote into the DORMANT kernel's S.bullets and was
+  // REJECTED: the fx suite shares that array and apply() emptied it under it.
+  //   DRAW-2 (a second round draw inside js/net.js) was REFUSED for that
+  // reason: it would be a new draw, and the look plane is PORT-L's and PORT-F's.
+  const netDraw = !!(window.Net && Net.active && Net.active());
+  if (!netDraw && (!window.EncounterHost || !EncounterHost.installed())) return;
   // save/restore, NOT a transform reset, and the difference was measured. That
   // renderer leaves more than a matrix behind: `lineJoin` and `lineCap` are set
   // to "round" for its own art, and `globalAlpha`, `fillStyle` and `strokeStyle`

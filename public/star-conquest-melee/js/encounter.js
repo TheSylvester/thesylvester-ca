@@ -472,14 +472,31 @@
   // allow-list never learns it, and js/net.js re-builds an inbound cue as four
   // keys, so a ?mp client draws the row's own fallback hue. Widening either is
   // R7's wire question, not this lane's.
-  function emit(kind, at, gain, seat, termSeq, srcKind, col) {
+  // `rec` (r7b, O2/O3) is the EIGHTH parameter — `col` took the seventh at D64 —
+  // and it is the WIDE record the four split kinds carry: a roundSpawn's
+  // resolved flight, a roundDeath's id and reason, an orbSpawn's per-orb batch,
+  // an orbPickup's id and seat. It is spread FLAT rather than nested, because
+  // js/wire.js's encoder reads a roundSpawn's fields off the EVENT ITSELF
+  // (`payloadOf` does `{...ev}`) and a nested record would be invisible to it.
+  // The presence fold is the same idiom as the three above: an event with no
+  // record keeps a shape byte-identical to what the committed fixtures pinned.
+  function emit(kind, at, gain, seat, termSeq, srcKind, col, rec) {
     // (THE STALL SIGNATURE'S DAMAGE TERM IS NOT COUNTED HERE — fix 11. It was,
     // and the scoped check found what a cue stream admits: a `hit` on a wall, a
     // PvP `blast` and a shot into a nonblocking mine are all emitted here and
     // none of them is progress toward a clear. The term is the KERNEL's now —
     // player-credited damage applied to a BLOCKING body, counted at
     // `damageEnemy`'s own funnel where the role and the credit both are.)
-    EVENTS.push({ kind, at: at ? { x: at.x, y: at.y } : null, gain, seat,
+    // r7b FIX 13 (L-7): `rec` IS SPREAD FIRST, so the VALIDATED fields win. It
+    // used to land last, and `routeCue` validates `seat` before it forwards
+    // anything — a record carrying a `seat` of its own would then have
+    // overwritten the seat the route just checked. Spreading first keeps the
+    // wide record's fields (a roundSpawn's ballistics, an orbSpawn's batch) and
+    // lets `kind`, `at`, `gain` and `seat` overwrite anything that shares their
+    // names. The presence fold is unchanged: an event with no record has a shape
+    // byte-identical to what the committed fixtures pinned.
+    EVENTS.push({ ...(rec !== undefined ? rec : {}),
+                  kind, at: at ? { x: at.x, y: at.y } : null, gain, seat,
                   ...(termSeq !== undefined ? { termSeq } : {}),
                   ...(srcKind !== undefined ? { srcKind } : {}),
                   ...(col !== undefined ? { col } : {}) });
@@ -987,9 +1004,17 @@
                   // rows one tick apart; rowForAge still addresses relatively
       ships: players.map((pl, s) => ({ x: pl.ship.x, y: pl.ship.y,
                                        alive: seatAlive(s) })),
-      // vx,vy ride every row (corrective pass 2): a live-class (projected)
-      // body's rebated sweep reconstructs the PRESENTED pose from its era
-      // pose and era velocity — the frozen-NOW form was an aim assist
+      // ---- THE SHIP ROW IS `{x, y, alive}` AND NOTHING ELSE (R2.11) -------
+      // WHAT STOOD HERE WAS FALSE. It read: "vx,vy ride every row (corrective
+      // pass 2): a live-class (projected) body's rebated sweep reconstructs the
+      // PRESENTED pose from its era pose and era velocity — the frozen-NOW form
+      // was an aim assist". MEASURED at this tip: the row above carries `x`, `y`
+      // and `alive`, and no velocity of any kind. The claim described the ENEMY
+      // and MISSILE rows, which S3b lane 3 commit D5 emptied — see the block
+      // below — and it outlived the arrays it was about.
+      //   The sole reader takes exactly those three fields, and R7 ADDS NO FIELD
+      // TO THIS ROW (R4.4): the ballistic split's rounds ride their own spawn
+      // and death events and their own client store, not this ring.
       // ---- THE TWO BODY ROWS ARE EMPTY LITERALS (S3b lane 3, commit D5) ---
       // The arrays they mapped are DELETED. They are written as `[]` rather
       // than dropped because the ROW'S SHAPE is a contract with every reader of
@@ -1971,6 +1996,12 @@
         const ix = b.px + (b.x - b.px) * bestT;
         const iy = b.py + (b.y - b.py) * bestT;
         b.dead = true; // consumed exactly once — the game sweep removes it
+        // r7b FIX 1: the round is CONSUMED, and no client can derive it — a
+        // contact is a collision with something the client does not resolve. The
+        // reason is `contact` for all four consumption sites: DEATH_REASONS has no
+        // player flavour and needs none, because the client only DROPS.
+        emit("roundDeath", { x: ix, y: iy }, undefined, shooter, undefined, undefined,
+          undefined, { id: b.id, reason: "contact" });
         if (EncounterHost.damageKernelBody(kb, b.dmg, ix, iy, shooter, "shot")) E.hitsDealt++;
         //   D45 (PORT-L): production's clay impact burst is GONE from this
         // branch. A hit on a kernel body used to paint 23 particles, 21 of them
@@ -2012,17 +2043,38 @@
         //     `roundDeath` cue on the kill, carrying the round's own colour. It
         //     changes no counter, no hp and no array.
         b.dead = true; // consumed exactly once — the game sweep removes it
+        // r7b FIX 1: the round is CONSUMED, and no client can derive it — a
+        // contact is a collision with something the client does not resolve. The
+        // reason is `contact` for all four consumption sites: DEATH_REASONS has no
+        // player flavour and needs none, because the client only DROPS.
+        emit("roundDeath", { x: b.x, y: b.y }, undefined, shooter, undefined, undefined,
+          undefined, { id: b.id, reason: "contact" });
         if (EncounterHost.damageKernelRound(kr, b.dmg)) E.missilesShot++;
-        //   D64 (PORT-P) — THE DESTRUCTION SPARK, and its condition is
-        // `kr.dead` READ AFTER THE DOOR. damageKernelRound returns true on
-        // DAMAGE, not on a kill, so hanging this off the call's own value
-        // sparks ceil(hp / dmg) times per kill — three on an hp-6 round at the
-        // shipped BDMG 2. The position is the ROUND'S OWN, not the intercept:
-        // `ix`/`iy` are declared inside the BODY branch above and are NOT in
-        // scope here (a measured ReferenceError that aborts the suite with zero
-        // FAIL lines). `kr.color` is the kernel colour NAME and js/fx.js
-        // resolves it through PAL.kernel.
-        if (kr.dead) emit("roundDeath", { x: kr.x, y: kr.y }, undefined, shooter, undefined, undefined, kr.color);
+        //   D64's DESTRUCTION SPARK IS NO LONGER EMITTED HERE, and the reason
+        // is that r7b gave the same kill a SECOND producer. The line that stood
+        // here was
+        //     if (kr.dead) emit("roundDeath", { x: kr.x, y: kr.y }, undefined,
+        //                       shooter, undefined, undefined, kr.color);
+        // and its own note explained why the condition is `kr.dead` read AFTER
+        // the door (damageKernelRound returns true on DAMAGE, not on a kill).
+        // Every word of that stayed true; what changed is that the KERNEL now
+        // raises its own `roundDeath` for the same death — reliable, carrying
+        // the round's `id` and its `reason` — through `cueRoundDeath`.
+        //   MEASURED with both in place (seed 4242, 20,000 ticks): 200
+        // `roundDeath` events, of which 24 carried NO reason and NO id. Those 24
+        // are this line's, and js/wire.js encodes a reason-less event as
+        // `reason: 0` = "shot" with a zero id — a LIE on the wire, one per gun
+        // kill, RELIABLE, so it entered the ring and every replay, and it ticked
+        // `clamps.event` each time, poisoning the encoder's own alarm. On a ?mp
+        // client it decoded as a destruction and sparked a SECOND time; in SOLO
+        // js/game.js's drainCues raised both, so the deployed game sparked twice
+        // per gun kill of a kernel round — a look change D64 never bought (it
+        // ruled ONE spark, "in its own colour").
+        //   ONE PRODUCER, THE KERNEL'S. The colour is not lost: `cueRoundDeath`
+        // carries `col: b.color` in its record, so the solo spark keeps the
+        // round's own hue through js/fx.js's `ev.col` arm. The WIRE row carries
+        // no `col`, so a ?mp client draws the row's clay fallback — PORT-P
+        // addendum item 3's accepted state.
         continue;
       }
       if (vs >= 0) {
@@ -2046,6 +2098,12 @@
         const ix = b.px + (b.x - b.px) * bestT;
         const iy = b.py + (b.y - b.py) * bestT;
         b.dead = true;
+        // r7b FIX 1: the round is CONSUMED, and no client can derive it — a
+        // contact is a collision with something the client does not resolve. The
+        // reason is `contact` for all four consumption sites: DEATH_REASONS has no
+        // player flavour and needs none, because the client only DROPS.
+        emit("roundDeath", { x: ix, y: iy }, undefined, shooter, undefined, undefined,
+          undefined, { id: b.id, reason: "contact" });
         if (hitPlayer(vs, b.dmg, { kind: "shot", cls: Engine.CLASS.SHIP, seat: shooter })) E.hitsDealt++;
         spawnImpactFx(ix, iy, b.vx / bm, b.vy / bm, "enemy");
         blastAt(ix, iy, null, b.dmg, shooter, b.blastR, vs);
@@ -2202,6 +2260,12 @@
       // phase (applyRebateHits) — a ship winner is consumed regardless of
       // what hitPlayer will decide there (phase 14's rule)
       b.dead = true;
+      // r7b FIX 1: the round is CONSUMED, and no client can derive it — a
+      // contact is a collision with something the client does not resolve. The
+      // reason is `contact` for all four consumption sites: DEATH_REASONS has no
+      // player flavour and needs none, because the client only DROPS.
+      emit("roundDeath", { x: ix, y: iy }, undefined, shooter, undefined, undefined,
+        undefined, { id: b.id, reason: "contact" });
       rebateQueue.push({ bid: b.id | 0, kind: c.kind, id: c.id, seat: c.seat,
         dmg: b.dmg, src: shooter, br: b.blastR, ix, iy, dx: b.vx / bm, dy: b.vy / bm });
       return;
@@ -3066,6 +3130,41 @@
       stallFired = true;
       emit("stall");
     }
+  }
+
+  // ---- WHOSE STALL IS DRAWN (R7 / r7c commit 7, R3.7) -----------------------
+  // The local detector on a SOLO surface; the SERVER's word on a net client.
+  // The cross-seam idiom is `presentedBodies()`'s, and the reason is the same
+  // one: on a net client `presentedBodies()` returns THIS RECEIVER'S list, and
+  // from r7c commit 2 that list is culled by radius (D22) — so `foeCount()`,
+  // `stallSignature` and therefore `advanceStall` all read what ONE SOCKET was
+  // sent. Two clients in one room legitimately disagree about the census, and
+  // neither census is the room's answer. The room has one, and it is the
+  // server's: `hud.state === "stalled"`, decoded by js/net.js.
+  //   SOLO FALLS THROUGH UNCHANGED — no `window.Net`, no `Net.active()` — so
+  // every wave1 leg over this surface reads the local detector exactly as it
+  // did, which is what keeps this a SIM-file line with no fixture behind it.
+  // ---- WHOSE CLEAR HOLD IS COUNTED (R7 / r7c commit 8, R3.8) ---------------
+  // The SERVER's on a net client, this page's own dial otherwise — the same
+  // cross-seam idiom `presentedBodies()` and `stalledNow()` use, and the same
+  // reason: the room's break is decided in one place and it is not here.
+  //   THE ZERO IS THE FALLBACK EDGE, not a hold of zero. `Net.hudHold()`
+  // answers 0 until a snapshot has said, and a client cannot count down a break
+  // whose length nobody has told it — its own dial is the only other number it
+  // has, and it is what solo uses anyway.
+  //   SOLO FALLS THROUGH UNCHANGED (no `window.Net`), which is what keeps
+  // tests/wave1-checks.js's countdown legs green and unmoved on a SIM file.
+  function clearHoldNow() {
+    if (window.Net && Net.active() && Net.hudHold) {
+      const h = Net.hudHold();
+      if (h > 0) return h;
+    }
+    return ECFG.clearHold;
+  }
+
+  function stalledNow() {
+    if (window.Net && Net.active() && Net.stalled) return Net.stalled();
+    return stallActive;
   }
 
   const stallSignature = (foes) => {
@@ -5839,8 +5938,17 @@
     // to hold for 481 ticks (float residue on `gateTimer`; see its terminal
     // condition), which left the last one BLANK. The two are equal now, and
     // `test/tools/demo-director.mjs` LEG 5 counts both sides.
-    if (E.state === "cleared" && wt >= E.clearTick && wt - E.clearTick < ECFG.clearHold) {
-      const left = ECFG.clearHold - (wt - E.clearTick);
+    //   ...AND THE LENGTH IS THE SERVER'S ON A NET CLIENT (R7 / r7c commit 8,
+    // R3.8, S-r3mfs8 leg R1). `wt - E.clearTick` is the hold ALREADY SPENT —
+    // applyKernelHud writes `E.clearTick = E.waveTick - round((hold - held) *
+    // 60)` — so the LENGTH came from this client's own ECFG.clearHold, and a
+    // client whose dial disagrees with the room's counted down to the wrong
+    // number and then sat through a break it had already finished announcing.
+    // Both terms read the helper, so the GUARD and the COUNT can never disagree
+    // about which hold they are measuring.
+    const hold = clearHoldNow();
+    if (E.state === "cleared" && wt >= E.clearTick && wt - E.clearTick < hold) {
+      const left = hold - (wt - E.clearTick);
       ctx.textAlign = "center";
       ctx.font = "700 11px " + FONT;
       ctx.fillStyle = left <= 180 ? C.clay : C.dim; // the last three seconds warm up
@@ -5882,7 +5990,7 @@
       // the surfaced state and decides nothing: `stallActive` is a fact the SIM
       // established on this tick, so a spectator, a paused screen and a
       // headless server all agree about whether the room is stuck.
-      const stalled = stallActive;
+      const stalled = stalledNow();
       const source = stalled ? stallSourceLabel() : "";
       ctx.textAlign = "center";
       ctx.font = "700 11px " + FONT;
@@ -6834,6 +6942,21 @@
       // its loop. `{wave: 0, loop: 0}` is NEVER DEALT — waves start at 1 — and
       // a wipe puts a room back there.
       market: () => ({ wave: E.marketWave, loop: E.marketLoop }),
+      // ---- THE STALL FACT, PUBLISHED (R7 / r7c commit 1, R3.7) ------------
+      // D39's stall detector already owns the answer — `stallActive` is the
+      // SURFACED state advanceStall() writes and the draw reads at :5949 — but
+      // it was module-local, so the only reader outside this file was a pixel.
+      //   R3.7 gives it a SECOND reader that is not a pixel: server/sim-host.mjs
+      // maps it onto `hud.state` as the value "stalled", so a joiner that
+      // arrives mid-stall is TOLD the room is stuck instead of being left to
+      // re-derive it from a body census it does not have. The census is exactly
+      // what a net client cannot run: presentedBodies() returns THIS RECEIVER'S
+      // culled list under D22, so two clients in one room legitimately count
+      // different foes and neither count is the room's answer. The server's is.
+      //   It is a READ and nothing else. `stallActive` is not written here, the
+      // sim's own E.state is untouched, and this line adds no state to hash —
+      // which is why a SIM_FILES member can carry it with the golden unmoved.
+      stalled: () => stallActive,
       // ---- THE EXPLICIT STAGING SEAM (PORT-S S7) --------------------------
       // The ONE way a check stages a hand short of driving a real clear. It
       // writes the ids and zeroes the bits and TOUCHES NOTHING ELSE — not the

@@ -75,10 +75,11 @@
   // reaches it through window like it reaches Flight
   const AB_FIRE = Abilities.bit(Abilities.ABILITY.FIRE);
   const AB_COMET = Abilities.bit(Abilities.ABILITY.COMET);
-  const NET_V = 10; // MUST equal server/snapshot.mjs's SNAPSHOT_VERSION — a
-                   // classic script cannot import it, so this mirrors it by
-                   // hand; the s.v gate below silently drops every snapshot
-                   // if the two ever drift, and a stale hello meets 4001
+  // THE WIRE VERSION, READ AND NEVER MIRRORED (R0.3). js/wire.js is the one
+  // source and index.html loads it above this file. What used to sit here was a
+  // hand-written declaration of the number, carrying a comment that said it
+  // MUST equal server/snapshot.mjs's, with nothing enforcing the MUST.
+  const NET_V = Wire.VERSION;
   // THE parked-seat predicate — the wire contract in one place. Since v8 a
   // seat with nobody behind it crosses as the FOUR-KEY record `{ seat, hull,
   // hm, cl: -1 }` and nothing else (server/snapshot.mjs encodes it, its
@@ -404,35 +405,25 @@
   // and pins this literal to ENEMY_TYPES by text. The decode
   // hands back the SAME STRINGS the wire used to carry, so nothing downstream
   // of apply() — render, the scorer's buckets, the rig's samples — moved.
-  const WIRE_TYPES = ["dart", "harrier", "radarHarrier", "charger",
-    "radarCharger", "husk", "anvil", "shard", "radarDart",
-    "packHusk", "wardAnvil", "eliteDart", "eliteHarrier", "eliteCharger",
-    "eliteHusk", "eliteAnvil"];
-  const WIRE_MODES = ["seek", "tele", "pulse", "lockon", "windup",
-    "dash", "tired"];
-  // an index neither table knows (the encoder's -1) names itself as the
-  // roster's baseline body and its baseline mode — the same fallback statsFor
-  // already applies to an unknown type, never a throw on a live stream
-  const wireType = (i) => WIRE_TYPES[i] || "dart";
-  const wireMode = (i) => WIRE_MODES[i] || "seek";
-  // ---- AN R7 BILL, NAMED HERE (PORT-S S4, the HOLD round, fix 15) ----------
-  // EVERY successor-plane body arrives as `ty: -1` today — `server/snapshot.mjs`
-  // has no row for a kernel type since S3b commit D4 — so `wireType` answers
-  // `dart` for all of them and the decoded record carries `hp: 1` and NO
-  // `state`. That is harmless for the render (the fallback radius and the
-  // fallback ceiling are what the tail of this file uses) and it is NOT harmless
-  // for D39: the clear-role table is keyed on the KIND and the fly-by exception
-  // is read off the STATE, so a decoding client cannot apply either. A real
-  // decoded MINE and a real spent WARDEN both BLOCK and both count as FOES on
-  // `?mp`.
+  // THE BODY'S KIND AND STATE COME OFF THE WIRE (R7 / r7a commit 6, R1.4).
+  // What stood here were TWO HAND MIRRORS of server/snapshot.mjs's tables —
+  // WIRE_TYPES (production's retired 16-name roster) and WIRE_MODES — plus the
+  // two lookups that answered `dart` and `seek` for an index neither knew.
   //
-  // THE SEAT DEFERRED IT TO R7 (the S4 scoped check, finding 1): the fix is the
-  // WIRE — a kind index and the body's state at v11 — which R7 owns and PORT-S
-  // does not, and `?mp` is undeployable until R7 regardless. The limit is
-  // asserted as the CURRENT CONTRACT by `tests/net-checks.js`'s `(R7 BILL)`
-  // legs, so the day the wire grows those fields, a green suite says so.
-  // The readers carry the same note: `js/encounter.js`'s `bodyBlocks` and
-  // `stallSignature`.
+  // THE R7 BILL THAT PARAGRAPH RECORDED IS PAID. Every successor body arrived
+  // as `ty: -1`, because the kernel's twenty-one type names overlap that roster
+  // NOT ONCE, so `wireType` answered `dart` for all of them and the decoded
+  // record carried hp 1 and NO state. That was harmless for the render and NOT
+  // harmless for D39: the clear-role table is keyed on the KIND and the fly-by
+  // exception is read off the STATE, so a decoding client could apply neither —
+  // a real MINE and a spent WARDEN both BLOCKED and both counted as FOES.
+  //   js/wire.js is the one authority now. `Wire.BODY_TYPES` is the kernel's own
+  // STATS order, pinned to its source text; the STATE crosses as a string
+  // (R1.4's measured branch — the kernel declares no per-type state list, so a
+  // 1-byte enum has nothing to be an enum OF, and it is filed as R8a debt); and
+  // `hp` crosses beside them. The readers that carried the same note —
+  // js/encounter.js's `bodyBlocks` and `stallSignature` — can ask their real
+  // questions from this commit.
 
   // ---- state ---------------------------------------------------------------
   // The presentation buffer is ADAPTIVE at phase 12: DELAY_TICKS was a fixed 3
@@ -463,14 +454,30 @@
   const GAP_WINDOW = 300;  // five seconds of accepted arrivals at 60 Hz
   const buf = [];          // decoded snapshots, ascending by tick
   const evq = [];          // events awaiting their presented tick, in order
-  const trails = new Map();// missile id → rebuilt trail samples
+  // WHICH KINDS ARE RELIABLE IS js/wire.js's OWN COLUMN (R2.1 as O2.12 settles
+  // it), read once here and never re-stated: r7a declared the table and its
+  // values, and a second list on this side is the drift a single source exists
+  // to stop. The fallback is FALSE — a kind this client's wire.js does not know
+  // is one it cannot promise to keep.
+  // ...and the CONSTRUCT set, read off js/wire.js's own exported list for the
+  // same reason (r7b FIX 4): it is pinned to the kernel ladder's source text in
+  // both directions, so a fifth homing kind is covered without a second literal
+  // here to go stale.
+  const isConstructKind = (k) => !!(window.Wire && Wire.CONSTRUCT_KINDS &&
+    Wire.CONSTRUCT_KINDS.indexOf(k) >= 0);
+  const RELIABLE_KINDS = new Set(
+    (window.Wire && Wire.EVENT_KINDS ? Wire.EVENT_KINDS : [])
+      .filter((r) => r.reliable).map((r) => r.k));
+  const isReliable = (k) => RELIABLE_KINDS.has(k);
+  // the event plane's own instruments, published on Net.stats().ev
+  const evStats = { replayed: 0, cosmeticDropped: 0, resyncs: 0, fulls: 0, reliableHeld: 0 };
   const bCarry = new Map();// bullet id → the two RENDER-ONLY numbers the wire does
                            // not carry: {vx, vy} derived from the last bracket and
                            // {ox, oy}, where the round first appeared on screen.
                            // Rebuilt whole on every deal from the rounds just
                            // presented — never appended to, so it holds exactly the
                            // live set and cannot leak an entry per shot fired. It is
-                           // dropped at the same cuts `trails` is: an id is only a
+                           // dropped at both discontinuity cuts: an id is only a
                            // handle inside ONE match, and the server reissues ids
                            // from 1 at a restart, so a carry that outlived the cut
                            // would hand a fresh round a dead one's heading.
@@ -552,6 +559,33 @@
   // and tears nothing down (see onYou).
   let seatNames = [];
   let seatSkins = [];
+  // ...and D37's MARKET HAND, this client's OWN (R7 / r7c commit 5, R3.5).
+  // Four catalog indices and the four bought bits beside them, off the
+  // SEATED branch of `you` — a spectator's `you` carries neither, and that
+  // is deliberate: a hand fanned out on `roster` would publish every pilot's
+  // shelf to the room, and D37's whole point is that the shelf is private.
+  //   NULL IS "NOBODY HAS TOLD ME", AND IT IS NOT THE SAME AS []. The server
+  // sends both arrays on EVERY seated `you`, empty until the room's first clear
+  // deals one — so `[]` means "I hold no rows" and `null` means "I have never
+  // been sent a shelf at all". Collapsing the two would make an oracle over
+  // this accessor VACUOUS: a server that dropped the field entirely and a room
+  // that has dealt nothing would read identically, and the leg that closes
+  // S-0cg7r2 (test/tools/two-seat-proof.mjs) could not tell them apart.
+  // the KEY LIST of the last `you` this client decoded (r7c FIX F12) — null
+  // until one arrives. Read-only, published on Net.stats(); nothing on the
+  // draw path reads it.
+  let lastYouKeys = null;
+  let seatHand = null;
+  let seatBought = null;
+  // ...and D39's STALL, as the SERVER decided it (r7c commit 7, R3.7). The
+  // detector advances in the SIM STEP and a net client steps no local sim, so
+  // this surface was dark on every `?mp` screen. It is a flag and not a state
+  // because a stalled room is an ACTIVE one — see the apply.
+  let netStalled = false;
+  // ...and the SERVER's inter-wave break length, in ticks (r7c commit 8, R3.8).
+  // 0 means "no server has said" — a real answer, and the one that makes the
+  // countdown fall back to the client's own ECFG.clearHold rather than to zero.
+  let netHold = 0;
   let lastAck = 0;        // the server's highest CONTIGUOUS RESOLVED input n
 
   // ---- the OWN-SHIP predictor (phase 11b) -----------------------------------
@@ -579,6 +613,9 @@
   let predOn = false;   // a base exists and the seat is up — the apply() carve-out gate
   let predK = null;     // the predicted kernel state — detached, never players[]
   let predTick = -1;    // the tick predK describes
+  let lastCutTick = -1; // the SIM TICK of the newest discontinuity marker this
+                        // client cut on — the marker's own `ev.t` since v11, not
+                        // the tick of the snapshot that delivered it
   let predIdle = false; // hud dead, own rsp > 0, or no hull at all (the claim
                         // window and the release both sit at rsp 0) — no motion,
                         // no replay: there is nothing flying to predict
@@ -961,6 +998,7 @@
     predIdle = false;
     predK = null;
     predTick = -1;
+    lastCutTick = -1;   // a dead match's marker must not name this one's cut
     sentHist.length = 0;
     localAtTick.clear();
     tracers.length = 0;
@@ -1007,8 +1045,14 @@
     // the day something INDEXES it directly, because a raw index into a trimmed
     // vector is the NaN that padRanks exists to stop.
     if (Array.isArray(pr.ow)) myOw = pr.ow.slice();
-    // the discontinuity markers, read at ARRIVAL (their tick IS this
-    // snapshot's tick while SNAPSHOT_EVERY === 1 — asserted server-side).
+    // the discontinuity markers, read at ARRIVAL — and SINCE v11 EACH ONE
+    // CARRIES ITS OWN TICK (R2.2). The old reading was "their tick IS this
+    // snapshot's tick while SNAPSHOT_EVERY === 1", and that stopped being true
+    // the moment the ring could REPLAY a marker: a socket the broadcast skipped
+    // gets its markers on a LATER snapshot than the one they happened on, so
+    // `s.tick` would name the delivery and not the event. The cut itself is
+    // unchanged — the predictor snaps to the authoritative state this snapshot
+    // carries either way — but the tick it RECORDS is the marker's own.
     // restart cuts everyone and death/respawn cut the local seat: those are
     // TELEPORTS, so the whole predictor snaps wholesale. termChange is a
     // TERMS discontinuity, not a teleport: the rebase below already replays
@@ -1018,11 +1062,16 @@
     // front of the server, not behind the marker.
     let cut = false;
     let termCut = false;
+    let cutT = -1;
     for (const ev of s.events || []) {
-      if (ev.k === "restart") cut = true;
-      else if ((ev.k === "death" || ev.k === "respawn") && ev.seat === mySeat) cut = true;
-      else if (ev.k === "termChange" && ev.seat === mySeat) termCut = true;
+      // v11: the event's OWN tick, and `s.tick` only as the pre-v11 fallback a
+      // decoder that saw no `t` would have used.
+      const et = ev.t !== undefined ? ev.t : s.tick;
+      if (ev.k === "restart") { cut = true; if (et > cutT) cutT = et; }
+      else if ((ev.k === "death" || ev.k === "respawn") && ev.seat === mySeat) { cut = true; if (et > cutT) cutT = et; }
+      else if (ev.k === "termChange" && ev.seat === mySeat) { termCut = true; if (et > cutT) cutT = et; }
     }
+    if (cutT >= 0) lastCutTick = cutT;
     const down = (s.hud && s.hud.state === "dead") || (pr.rsp || 0) > 0 ||
                  pr.hull <= 0; // the HULL closes the gap the countdown left:
                  // a seat in its claim window, or unseated, sits at rsp 0 with no
@@ -1350,9 +1399,29 @@
   //
   // THE FALLBACKS BELOW ARE THEREFORE LIVE, and each says what it stands in
   // for: a body's RADIUS and its speed CEILING.
-  const BODY_R_FALLBACK = 20;      // px — the old dart's radius at commit C's x2.5
-  const BODY_CAP_FALLBACK = 12.5;  // px/tick — the old charger dash at the same ratio,
-                                   // which was the widest ceiling any body had
+  // THE FALLBACKS ARE RETIRED (r7a commit 6). BODY_R_FALLBACK was "the old
+  // dart's radius" and every decoded body wore it, because no body's KIND
+  // reached the client. The kind reaches it now, so a body's radius is ITS OWN:
+  // the kernel publishes its whole STATS table (js/demo-kernel.js's API), the
+  // page loads the kernel, and `bodyStats` below reads the row the wire named.
+  //   BODY_CAP_FALLBACK was the speed CEILING the decode guard bounds a pose
+  // with — "the old charger dash", one number for every body. It is per kind
+  // now, and the HEADROOM is derived from the number it replaces rather than
+  // invented: 12.5 px/tick against the kernel roster's fastest body (152 px/s =
+  // 2.53 px/tick) is 4.9x, so CAP_HEADROOM 5 keeps that generosity FOR EACH
+  // KIND instead of granting the whole roster the fastest body's allowance.
+  // A sanity bound should be generous enough never to clip an honest pose and
+  // tight enough to refuse a decode that has gone wrong; per kind it is both.
+  const BODY_R_UNKNOWN = 20;       // px — a body whose kind the table does not
+                                   // know. It is drawn, not dropped, and it is
+                                   // the ONLY caller left of a default radius.
+  const CAP_HEADROOM = 5;
+  const kernelStats = () => (window.DemoKernel && window.DemoKernel.STATS) || null;
+  const bodyStats = (kind) => {
+    const T = kernelStats();
+    const row = T && kind ? T[kind] : null;
+    return row || { r: BODY_R_UNKNOWN, speed: BODY_R_UNKNOWN * 7.5 };
+  };
 
   function blastRadiusNow() {
     if (blastIndex < 0) blastIndex = enc().shopInfo().findIndex((r) => r.name === "BLAST CHARGE");
@@ -1366,6 +1435,12 @@
   // ---- the socket ------------------------------------------------------------
   function connect() {
     ws = new WebSocket(url);
+    // v11 SENDS THE SNAPSHOT AS BINARY (R0.1). Without this a browser hands a
+    // binary frame to the message listener as a Blob — asynchronous, and
+    // nothing downstream is written to await one — so the whole snapshot plane
+    // would go quiet with no error anywhere. Everything OTHER than the snapshot
+    // stays JSON text (R0.2) and the listener branches on typeof.
+    ws.binaryType = "arraybuffer";
     ws.addEventListener("open", () => {
       // the stored name rides the hello, and the server sets it BEFORE the
       // grant — so the very first roster this room fans out already carries it.
@@ -1385,9 +1460,34 @@
       note("NET connected — " + url);
     });
     ws.addEventListener("message", (m) => {
+      // THE ONE SITE THAT BRANCHES ON THE WIRE'S TWO FORMS (R0.2). The
+      // SNAPSHOT is binary from v11; `you`, `pong`, `claim` and the `tune` echo
+      // stay JSON TEXT, because non-snapshot traffic is 0.826 % of messages and
+      // 0.00186 % of bytes and a codec for it would buy nothing. A string is
+      // parsed, anything else is decoded — and nothing downstream of here can
+      // tell which arrived.
       let s;
-      try { s = JSON.parse(m.data); } catch { return; }
-      if (!s || s.v !== NET_V) return;
+      if (typeof m.data === "string") {
+        try { s = JSON.parse(m.data); } catch { return; }
+      } else {
+        try { s = Wire.decode(new Uint8Array(m.data)); } catch { return; }
+      }
+      if (!s) return;
+      // A WRONG VERSION IS TERMINAL, not a silent drop (R4.7). Until R7 this
+      // read `if (!s || s.v !== NET_V) return;` and a client one bump behind
+      // sat on a live socket presenting a frozen world, with no message and no
+      // log — the quietest failure on the wire. The 4001 close already says the
+      // true thing for a stale HELLO; this says it for a stale SNAPSHOT, in the
+      // same words and on the same terminal flag, because retrying cannot help:
+      // only new code can.
+      if (s.v !== NET_V) {
+        if (!versionDead) {
+          versionDead = true;
+          note("NET new version — refresh the page", true);
+          try { ws.close(4001, "version"); } catch {}
+        }
+        return;
+      }
       // `you` first: the identity envelope carries a tick too (the sim tick at
       // send — a lobby fact, stamped, never a sim event), so a tick-shaped gate
       // ahead of it would swallow the one message that says who this client is
@@ -1428,6 +1528,10 @@
       rosMax = -1;
       rosStarted = false;
       seatNames = [];
+      seatHand = null;   // ...and the hand and its bits, for the reason above
+      seatBought = null; // and one more: the shelf is a SEAT's, and a socket
+                         // that has lost its seat is holding a shelf it may not
+                         // spend. Back to NULL, not [] — see the declaration
       seatSkins = []; // ...and the hulls with them, for the identical reason:
                       // they are drawn on the FIELD, and a set kept here would
                       // leave a frozen board wearing the hulls of a room this
@@ -1482,16 +1586,18 @@
     }, delay);
   }
 
-  // a rejoin is a fresh stream: the old buffer, pending cues, trails and the
+  // a rejoin is a fresh stream: the old buffer, pending cues, carries and the
   // presented clock all describe a match that no longer exists. pt returns to
   // -1, so the first snapshot after the rejoin renders immediately, exactly
   // like the first snapshot of a fresh page.
   function resync() {
     buf.length = 0;
     evq.length = 0;
-    trails.clear();
     bCarry.clear(); // the streak's two derived numbers describe rounds of the
                     // match that just died, and the server reissues ids from 1
+    clearDerived(); // ...and so do the derived stores: an id is a handle inside
+                    // ONE match, and a derived round that outlived the cut would
+                    // keep flying on a heading from a match that is over
     pendingInputs.length = 0;
     snapGaps.length = 0;
     // the jitter estimate described the stream that just died, so it stands
@@ -1535,6 +1641,18 @@
   // the deploy window the -1 = UNKNOWN reading below was built for. A client on
   // this version only ever talks to a server that sends the roster.
   function onYou(you) {
+    // ---- THE KEY LIST OF THE MESSAGE, RECORDED BEFORE ANYTHING READS IT ----
+    // (r7c FIX F12.) A read-only record of WHICH FIELDS the last `you` carried,
+    // published on `Net.stats()`. It exists because an instrument that asks
+    // "did the server send the market hand?" was answering through
+    // `Net.hand()`, and an ACCESSOR can only report what it decoded — its
+    // null/[] distinction is a convention this file chose, not the message.
+    // The key list is the message itself, so a leg over it cannot be softened
+    // by a later change to how an absent field folds.
+    //   IT IS SET AT THE TOP, ABOVE THE EARLY RETURN, so a `you` the guard
+    // discards is recorded exactly like one that repaints — "what did the
+    // server last send" is not the same question as "what changed".
+    lastYouKeys = Object.keys(you);
     const seat = Number.isInteger(you.seat) ? you.seat : null;
     const seatEpoch = Number.isInteger(you.seatEpoch) ? you.seatEpoch : -1;
     const matchEpoch = Number.isFinite(you.matchEpoch) ? you.matchEpoch : -1;
@@ -1581,22 +1699,36 @@
     // change here is a LOBBY change and reaches the early return and nothing
     // else. Folded in beside namesSame rather than given a paragraph of its own
     // because the two are one identity and every reader below treats them so.
-    // (R7 BILL) ...and D37's MARKET HAND is the roster's FIFTH count, on exactly
-    // the same rule (PORT-S S7): a fresh hand is a LOBBY change, it reaches the
-    // early return and nothing else, and it must be folded in here beside the
-    // two below rather than given a paragraph — a hand that changed while this
-    // guard ignored it would be a reroll the panel never drew. It carries no
-    // teardown for the same reason the names do not: the identity triple alone
-    // decides that, so a `you` that brings only a new hand can never clear the
-    // input ring. Nothing to compare yet — the wire has no hand at v10.
+    // ...and D37's MARKET HAND is the roster's FIFTH count, on exactly the same
+    // rule. THE BILL THAT STOOD HERE IS PAID (R7 / r7c commit 5, S-0cg7r2). It
+    // read, in full: "(R7 BILL) ...and D37's MARKET HAND is the roster's FIFTH
+    // count, on exactly the same rule (PORT-S S7) ... Nothing to compare yet —
+    // the wire has no hand at v10." The wire has one at v11.
+    //   A fresh hand is a LOBBY change: it reaches the early return and nothing
+    // else, and a hand that changed while this guard ignored it would be a
+    // reroll the panel never drew. IT CARRIES NO TEARDOWN, for exactly the
+    // reason the names do not — the identity triple alone decides that, which
+    // is the whole reason a name (and now a hand) is allowed on this message —
+    // so a `you` that brings only a new hand can never clear the input ring,
+    // reset the sequence or resync the buffer.
+    //   NULL-SAFE on BOTH sides, because null is a value here and not an
+    // absence to fold away: two nulls are the same, a null and an array are
+    // not, and that difference is what an oracle over this accessor reads.
+    const arrSame = (a, b) => (a === null || b === null) ? a === b
+      : a.length === b.length && a.every((v, i) => v === b[i]);
+    const nextHand = Array.isArray(you.hand) ? you.hand.map((v) => v | 0) : null;
+    const nextBought = Array.isArray(you.bought) ? you.bought.map((v) => (v ? 1 : 0)) : null;
+    const handSame = arrSame(nextHand, seatHand) && arrSame(nextBought, seatBought);
     const skinsSame = nextSkins.length === seatSkins.length &&
       nextSkins.every((v, i) => v === seatSkins[i]);
-    if (identitySame && rosterSame && namesSame && skinsSame) return;
+    if (identitySame && rosterSame && namesSame && skinsSame && handSame) return;
     rosGranted = granted;
     rosMax = maxSeats;
     rosStarted = started;
     seatNames = nextNames;
     seatSkins = nextSkins;
+    seatHand = nextHand;
+    seatBought = nextBought;
     // ...and this client's OWN copy follows the server's answer for its own
     // seat. The server's sanitize is the only one that reaches a screen, and
     // the claim card draws from ownName rather than from a row it does not
@@ -1748,6 +1880,19 @@
       epochDrops += 1;
       return;
     }
+    // ---- THE HEADER'S TWO FLAGS (R2.5) ---------------------------------
+    // `resync` says this socket's cursor fell past the ring's oldest entry, so
+    // there is a HOLE in its reliable stream that no partial replay can repair;
+    // `full` says the snapshot carries EVERY live round and orb, which is the
+    // repair. They arrive together on the overflow path and `full` arrives alone
+    // on a joiner's first snapshot.
+    //   The resync is taken BEFORE the newest-wins gate below, because the whole
+    // point of it is that the stream this client was following is gone.
+    if (s.resync) {
+      evStats.resyncs += 1;
+      resync();
+    }
+    if (s.full) evStats.fulls += 1;
     const newest = buf.length ? buf[buf.length - 1].tick : -1;
     if (s.tick <= newest) {
       // a stale clump: TCP delivered a burst after loss and an older snapshot
@@ -1768,11 +1913,36 @@
     if (buf.length > BUF_MAX) buf.shift();
     snaps += 1;
     attempts = 0; // the stream is live again — the backoff clock starts over
-    for (const e of s.events || []) evq.push({ tick: s.tick, e });
+    // v11 (R2.2): an entry is stamped with the EVENT's own tick, not the
+    // snapshot's. A replayed reliable event arrives on a later snapshot than the
+    // one it happened on, and stamping it with `s.tick` would fire it late.
+    for (const e of s.events || []) {
+      evq.push({ tick: e.t !== undefined ? e.t : s.tick, e, rel: isReliable(e.k) });
+    }
     // a paused client stops presenting but keeps receiving — the pending
     // event list must not grow for as long as a pause lasts, and a resume
-    // must not replay minutes of cues in one burst
-    if (evq.length > 300) evq.splice(0, evq.length - 300);
+    // must not replay minutes of cues in one burst.
+    //   ...AND THE TRIM DROPS COSMETIC ENTRIES ONLY (R2.9). The server's
+    // exactly-once guarantee ends at `ws.send`; this queue is the client's own
+    // drop point and it must not undo it. A dropped `fire` is a missed spark; a
+    // dropped `death` is a hull that never blew up, and since the ballistic
+    // split a dropped `roundSpawn` is a round that never appears at all. The
+    // blind `splice(0, n)` that stood here could take either.
+    if (evq.length > 300) {
+      let over = evq.length - 300;
+      for (let i = 0; i < evq.length && over > 0; i++) {
+        if (evq[i].rel) continue;
+        evq.splice(i, 1);
+        i -= 1;
+        over -= 1;
+        evStats.cosmeticDropped += 1;
+      }
+      // ...and if the queue is 300 RELIABLE entries deep there is nothing left
+      // to drop. It grows rather than losing one, which is the honest failure:
+      // a reliable backlog that large means the presented clock has stalled, and
+      // the resync path is what repairs that.
+      evStats.reliableHeld = evq.length > 300 ? evq.length - 300 : 0;
+    }
     // the first snapshot renders immediately — a one-frame snap beats a black
     // screen; the presented clock then slews back to the buffer depth
     if (pt < 0) pt = s.tick;
@@ -2003,6 +2173,9 @@
   //           without a projection — they are planted or nearly so. Leading
   //           them would spend accuracy to buy nothing, so the gain stays 0
   //           and that is a measurement, not an omission.
+  // the policy a body takes when the client does not know its state — see the
+  // decode below for why this is not `seek`.
+  const ENEMY_POLICY_UNKNOWN = { interp: "hermite", boundary: "hold", project: 0 };
   const ENEMY_POLICY = {
     seek:   { interp: "hermite", boundary: "hold", project: 1 },
     tele:   { interp: "hermite", boundary: "hold", project: 0 },
@@ -2012,17 +2185,10 @@
     dash:   { interp: "hermite", boundary: "hold", project: 0 },
     tired:  { interp: "hermite", boundary: "hold", project: 0 },
   };
-  // ...and missiles by their derived steering PHASE, which is the same idea:
-  // a missile under `arm` is ballistic, then it turns, then the authority
-  // decays away. The phase is DERIVED from the wire's `age` and the missile
-  // cfg — it never rides the wire itself.
-  const MISSILE_POLICY = {
-    ballistic: { interp: "hermite", boundary: "hold", project: 0 },
-    turning:   { interp: "hermite", boundary: "hold", project: 0 },
-    decaying:  { interp: "hermite", boundary: "hold", project: 0 },
-  };
-  const missilePhase = (age, M) => (age < M.arm ? "ballistic"
-    : M.life - age < M.decay ? "decaying" : "turning");
+  // MISSILE_POLICY and missilePhase went with the missile decode (R0.4). They
+  // derived a steering phase from the wire's `age` for a row that has had no
+  // producer since the harrier's seeker retired, so both were reachable only
+  // from a loop that always ran zero times.
 
   // a SHIP's ceiling, px/tick: the flight clamp's own formula, over the seat's
   // OWN decoded rank vector through the one derivation (termsFromOwned) and
@@ -2034,14 +2200,13 @@
     const vcap = VMAX + (terms ? terms.speed : 0);
     return pr.comet ? vcap * COMETVMAX : vcap;
   }
-  // the class ceiling, px/tick. It derived from the server's per-wave stats and
-  // capped on max(maxSpeed, backSpeed), with the charger's dash as the floor
-  // because that constant was the widest ceiling any body had. The table
-  // retired at commit D4, so the guard falls back to that same widest ceiling —
-  // which is what a SANITY BOUND should be when it cannot ask a per-class
-  // question: generous enough never to clip an honest pose, tight enough to
-  // refuse a decode that has gone wrong. R7 re-cuts it per class.
-  function enemyCap() { return BODY_CAP_FALLBACK; }
+  // the class ceiling, px/tick — PER CLASS again since r7a commit 6, which is
+  // what the note here promised R7 would do. The kind comes off the wire and
+  // the kernel publishes its own STATS, so the guard asks the per-class
+  // question it could not ask while every body decoded as a dart. See
+  // CAP_HEADROOM for where the 5 comes from: it is the generosity the single
+  // shipped ceiling already had, kept per kind rather than granted to all.
+  function enemyCap(kind) { return bodyStats(kind).speed / 60 * CAP_HEADROOM; }
   // the guard catches a SPIKE, not a rounding edge: a body travelling at
   // exactly its clamp prints a wire velocity that can round a hair over it, and
   // throttling that would be the guard inventing a lag of its own. The slack is
@@ -2120,7 +2285,306 @@
   // those twenty-one types real rows — the program's standing wire fact — and
   // SOLO is the shipped surface. The decode is kept INTACT rather than gutted
   // so R7 has one place to re-cut.
-  const NETV = { enemies: [], missiles: [], groups: [] };
+  // `missiles` IS AN EMPTY LITERAL WITH A LIVE READER, and it survives the row's
+  // deletion (R0.4) for the reason js/encounter.js states at its own consumer:
+  // "a `FRAME.missiles` shadow is built from it every frame and a missing key is
+  // a TypeError on the render path, which is the one place a retirement must not
+  // surface." The WIRE ROW is gone — the schema declares none and no snapshot
+  // decodes one; what is left here is a shape the draw reads and nothing fills.
+  const NETV = { enemies: [], missiles: [], groups: [], rounds: [], orbs: [] };
+
+  // ---- THE DERIVED STORES (R7 / O2.2, O3) ---------------------------------
+  // THE BALLISTIC SPLIT'S CLIENT HALF. Sixteen of the kernel's twenty round
+  // kinds have a flight FIXED AT SPAWN, so they do not ride per tick at all:
+  // the wire sends a reliable SPAWN EVENT and this store runs the KERNEL'S OWN
+  // STEP to know where the round is on every tick after. Orbs ride the same
+  // split — a scatter velocity and a fixed damping, both derivable.
+  //
+  // ONE COPY OF THE ARITHMETIC. `DemoKernel.flyRound` is the function the sim
+  // itself calls (js/demo-kernel.js, exported at r7a commit 8); nothing is
+  // re-implemented here. Two copies would be two answers to one question, and
+  // one of them would be on the screen the player is watching.
+  //
+  // THE STORE NEVER SPAWNS. On a derived death — the step's own terminal
+  // reason: a timer split, a life expiry, or the arena wall — it DROPS the
+  // round and waits. The children of a split arrive as their OWN spawn events
+  // (O2.1), and a store that manufactured one would be putting ordnance on the
+  // player's screen that the server never fired.
+  //
+  // THE HALF-RTT GHOST IS ACCEPTED (O2.6, the owner's ruling). A derived round
+  // is DISPLAY-ONLY and hits stay the server's, so for up to about half a round
+  // trip after a server-side death the client draws a round that is already
+  // dead. That is the industry norm and it is NOT a defect to design around —
+  // no reconciliation is built for it.
+  //
+  // NOTHING FEEDS THESE STORES AT r7a'S TIP, and that is the expected state
+  // rather than a gap: r7b emits the four kinds and routes them here. Until
+  // then they are fed by `full` snapshots and by the test seam below, which is
+  // what the determinism legs drive.
+  const derivedRounds = new Map();  // id -> a kernel-shaped round record
+  const derivedShots = new Map();   // id -> a PLAYER round, derived the same way
+  const derivedOrbs = new Map();    // id -> a kernel-shaped orb record
+  let derivedTick = -1;             // the sim tick the stores have been advanced to
+  const KSTEP = 1 / 60;             // the kernel's own STEP; the client runs the
+                                    // same fixed timestep or it is not the same run
+
+  // PREV and CUR, so the presentation chain lerps a derived round through the
+  // bracket it already uses for every other body (presentBody's shape). The
+  // chain itself does not move: a derived round is a body like any other to it.
+  const poseOf = (r) => ({ x: r.x, y: r.y, px: r.px, py: r.py });
+
+  function seedRound(rec) {
+    // the kernel's own round shape, which is what flyRound steps
+    derivedRounds.set(rec.id, {
+      id: rec.id, team: "enemy", kind: rec.kind,
+      x: rec.x, y: rec.y, px: rec.x, py: rec.y,
+      vx: rec.vx, vy: rec.vy,
+      speed: rec.speed || Math.hypot(rec.vx, rec.vy),
+      maxSpeed: rec.maxSpeed || 0, acceleration: rec.acceleration || 0,
+      life: rec.life, homing: 0, homingDelay: 0, armed: rec.armed || 0,
+      curve: rec.curve || 0, wiggle: rec.wiggle || 0,
+      specialTimer: rec.specialTimer || 0,
+      ownerId: rec.ownerId || 0, r: rec.r || 3, color: rec.color,
+      dead: false,
+    });
+  }
+  function seedOrb(rec) {
+    derivedOrbs.set(rec.id, { id: rec.id, x: rec.x, y: rec.y, px: rec.x, py: rec.y,
+      vx: rec.vx, vy: rec.vy, life: rec.life, value: rec.value || 1, dead: false });
+  }
+  // A PLAYER ROUND (O2.8, commit 10b). Its flight is EXACTLY straight on every
+  // wire-reachable path — ordnanceStep is inert and BOUNCE has no wire writer —
+  // so `x += vx` per tick IS the sim's own step, and there is no kernel
+  // function to share because there is no curve to share. The pose the record
+  // carries is POST-REBATE: js/encounter.js's rebate advances a round at spawn
+  // and collapses px/py, so this is the state the round would have had on its
+  // first snapshot.
+  function seedShot(rec) {
+    derivedShots.set(rec.id, { id: rec.id, seat: rec.seat, k: rec.k | 0,
+      x: rec.x, y: rec.y, px: rec.x, py: rec.y,
+      vx: rec.vx, vy: rec.vy, ttl: rec.ttl | 0 });
+  }
+  const dropShot = (id) => derivedShots.delete(id);
+  const dropRound = (id) => derivedRounds.delete(id);
+  const dropOrb = (id) => derivedOrbs.delete(id);
+
+  // ONE SIM TICK of both stores. `sweeping` freezes an orb's life exactly as
+  // the kernel does (`if (!sweeping && !o.captured) o.life -= dt`) — a client
+  // that let the life run during a clear break would expire orbs the server
+  // still holds.
+  function stepDerived(tick, sweeping) {
+    const K = window.DemoKernel;
+    if (!K || !K.flyRound) return;
+    const time = tick * KSTEP;
+    for (const [id, b] of derivedRounds) {
+      b.px = b.x; b.py = b.y;
+      // NO SEEK TARGET. A derived round is by definition one that does not
+      // home — CONSTRUCT_KINDS is exactly the homing set — so the branch is
+      // unreachable for anything in this store, and passing null makes that a
+      // property of the call rather than a hope about the data.
+      const end = K.flyRound(b, KSTEP, time, null);
+      if (end) dropRound(id);   // "split" | "expire" | "wall" — never a spawn
+    }
+    for (const [id, b] of derivedShots) {
+      b.px = b.x; b.py = b.y;
+      b.x += b.vx;
+      b.y += b.vy;
+      b.ttl -= 1;
+      // TTL IS LOAD-BEARING: without it a derived round outlives its death tick
+      // and keeps drawing. A round killed by a HIT is dropped by its roundDeath
+      // event instead, which r7b emits — this is only the expiry the client can
+      // see for itself.
+      if (b.ttl <= 0) dropShot(id);
+    }
+    for (const [id, o] of derivedOrbs) {
+      o.px = o.x; o.py = o.y;
+      K.dampOrb(o, KSTEP);
+      o.x = o.x + o.vx * KSTEP;
+      o.y = o.y + o.vy * KSTEP;
+      if (!sweeping) o.life -= KSTEP;
+      if (o.life <= 0) dropOrb(id);
+    }
+  }
+  // ---- THE LATE-ARRIVING SPAWN (r7b commit 8, O2.2 / O3) -------------------
+  // A reliable event carries its OWN tick, and the ring can replay one that is
+  // older than the store's current tick — a socket the broadcast skipped gets
+  // the whole backlog on its next accepted send. Such a spawn is seeded AT ITS
+  // SPAWN POSE and then stepped forward `now - t` times before it is ever drawn,
+  // so it lands exactly where a round delivered on time would be.
+  //   ONE ENTITY, NOT THE STORE. `stepDerived` advances everything; running it
+  // here would double-advance every OTHER round in the store by the same gap.
+  // The guard is `advanceDerived`'s own 600, and for its reason: a gap past it
+  // is a resync's business, not a reason to integrate a big dt.
+  function catchUpRound(b, fromTick, toTick) {
+    const K = window.DemoKernel;
+    if (!K || !K.flyRound) return true;
+    let t = fromTick, guard = 0;
+    while (t < toTick && guard++ < 600) {
+      t += 1;
+      b.px = b.x; b.py = b.y;
+      if (K.flyRound(b, KSTEP, t * KSTEP, null)) return false;   // it ended en route
+    }
+    return true;
+  }
+  // ...and the PLAYER round's own catch-up (r7b FIX 1). Its step is `x += vx`
+  // per tick and nothing else — ordnanceStep is INERT and BOUNCE has no wire
+  // writer, both measured by r7a — so there is no kernel function to share
+  // because there is no curve to share. `ttl` is spent on the way, and a round
+  // whose ttl runs out en route is dropped rather than delivered dead.
+  function catchUpShot(b, fromTick, toTick) {
+    let t = fromTick, guard = 0;
+    while (t < toTick && guard++ < 600) {
+      t += 1;
+      b.px = b.x; b.py = b.y;
+      b.x += b.vx;
+      b.y += b.vy;
+      b.ttl -= 1;
+      if (b.ttl <= 0) return false;
+    }
+    return true;
+  }
+  function catchUpOrb(o, fromTick, toTick, sweeping) {
+    const K = window.DemoKernel;
+    if (!K || !K.dampOrb) return true;
+    let t = fromTick, guard = 0;
+    while (t < toTick && guard++ < 600) {
+      t += 1;
+      o.px = o.x; o.py = o.y;
+      K.dampOrb(o, KSTEP);
+      o.x = o.x + o.vx * KSTEP;
+      o.y = o.y + o.vy * KSTEP;
+      if (!sweeping) o.life -= KSTEP;
+      if (o.life <= 0) return false;
+    }
+    return true;
+  }
+
+  // ---- THE DERIVED PLANE'S INTAKE (r7b commit 8, O2.2 / O3) ----------------
+  // ONE FUNCTION, TWO CALLERS, AND THE SECOND IS A TEST SEAM ON THE FIRST.
+  // fireEvents calls this for every drained event; Net.__derived.apply() calls
+  // the SAME function, so a leg that drives it is driving the shipped consumer
+  // and not a copy of it. It is split out because the alternative — driving this
+  // through hundreds of injected snapshots — walks the shared client's stream
+  // past every leg that runs after it.
+  function applyDerivedEvent(e, tick) {
+    // ---- THE DERIVED PLANE'S INTAKE (r7b commit 8, O2.2 / O3) ----------
+    // The four split kinds are STATE, not sound: they seed and drop r7a's
+    // derived stores. They are applied BY THEIR OWN TICK — a spawn replayed
+    // out of the ring is seeded at its spawn pose and stepped forward to now
+    // before it is drawn, or the client would draw it `now - t` ticks behind
+    // where the server has it.
+    if (e.k === "roundSpawn") {
+      // ---- A CONSTRUCT IS NEVER SEEDED (r7b FIX 4, the seat's S-D row) ------
+      // O2.4 says a construct's spawn ALSO emits `roundSpawn`, so the client can
+      // DRAW it the tick it appears — and it does, from `s0.rounds`, because
+      // js/wire.js sends the four homing kinds PER TICK as wire rounds. Seeding
+      // one here as well made it DRAWN TWICE: once as the true homing round from
+      // the wire and once as a straight-flying ghost from this store, which
+      // lives until its own `roundDeath` (measured divergence 377 px at seed
+      // 4242, 576 px at 20260826).
+      //   `stepDerived`'s own comment already claimed "the branch is unreachable
+      // for anything in this store — CONSTRUCT_KINDS is exactly the homing set".
+      // NOTHING ENFORCED IT. This is the line that does, and it reads the
+      // EXPORTED list rather than a literal so a fifth homing kind is covered
+      // the day the ladder gains one.
+      if (isConstructKind(e.kindName)) return;
+      seedRound({ id: e.id, kind: e.kindName, x: e.x, y: e.y, vx: e.vx, vy: e.vy,
+        life: e.life, ownerId: e.ownerId, curve: e.curve, wiggle: e.wiggle,
+        specialTimer: e.specialTimer });
+      const b = derivedRounds.get(e.id);
+      if (b && derivedTick > tick && !catchUpRound(b, tick, derivedTick)) dropRound(e.id);
+    } else if (e.k === "roundDeath") {
+      // IDEMPOTENT BY CONSTRUCTION, and the case that produces a miss is a
+      // RACE rather than a duplicate: a derived round the client already
+      // expired at its own `life` while the server's end for the same round
+      // was still in flight. Map.delete on an absent key is a no-op and
+      // nothing is counted, which is what makes the double drop invisible.
+      dropRound(e.id);
+      // r7b FIX 1: a PLAYER round's end lands here too, and it drops from the
+      // OWN-ROUND store. The two stores hold disjoint id spaces — the kernel's
+      // rounds cross at `id + KERNEL_WIRE_ID_BASE` — so asking both is exact
+      // and neither drop can take the other's round.
+      dropShot(e.id);
+    } else if (e.k === "orbSpawn") {
+      // ONE EVENT SEEDS `n` ORBS, NOT ONE (O2.11). `x`, `y` and `life` are
+      // the batch's — killEnemy passes one spawn point and ORBLIFE to every
+      // orb of one kill — while `id`, `vx`, `vy` and `value` are PER ORB:
+      // the loop computes `value` per iteration and the first
+      // `xpTotal % count` orbs each carry one more than the rest, so a
+      // batch-level value cannot represent the batch. A batch applied as a
+      // single orb is the defect this walk exists to prevent.
+      const sweeping = !!(buf.length && buf[buf.length - 1].hud && buf[buf.length - 1].hud.sweep);
+      for (const o of e.orbs || []) {
+        seedOrb({ id: o.id, x: e.x, y: e.y, vx: o.vx, vy: o.vy,
+          life: e.life, value: o.value });
+        const seeded = derivedOrbs.get(o.id);
+        if (seeded && derivedTick > tick && !catchUpOrb(seeded, tick, derivedTick, sweeping)) dropOrb(o.id);
+      }
+    } else if (e.k === "orbPickup") {
+      // D55: the CREDIT already fired server-side at magnet entry. What the
+      // client does here is remove the orb; the fly-in and its landing cue
+      // are local (`pickup`, a cosmetic event of its own).
+      dropOrb(e.id);
+    } else if (e.k === "shot") {
+      // A6-NO's own-round store. THE ROW AND THE STORE ARE r7a's AND NOTHING
+      // EMITS THIS EVENT AT THIS TIP — see the lane report's FINDING 1. The
+      // route is built because it is this lane's obligation (§4 step 8 (ii))
+      // and because it costs one branch: the client half is then ready the
+      // day the emit lands.
+      seedShot({ id: e.id, seat: e.seat, k: e.rk, x: e.x, y: e.y,
+        vx: e.vx, vy: e.vy, ttl: e.ttl });
+      // ...and it is CAUGHT UP BY ITS OWN TICK, exactly as a roundSpawn is: a
+      // `shot` replayed out of the ring is seeded at its spawn pose and stepped
+      // forward `now - t` times before it is drawn.
+      const sb = derivedShots.get(e.id);
+      if (sb && derivedTick > tick && !catchUpShot(sb, tick, derivedTick)) dropShot(e.id);
+    } else if (e.k === "restart" || e.k === "wipe") {
+      // ...and a dead run's rounds never survive into a fresh match. `restart`
+      // is already RELIABLE and already cuts the predictor; this is case 7's
+      // client half.
+      //   `wipe` JOINS IT AT r7b FIX 5 (the seat's S-C row), and it is the same
+      // event on the sim's side: js/encounter.js's `wipeNow` reaches the
+      // kernel's `resetRun`, which empties `S.bullets` AND `S.orbs` outright.
+      // Measured at fa2f893 (seed 4242, tick 15788): the match wiped, NO
+      // `restart` marker crossed, the kernel's five live `flame` rounds vanished
+      // with no `roundDeath` of their own, and the client's store still held all
+      // five with 1.87-2.02 s of `life` left — drawn over an empty field at the
+      // moment every pilot is watching it. A 12-seed sweep found derived ORBS
+      // ghosting for the whole of ORBLIFE (27.7-30 s) on 4 of 12 seeds, which is
+      // the common case.
+      //   `clearDerived()` and not a round-store-only clear: it also nulls
+      // `DemoRender.setNetRounds` and re-seats `derivedTick`, and a clear that
+      // left the render handle pointing at the ghost list would draw them anyway.
+      clearDerived();
+    }
+  }
+
+  // advance to a tick, one fixed step at a time. A gap larger than one tick is
+  // a resync's business, not a reason to integrate a big dt: the kernel runs a
+  // fixed timestep and a client that took a variable one would not be running
+  // the same simulation at all.
+  function advanceDerived(tick, sweeping) {
+    if (derivedTick < 0) { derivedTick = tick; return; }
+    let guard = 0;
+    while (derivedTick < tick && guard++ < 600) {
+      derivedTick += 1;
+      stepDerived(derivedTick, sweeping);
+    }
+    if (derivedTick < tick) derivedTick = tick;  // a gap past the guard: catch up silently
+  }
+  function clearDerived() {
+    derivedRounds.clear();
+    derivedShots.clear();
+    derivedOrbs.clear();
+    derivedTick = -1;
+    NETV.rounds = [];
+    NETV.orbs = [];
+    // ...and the renderer's handle with them. It is module-level in
+    // js/demo-render.js and outlives this client, so a list left behind here is
+    // a list some later page draws.
+    if (window.DemoRender && DemoRender.setNetRounds) DemoRender.setNetRounds(null);
+  }
+
   let starving = false; // set by present()'s starvation branch for the frame it
                         // drives — the projection stands down for that frame
   function leadTicks() {
@@ -2336,7 +2800,22 @@
         // lerping the plume across the deal draws a thrust the sim never had
         P.flame.x = p1 && !held ? lerp(pr.fx, p1.fx, k) : pr.fx;
         P.flame.y = p1 && !held ? lerp(pr.fy, p1.fy, k) : pr.fy;
+        // v11: THE CONVERGED NOSE, adopted from the wire. Until this key
+        // existed every remote plate on every screen held nose-right, and
+        // test/tools/pred-frame-proof.mjs asserted exactly that as the
+        // contract. It is an ANGLE, so it interpolates the short way round —
+        // alerp, the same routine a body's `face` takes — and it HOLDS across a
+        // respawn like the pose and the plume beside it.
+        if (Number.isFinite(pr.hd)) {
+          P.heading = p1 && !held && Number.isFinite(p1.hd)
+            ? alerp(pr.hd, p1.hd, k) : pr.hd;
+        }
       }
+      // ...and the comet HALO'S RADIUS (S-5tqjej), presented truth for every
+      // seat. A client sized a remote halo from its OWN rank because the
+      // effective terms never cross; now the authoritative number does. Zero
+      // means "no halo", which is what the zero-fold on the wire encodes.
+      P.auraR = pr.auraR || 0;
       P.comet = !!pr.comet;
       P.cool = pr.cool || 0;     // v4: the fire cooldown and the recharge delay
       P.enIdle = pr.enIdle || 0; // — presented truth, and the predictor's rebase source
@@ -2419,18 +2898,51 @@
     // --- the encounter's presented fields, discrete ones from s0 (the
     // snapshot whose moment is on screen): the freeze renders exactly as the
     // sim reports, no client-side state machine
-    E.state = s0.hud.state;
+    // ---- THE STALL RIDES `hud.state` (R7 / r7c commit 7, R3.7) -------------
+    // "stalled" is a SURFACE and not a director state: a stalled room is an
+    // ACTIVE one that has stopped making progress, and js/encounter.js's own
+    // count line is gated on `E.state === "active"`. Writing "stalled" straight
+    // into E.state would DARKEN the very line the stall is supposed to light,
+    // which is the opposite of R3.7. So the wire's value is split: the director
+    // half goes to E.state and the alarm half to a flag the draw reads through
+    // Net.stalled(), on the presentedBodies() cross-seam idiom.
+    //   WHY IT IS THE SERVER'S WORD AND NOT THE CLIENT'S COUNT: presentedBodies()
+    // on a net client returns THIS RECEIVER'S list, and from r7c commit 2 that
+    // list is radius-culled (D22) — so two clients in one room legitimately
+    // count different foes and neither count is the room's answer.
+    netStalled = s0.hud.state === "stalled";
+    E.state = netStalled ? "active" : s0.hud.state;
     E.wave = s0.hud.wave;
-    // (R7 BILL) `E.loop` — production's arc loop counter (PORT-S S7) — HAS NO
-    // SOURCE HERE. It is written by `applyKernelHud` watching the wave FALL and
-    // by the wipe, and a `?mp` client runs neither: it ASSIGNS E.wave from the
-    // snapshot on the line above, so a fall-watching derivation would fire on
-    // DECODE ORDER rather than on the sim. So a client's `E.loop` stays 0 until
-    // the wire carries it, and it rides the ROSTER message beside the seat's own
-    // market hand (server/server.js's `you`, the SEATED branch) — one message,
-    // two halves of one fact, because a hand is meaningless without the loop it
-    // was dealt in. Nothing on the client reads E.loop today, so the hole costs
-    // nothing until R7 opens it.
+    // ---- `E.loop` RIDES THE SNAPSHOT (R7 / r7c commit 6, R3.6) -------------
+    // THE BILL THAT STOOD HERE IS PAID. It read, in full:
+    //   "(R7 BILL) `E.loop` — production's arc loop counter (PORT-S S7) — HAS NO
+    //    SOURCE HERE. It is written by `applyKernelHud` watching the wave FALL
+    //    and by the wipe, and a `?mp` client runs neither: it ASSIGNS E.wave
+    //    from the snapshot on the line above, so a fall-watching derivation
+    //    would fire on DECODE ORDER rather than on the sim. So a client's
+    //    `E.loop` stays 0 until the wire carries it, and it rides the ROSTER
+    //    message beside the seat's own market hand ... Nothing on the client
+    //    reads E.loop today, so the hole costs nothing until R7 opens it."
+    // Every sentence of the DIAGNOSIS is still true. The last one is not, and
+    // the CHANNEL it names was reversed.
+    //   IT DOES NOT RIDE THE ROSTER (R3.6, map items 19/50). Three measured
+    // reasons, and the first alone settles it: a SPECTATOR HAS NO SEATED BRANCH,
+    // so a loop that rode the hand's message would never reach the screen the
+    // badge is drawn on. A JOINER between two `you` messages would hold a stale
+    // loop for as long as nobody was granted or released. And the POR's own rule
+    // is that PERSISTENT state rides snapshots — `state`, `wave` and `clearTick`
+    // are on the three lines around this one for exactly that reason.
+    //   AND SOMETHING READS IT NOW, which is the other half of the retired
+    // sentence: js/encounter.js's `waveHeader` appends " · LOOP n" to the badge
+    // for any `E.loop > 0`, and until this line that badge was dark on every
+    // net client however many arcs the room had turned.
+    E.loop = s0.hud.loop | 0;
+    // ...and the SERVER's clear-hold LENGTH (r7c commit 8, R3.8). It is NOT
+    // written into ECFG: that is the client's own configuration and a solo run
+    // on the same page must keep its own. It is held here and read back through
+    // Net.hudHold(), which js/encounter.js's countdown asks on the
+    // presentedBodies() cross-seam idiom.
+    netHold = s0.hud.hold | 0;
     E.clearTick = s0.hud.clearTick;
     E.waveTick = s1 ? lerp(s0.hud.waveTick, s1.hud.waveTick, k) : s0.hud.waveTick;
     // the buy cue reads the LOCAL seat's vector — a remote seat's purchase
@@ -2453,25 +2965,38 @@
     // death, one only in the newer appears when its snapshot becomes s0.
     // The client stamps e.stats via statsFor — drawAnvil and the edge arrows
     // read it, and a stats-less body throws.
-    // (the per-wave stat table retired at commit D4 — see the block at
-    // `BODY_R_FALLBACK`. Every decoded body takes the fallback radius and the
-    // fallback ceiling until R7 gives its type a wire row.)
+    // (the per-wave stat table retired at commit D4; since r7a commit 6 the
+    // KIND rides the wire, so a body's radius and its speed ceiling are its
+    // own again — read off the kernel's published STATS by the name the wire
+    // carried. See the block at BODY_R_UNKNOWN.)
     const e1by = s1 ? new Map(s1.enemies.map((e) => [e.id, e])) : null;
     NETV.enemies = s0.enemies.map((e0) => {
       const e1 = e1by ? e1by.get(e0.id) : null;
       // v5: the wire carries enum INDICES; the decode hands back exactly the
       // strings v4 carried, so stats lookup, render and every scorer bucket
       // downstream read the same values they always did
-      const type = wireType(e0.ty);
-      const mode = wireMode(e0.md);
-      const stats = { r: BODY_R_FALLBACK };
-      const pol = ENEMY_POLICY[mode] || ENEMY_POLICY.seek;
+      // v11: the body names ITS OWN KIND and ITS OWN STATE. `kind` is null for
+      // an index the table does not know — never "dart", which is the fallback
+      // this commit retired: it answered for all 21 kernel types at once.
+      const type = e0.kind || null;
+      const mode = e0.state || "";
+      const stats = { ...bodyStats(type) };
+      // THE DEFAULT IS HOLD, NOT `seek` (r7a commit 6). ENEMY_POLICY is keyed on
+      // production's retired mode names, and the kernel's thirty-six states are
+      // not among them — so before this line the fallback was `seek`, THE ONE
+      // POLICY WITH project: 1, and every kernel body was led forward on a
+      // horizon the client invented. server/sim-host.mjs's own gather note
+      // named that as part of the ty:-1 lie. An unknown state now HOLDS and
+      // projects nothing, which is what a client that does not know a body's
+      // behaviour should do. A per-state policy table for the kernel's states
+      // is R8a's, filed with the state ENUM it belongs beside.
+      const pol = ENEMY_POLICY[mode] || ENEMY_POLICY_UNKNOWN;
       // THE BOUNDARY. A mode change between the brackets is a discontinuity:
       // pose, countdown and facing all HOLD at s0, and nothing is projected
       // across it. (`t` is the load-bearing half — lerping a countdown through
       // a mode change manufactures values the sim never held.)
-      const held = !!(e1 && pol.boundary === "hold" && wireMode(e1.md) !== mode);
-      const cap = enemyCap();
+      const held = !!(e1 && pol.boundary === "hold" && (e1.state || "") !== mode);
+      const cap = enemyCap(type);
       // THE PER-BODY BOUND on the horizon. A mode that counts down may never be
       // led past its own remaining ticks: the tick after `t` runs out is a mode
       // the client has not been told about, and leading into it is the same lie
@@ -2493,50 +3018,55 @@
       return {
         id: e0.id, type,
         x: pose.x, y: pose.y,
-        vx: 0, vy: 0, r: stats.r, hp: 1, stats, orbDrop: 0,
+        vx: 0, vy: 0, r: stats.r, hp: e0.hp | 0, stats, orbDrop: 0,
         mode, cd: 0,
         t: e1 && !held ? lerp(e0.t, e1.t, k) : e0.t,
         face: e1 && !held ? alerp(e0.face, e1.face, k) : e0.face,
-        lockA: e1 && !held ? alerp(e0.lk, e1.lk, k) : e0.lk,
+        lockA: 0,   // R1.12: lockA is not on the v11 wire — it was a hardcoded
+                    // zero at server/sim-host.mjs and the encoder's conditional
+                    // triple that read it was unreachable
         flash: e0.fl, pulseHit: false, dashHit: false,
+        // ---- THE TELEGRAPH FIVE, DECODED (R7 / r7c commit 4, R3.4) --------
+        // Back under the names js/demo-render.js reads them by — `lance`,
+        // `lanceAngle`, `dashAngle`, `phase`, `enraged` — because the renderer
+        // is the consumer and a second vocabulary at the decode would be a
+        // second thing to keep in step. The wire's short names exist to save
+        // bits, not to be a second API.
+        //   HELD, NEVER INTERPOLATED. Every one of the five is either an
+        // ANGLE the draw rotates by, a countdown the draw divides by, or a
+        // BIT — and lerping any of them across a mode change manufactures a
+        // value the sim never held, which is the same refusal `t` and the
+        // boundary hold above already make. They ride s0 as they arrived.
+        //   NO DRAW IS ADDED HERE. js/demo-render.js's body loop still walks
+        // the kernel's own S.enemies and there is no setNetBodies seam — the
+        // wire half is R7's and the draw half is the look plane's (the same
+        // split DRAW-2 was refused under at r7a commit 8). What lands here is
+        // that the fields ARRIVE and are named; nothing new paints.
+        lance: e0.lance, lanceAngle: e0.lanceA,
+        dashAngle: e0.dashA, phase: e0.phase, enraged: !!e0.rage,
         // the radar latch's PING is a PAST world point, draw-only: it is held
         // from s0 and never interpolated, never projected, never fed to any
         // interpolator. prT joins the hold column explicitly here.
-        predX: e0.prX || 0, predY: e0.prY || 0, predT: e0.prT || 0,
+        predX: 0, predY: 0, predT: 0,  // R1.12: the projection triple is not on
+                                       // the v11 wire either, for the same reason
         contactCd: 0, contactTaken: false,
       };
     });
 
-    // --- missiles, with the trail rebuilt from presented positions: one
-    // sample per presented tick, capped at the sim's own trail length
-    const m1by = s1 ? new Map(s1.missiles.map((m) => [m.id, m])) : null;
-    const liveIds = new Set();
-    NETV.missiles = s0.missiles.map((m0) => {
-      const m1 = m1by ? m1by.get(m0.id) : null;
-      // v5: `age` rides the wire and the steering PHASE is derived from it
-      // here — the same three segments stepMissile runs (ballistic under
-      // `arm`, full turn, then decaying inside `decay`). The phase is the
-      // policy key; it is never wire weight.
-      const age = m0.age | 0;
-      const phase = missilePhase(age, cfg.missile);
-      const pol = MISSILE_POLICY[phase];
-      const held = !!(m1 && pol.boundary === "hold" &&
-        missilePhase(m1.age | 0, cfg.missile) !== phase);
-      const bodyLead = pol.project > 0 ? lead * pol.project : 0;
-      const pose = presentBody(pol, m0, m1, k, h, cfg.missile.speed, held,
-        bodyLead, cfg.missile.r);
-      const x = pose.x, y = pose.y;
-      liveIds.add(m0.id);
-      let tr = trails.get(m0.id);
-      if (!tr) { tr = []; trails.set(m0.id, tr); }
-      tr.push({ x, y });
-      while (tr.length > cfg.missile.trail) tr.shift();
-      return { id: m0.id, x, y, vx: m0.vx, vy: m0.vy,
-        r: cfg.missile.r, hp: 1, age, trail: tr, radar: !!m0.radar };
-    });
-    for (const id of trails.keys()) {
-      if (!liveIds.has(id)) trails.delete(id); // a dead id disappearing IS the death
-    }
+    // --- MISSILES: THE ROW IS GONE FROM THE WIRE (R0.4, r7a) ---------------
+    // What stood here decoded `s0.missiles`, rebuilt a trail per missile from
+    // presented positions, and derived the steering phase from the wire's
+    // `age`. It was a TRAP: `missiles[]` has had no producer since the
+    // harrier's seeker retired at PORT-S S3b lane 3 commit D4, so the map ran
+    // over an empty array on every tick and nothing exercised the body — and
+    // the first non-empty array would have thrown on `cfg.missile`, which the
+    // client no longer configures. R0.4 deletes the schema row; this is the
+    // decode that read it.
+    //   `trails` and `liveIds` went with it — they were the missile trail's
+    // own store and had no other reader. R7's kernel ROUNDS are the successor
+    // ordnance and they arrive as their own row and their own store (r7a's
+    // commit 8), not by reviving this one.
+    NETV.missiles = [];   // ...and it stays empty: see the declaration above
 
     // --- orbs and bullets
     const o1by = s1 ? new Map(s1.orbs.map((o) => [o.id, o])) : null;
@@ -2548,6 +3078,19 @@
       const pose = presentBody(POLICY.orb, o0, o1, k, h, 0, false, 0, 0);
       return { id: o0.id, x: pose.x, y: pose.y, vx: 0, vy: 0 };
     });
+    // v11 (O2.8, commit 10b): `bullets[]` is `full`-ONLY. A player round's pose
+    // stopped riding per tick — a reliable `shot` event carries the spawn and
+    // the store below derives the straight flight — so this list is non-empty
+    // only on a resync or a grant, and it RE-SEATS the store whole.
+    if (s0.full) {
+      derivedShots.clear();
+      for (const b of s0.bullets || []) seedShot({ id: b.id, seat: b.o, k: b.k,
+        x: b.x, y: b.y, vx: 0, vy: 0, ttl: 1 });
+    }
+    // ...and the presented list is the STORE's, not the wire's. Everything
+    // downstream — the streak, the carry, the owner-scoped budget and the
+    // tracer hand-off — reads exactly the shape it read before.
+    const wireBullets = [...derivedShots.values()];
     const b1by = s1 ? new Map(s1.bullets.map((b) => [b.id, b])) : null;
     // what this client knew about each round LAST deal — read from bCarry and
     // NOT from the outgoing G.bullets, which the discontinuities do not clear:
@@ -2557,7 +3100,7 @@
     // belongs to a match that is over. bCarry is cleared at both cuts.
     const bWas = new Map(bCarry);
     bCarry.clear();
-    G.bullets = s0.bullets.map((b0) => {
+    G.bullets = wireBullets.map((b0) => {
       const b1 = b1by ? b1by.get(b0.id) : null;
       const pose = presentBody(POLICY.bullet, b0, b1, k, h, 0, false, 0, 0);
       const x = pose.x, y = pose.y;
@@ -2608,7 +3151,7 @@
       // bulletSeat() reads the int directly, and the legacy-string alias
       // stays for local mode's suite synthetics only
       return { id: b0.id, x, y, px: x, py: y, vx, vy, ox, oy, ink, streak,
-        r: br, dmg: 0, owner: Number.isInteger(b0.o) ? b0.o : 0,
+        r: br, dmg: 0, owner: Number.isInteger(b0.seat) ? b0.seat : 0,
         ttl: 1, dead: false, spent: false };
     });
     // the tracer HAND-OFF: the FIRST authoritative own bullet appearing in
@@ -2652,6 +3195,49 @@
       }
     }
 
+    // --- THE DERIVED PLANE (O2, O3): advance both stores to the presented
+    // tick, seed from a `full` snapshot, and publish PREV/CUR poses so the
+    // presentation chain lerps them through the bracket it already has.
+    advanceDerived(s0.tick, !!(s0.hud && s0.hud.sweep));
+    if (s0.full) {
+      // a full snapshot carries EVERY live round and orb, un-culled (O2.5), so
+      // it is the one message that can re-seat the stores whole. r7b's resync
+      // and r7c's grant are what set the flag; nothing in r7a does.
+      clearDerived();
+      derivedTick = s0.tick;
+      // ...and a CONSTRUCT is skipped HERE TOO (r7b FIX 4). `s0.rounds` is the
+      // wire's construct list — `js/wire.js` filters it to `full || r.construct`
+      // — so every row in it on an ordinary snapshot is already a construct, and
+      // seeding one would double-draw it exactly as the event arm did. On a
+      // `full` snapshot the list carries every live round, so the test is what
+      // separates the two.
+      for (const r of s0.rounds || []) if (r.kind && !isConstructKind(r.kind)) seedRound(r);
+      for (const o of s0.orbs || []) seedOrb(o);
+    }
+    // the CONSTRUCTS ride per tick and are presented from the wire like any
+    // other body; the DERIVED rounds are presented from the store. Both end up
+    // in one list, because to the draw a round is a round.
+    NETV.rounds = (s0.rounds || []).map((r) => ({ id: r.id, kind: r.kind,
+      x: r.x, y: r.y, vx: r.vx, vy: r.vy, st: r.st, derived: false }))
+      .concat([...derivedRounds.values()].map((b) => ({ id: b.id, kind: b.kind,
+        x: b.x, y: b.y, vx: b.vx, vy: b.vy, st: 1, derived: true })));
+    NETV.orbs = [...derivedOrbs.values()].map((o) => ({ id: o.id, x: o.x, y: o.y }));
+    // ...AND THE DRAW (DRAW-1, §2.5(m)3). ONE SETTER, no new draw code: the
+    // shipped renderer's round loop already walks a list, and it is handed this
+    // one. The setter follows setHostedView/setCamOrigin's idiom exactly, which
+    // is what a WIRE round is allowed to do to a render plane — copy the
+    // reference call, design nothing. js/game.js's drawSuccessorField carries
+    // the matching net arm, because in `?mp` no EncounterHost is installed and
+    // its guard returned before this could reach a canvas.
+    //
+    // THE FIRST FORM OF THIS WROTE INTO THE DORMANT KERNEL'S OWN `S.bullets`,
+    // which needs no setter at all — and it was MEASURED WRONG: the fx suite
+    // shares that array on the same page, and the net client's apply() emptied
+    // it under a leg that was drawing into it ("the standard round draws the
+    // demo's BOLT" red on the first full gate). A dormant store is not a
+    // private draw buffer. The setter owns a list of its own.
+    if (window.DemoRender && DemoRender.setNetRounds) DemoRender.setNetRounds(NETV.rounds);
+
     // --- spawn groups: the portals and the incoming markers draw from the
     // same fields the sim's own groups carry
     NETV.groups = s0.groups.map((g) => ({
@@ -2670,10 +3256,21 @@
   let appliedTick = -1;
   function fireEvents() {
     while (evq.length && evq[0].tick <= pt) {
-      const { tick, e } = evq.shift();
-      if (tick < pt - 30) continue; // a resume after a pause drops the stale
-                                    // half-second's cues silently instead of
-                                    // playing a backlog as one burst
+      const { tick, e, rel } = evq.shift();
+      // THE SECOND DROP POINT, and it is skipped for a RELIABLE entry (R2.9).
+      // A resume after a pause drops the stale half-second's COSMETIC cues
+      // silently instead of playing a backlog as one burst — but a replayed
+      // `death` must still blow up the hull it belongs to, and since the split a
+      // `roundSpawn` older than 30 ticks must still seed its round or the client
+      // has a permanent hole in its derived store.
+      if (!rel && tick < pt - 30) continue;
+      if (rel) evStats.replayed += 1;
+      // THE MEMBERSHIP IS TAKEN BEFORE THE INTAKE, and it has to be: the
+      // intake DROPS the round, so asking the store afterwards always answers
+      // "no" and the spark below would never fire. (Measured on the first
+      // draft: N3 went dark.)
+      const wasKernelRound = e.k === "roundDeath" && derivedRounds.has(e.id);
+      applyDerivedEvent(e, tick);
       const at = Number.isFinite(e.x) ? { x: e.x, y: e.y } : null;
       // the local seat's own fire and thud already sounded on the PREDICTED
       // edge (predTickK's cueing fx), so the wire's copy is the same shot a
@@ -2708,7 +3305,24 @@
       // and a net client never restarts its own encounter — that marker is the
       // only signal this layer gets that the authority cut the run. FX.cue
       // refuses a positionless cue itself, so nothing else reaches ink.
-      if (e.k !== "termChange" && window.FX) FX.cue({ kind: e.k, at, gain: e.g, seat: e.seat });
+      // r7b (O2.3, and D64's row is the shape it raises): a wire `roundDeath`
+      // sparks only for a DESTRUCTION — `shot`, `contact` (the kernel's own word
+      // is `impact`) and `aura`. A CONSTRUCT's `split`/`expire` is an end the
+      // client could see coming, and a `reaped` round was taken by something
+      // that destroyed nothing; both drop the round silently. The row's own
+      // `clay` hue stands in, because `col` is NOT a schema field — js/wire.js's
+      // event row does not carry one — and js/encounter.js says exactly that
+      // where `col` is declared: "a ?mp client draws the row's own fallback hue".
+      //   ...AND THE SPARK IS THE KERNEL ROUND'S TELL AND NOTHING ELSE (r7b
+      // FIX 1). A PLAYER bullet's own end already draws production's `hit` fx,
+      // and a second spark per landed shot is a look change nobody ruled — so
+      // the gate asks the DERIVED-ROUND store, which holds kernel rounds only.
+      // An id neither store knows (a round this client never saw spawn) draws
+      // nothing, which is the honest answer rather than a guess.
+      const destroyed = e.k !== "roundDeath" ||
+        ((e.reason === "shot" || e.reason === "contact" || e.reason === "aura") &&
+         wasKernelRound);
+      if (e.k !== "termChange" && destroyed && window.FX) FX.cue({ kind: e.k, at, gain: e.g, seat: e.seat });
       // the comet instrument's hurt half. game.js's drainCues() carries the
       // same call, and in net mode the local sim never steps, so this is the
       // only one that ever runs here. The third argument says whether this
@@ -2733,8 +3347,35 @@
       // net client does not step: the client's signature is its blocking count
       // alone until R7 puts a body's kind and state on the wire. See
       // `js/encounter.js`'s `stallSignature` for the whole R7 bill.)
-      if (e.k === "hit" || e.k === "boom") spawnImpactFx(at.x, at.y, 0, -1, "enemy");
-      else if (e.k === "clang" || e.k === "wall") spawnImpactFx(at.x, at.y, 0, -1, "wall");
+      // `boom` and `clang` are DELETED as disjuncts here (R2.9). A census over
+      // js/ server/ tests/ test/ finds no producer of either: neither name
+      // appears in an `emit(` or a `sink.cue(` call anywhere in the tree, and
+      // neither is a row in js/wire.js's EVENT_KINDS, so the encoder would
+      // REFUSE one with a metric before it could reach this line. The only live
+      // mentions left are three CUE-NAME lists in tests/audio-checks.js, which
+      // are the audio plane's own vocabulary and not this stream's.
+      //   THE RETIRED-D45 BURST IS DELETED HERE (r7c commit 9, R3.9,
+      // S-pfeza7). What stood on the `hit` arm was
+      //     if (e.k === "hit") spawnImpactFx(at.x, at.y, 0, -1, "enemy");
+      // and that is the EXACT CALL D45 deleted in production. js/encounter.js
+      // records the deletion by name at its own site: "production's clay impact
+      // burst is GONE from this branch. A hit on a kernel body used to paint 23
+      // particles, 21 of them production's own orange, over the two the kernel
+      // spawns in the body's colour. The kernel's pair is the whole tell now,
+      // which is what the demo draws."
+      //   IT SURVIVED HERE BECAUSE `?mp` WAS NOT SHIPPING. R7 ships it, and a
+      // net client painting 21 orange particles over a kernel hit that a solo
+      // client paints two for is the same wrong look D45 removed, on the one
+      // surface nobody was looking at.
+      //   THE CUE ITSELF STAYS, exactly as production kept `emit("hit")`: the
+      // FLASH is still raised (js/fx.js's `hit` row is `flash: 0.35`), and the
+      // sound and the light layer read the same event. This is a PARTICLE
+      // decision, not a channel one — which is production's own sentence for it.
+      //   `wall`, `blast` AND `death` KEEP THEIRS. D45 zeroed `kill`,
+      // `killheavy` and `hit` and deleted the enemy impact burst; it touched
+      // neither the wall spark nor the PvP blast, and tests/net-checks.js's
+      // light-layer leg is staged on `blast` for exactly that reason.
+      if (e.k === "wall") spawnImpactFx(at.x, at.y, 0, -1, "wall");
       else if (e.k === "blast") spawnImpactFx(at.x, at.y, 0, -1, "blast", blastRadiusNow());
       // a SEAT dying — the event carries the seat that paid, so this client
       // blows up every hull that goes, not only the one it happens to fly.
@@ -2825,6 +3466,26 @@
     // back to Player-N on a nameless row.
     seatSkin: (s) => (Number.isInteger(s) && s >= 0 && s < seatSkins.length
       ? seatSkins[s] : null),
+    // ...and THIS client's own market hand (R7 / r7c commit 5, D37). It is not
+    // a roster read and takes no seat argument: `you`'s seated branch carries
+    // ONE hand, this client's, so there is no other seat to ask about. The
+    // panel reads it to draw the four rows it may actually buy — the shelf the
+    // SERVER will honour, rather than whatever a local encounter happened to
+    // deal itself.
+    //   COPIES, not the live arrays: a caller that spliced the answer would be
+    // editing this client's record of what it holds.
+    // D39's stall, as the SERVER decided it (r7c commit 7). js/encounter.js's
+    // count line reads this through its own cross-seam helper, so a net client
+    // draws the room's answer instead of its own culled body census.
+    stalled: () => netStalled,
+    // the SERVER's clear-hold length in ticks, or 0 where no snapshot has said.
+    // js/encounter.js's NEXT WAVE IN countdown reads this and falls back to its
+    // own ECFG.clearHold on the zero — a client cannot count down a break it
+    // has not been told the length of, and its own dial is the only other
+    // number it has.
+    hudHold: () => netHold,
+    hand: () => (seatHand === null ? null : seatHand.slice()),
+    handBought: () => (seatBought === null ? null : seatBought.slice()),
     // ...and THIS client's own name, which is not a roster read: a seatless
     // client has no row on the board and no entry in `names`, and the claim
     // card is exactly the screen where a name is worth asking for. It follows
@@ -2863,6 +3524,19 @@
     buy: routeBuy,
     restart: routeRestart,
     stats: () => ({ url, sent, snaps, stale, pt, ptPrev, vtDrawn, ntick,
+      // v11 (R2.2): the tick of the newest marker the predictor cut on. It is
+      // the EVENT's tick and not the delivering snapshot's, which is the whole
+      // difference a replayed marker makes.
+      cutTick: lastCutTick,
+      // ...and WHICH FIELDS the last `you` carried (r7c FIX F12). A copy, so a
+      // caller that spliced the answer would not be editing this client's
+      // record of what it was sent. Adding a key to this object is safe — the
+      // census rule is that `test/tools/` is grepped before one is REMOVED.
+      youKeys: lastYouKeys ? lastYouKeys.slice() : null,
+      // ...and the EVENT PLANE's own five (R2.9). Adding a key to this object is
+      // safe — the census rule is that `test/tools/` is grepped before one is
+      // REMOVED, not before one is added.
+      ev: { ...evStats },
       buffered: buf.length, newest: buf.length ? buf[buf.length - 1].tick : -1,
       snapshotGapMs: lastSnapGap, snapshotGapP95Ms: gapP95(),
       // the ADAPTIVE buffer's two instruments: the live (fractional) target
@@ -2878,7 +3552,17 @@
       // real bound instead of restating it — the `POINTER_MAX` idiom. It is a
       // single fallback since PORT-S S3b lane 3 commit D4 (the per-wave stat
       // table retired with the roster); R7 re-cuts it per class.
-      bodyCap: BODY_CAP_FALLBACK,
+      // the decoded body's speed CEILING, published so a check can name the
+      // real bound instead of restating it. It is the WIDEST of the per-class
+      // ceilings from r7a commit 6 — one number a rig can read, derived from
+      // the same table the per-body guard uses rather than from a retired
+      // constant. bodyCapOf(kind) answers the per-class one.
+      bodyCap: (() => {
+        const T = kernelStats();
+        if (!T) return BODY_R_UNKNOWN * 7.5 / 60 * CAP_HEADROOM;
+        return Math.max(...Object.keys(T).map((k) => enemyCap(k)));
+      })(),
+      bodyCapOf: (kind) => enemyCap(kind),
       open: !!(ws && ws.readyState === 1),
       // identity — and the input the server has RESOLVED: ack is the highest
       // contiguous n it banked or explicitly discarded, so ntick − ack is what
@@ -2966,11 +3650,39 @@
       clearInterval(pingTimer); // the RTT probe stands down with the socket
       pendingInputs.length = 0;
       if (ws) ws.close(1000);
+      clearDerived();  // ...and the renderer's round handle with the stores
       note("NET closed by the client", false);
     },
     // test seam, nothing shipped calls it: feed one decoded snapshot into the
     // buffer as if the socket delivered it — the one honest way to demonstrate
     // the newest-wins drop, since loopback TCP never reorders on demand
     inject: (s) => onSnapshot(s),
+    // ...and its v11 SIBLING (R1.9). `inject` takes an OBJECT and every one of
+    // its 65 call sites survives; `decode` takes REAL BYTES and hands back the
+    // same object, so a leg can feed the wire's own output through the client's
+    // own decoder into the client's own apply — the gate's first true
+    // end-to-end trip. Before this the browser suite hand-built the object the
+    // decoder was supposed to produce, and the decoder itself was covered by
+    // nothing that ran in a browser.
+    decode: (bytes) => Wire.decode(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)),
+    // THE DERIVED PLANE'S TEST SEAM (R7 / O2.2, O3). Nothing shipped calls it.
+    // Until r7b emits the four event kinds these stores have NO PRODUCER, and
+    // the determinism legs are what drives them: seed a round, advance N ticks,
+    // read the poses back, and compare against the kernel's own run.
+    __derived: {
+      // the pending-event queue itself, so a leg can read what SURVIVED a trim
+      // rather than inferring it from a counter (R2.9's own claim is about the
+      // queue's CONTENTS, and a counter cannot say which entries went)
+      evq: () => evq.map((q) => ({ tick: q.tick, rel: q.rel, e: q.e })),
+      // THE SHIPPED CONSUMER ITSELF (r7b commit 8), not a copy: fireEvents
+      // calls this same function for every drained event.
+      apply: (e, tick) => applyDerivedEvent(e, tick),
+      seedRound, seedOrb, seedShot, dropRound, dropOrb, dropShot, clearDerived,
+      shots: () => [...derivedShots.values()],
+      step: (tick, sweeping) => stepDerived(tick, !!sweeping),
+      setTick: (t) => { derivedTick = t; },
+      rounds: () => [...derivedRounds.values()],
+      orbs: () => [...derivedOrbs.values()],
+    },
   };
 })();

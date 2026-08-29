@@ -4312,6 +4312,8 @@
   var childBodies = [];
 
   function pushEnemyRound(bullet) {
+    cueRoundSpawn(bullet);   // r7b (O2.1): ONE funnel, so ONE emit covers both of
+                             // spawnEnemyBullet's pushes AND every staged child
     if (childStaging) { childRounds.push(bullet); return bullet; }
     S.bullets.push(bullet);
     return bullet;
@@ -4346,6 +4348,67 @@
   }
 
   function pendingChildren() { return childRounds.length + childBodies.length; }
+
+  // ---- THE FOUR RELIABLE EMITS (r7b, O2/O3) -------------------------------
+  // THE KERNEL SPEAKS THE WIRE'S REASON WORDS HERE AND NOWHERE ELSE. This file
+  // says `impact`, `timer` and `expiry`; js/wire.js's DEATH_REASONS says
+  // `contact`, `split` and `expire`, and its encoder does `indexOf(ev.reason)`
+  // with NO mapping of its own — a kernel word handed straight to it would
+  // count a clamp and cross as index 0, which is `shot`. So the map is a table
+  // right here, named once, and every emit below goes through it.
+  //   O2's own clause says "the codec maps at the encoder", and the SEAT RULED
+  // (r7b FIX 13, review row R-8) that the clause is a FALSE PREMISE about r7a's
+  // tree rather than a rule this file breaks: `payloadOf` translates nothing, so
+  // obeying the letter would have clamped `impact`/`timer`/`expiry` to index 0 —
+  // `shot` — and inverted the FX gate that reads the reason. O2.12 barred a
+  // js/wire.js edit in this lane in any case, and this map is a cue-side
+  // constant that moves no hash. It stays where it is, pinned by K1.
+  const DEATH_REASON_WIRE = { shot: "shot", impact: "contact", timer: "split", expiry: "expire" };
+
+  // A cue is NOT hashed and leaves this simulation entirely (killEnemy's own
+  // block says so for `kill`), which is why every one of these is a call and
+  // never a write. `rec` is the WIDE record js/encounter-host.js's routeCue
+  // forwards and js/encounter.js's emit spreads FLAT onto the event — the
+  // encoder reads a roundSpawn's fields off the event itself, so a nested
+  // record would be invisible to it.
+  function cueRoundSpawn(b) {
+    sink.cue("roundSpawn", { x: b.x, y: b.y, rec: {
+      id: b.id, kindName: b.kind, x: b.x, y: b.y, vx: b.vx, vy: b.vy,
+      life: b.life, ownerId: b.ownerId || 0,
+      curve: b.curve || 0, wiggle: b.wiggle || 0, specialTimer: b.specialTimer || 0 } });
+  }
+  // `col` is the ONE field on this record with a live reader: js/fx.js bends the
+  // KINDS row's `hue` on `ev.col` through `PAL.kernel`, which is how D64's spark
+  // wore the round's own colour. It rides here because r7b FIX 2 deleted
+  // production's own emit — one producer, and the colour travels with it. The
+  // WIRE row carries no `col` (js/wire.js's ROW_EVENT has no slot for one), so a
+  // ?mp client draws the row's clay fallback and a SOLO client draws the round's
+  // colour, which is PORT-P addendum item 3's accepted state.
+  //   THE FIRING SEAT IS DELIBERATELY NOT CARRIED. `seat` on a `roundDeath` has
+  // ZERO readers at this tip — js/fx.js discards it (`ride` is set on `fire`
+  // alone), js/audio.js's CUES has no `roundDeath` row, and every `ev.seat` read
+  // in js/net.js and server/server.js is kind-guarded — so it would be a field
+  // with no reader on a frozen reliable row.
+  function cueRoundDeath(b, reason) {
+    sink.cue("roundDeath", { x: b.x, y: b.y,
+      rec: { id: b.id, reason: reason, col: b.color } });
+  }
+  // ONE EVENT PER KILL (O2.11), read off the LAST `n` entries of S.orbs — they
+  // are the ones the loop above just pushed, their ids are consecutive from
+  // `nextId` (one draw per orb, no other consumer between them) and their
+  // `value` differs by one across the batch whenever xpTotal % count is not 0,
+  // which is why `value` rides the PER-ORB tuple and not the batch.
+  function cueOrbSpawn(x, y, n) {
+    const orbs = [];
+    for (let i = S.orbs.length - n; i < S.orbs.length; i++) {
+      const o = S.orbs[i];
+      orbs.push({ id: o.id, vx: o.vx, vy: o.vy, value: o.value });
+    }
+    sink.cue("orbSpawn", { x: x, y: y, rec: { x: x, y: y, life: ORBLIFE, orbs: orbs } });
+  }
+  function cueOrbPickup(o, seat) {
+    sink.cue("orbPickup", { x: o.x, y: o.y, seat: seat, rec: { id: o.id, seat: seat } });
+  }
 
   function spawnEnemyBullet(e, angle, kind) {
     // ---- THE CAP, AND IT REJECTS NOW (R6 commit F(b)) ---------------------
@@ -4507,68 +4570,116 @@
     return bullet;
   }
 
+  // ---- THE FLIGHT STEP, EXPORTED ONCE (R7 / O2.2) --------------------------
+  // ONE COPY OF THE ARITHMETIC, called by the kernel here and by the net
+  // client's derived-round store through the API below. Under the BALLISTIC
+  // SPLIT sixteen of the ladder's twenty kinds have a flight FIXED AT SPAWN, so
+  // they ride the wire as a spawn event and the client runs THIS FUNCTION to
+  // know where they are. Two copies of it would be two answers to the same
+  // question, one of them on the screen the player is watching.
+  //
+  // IT IS MOVEMENT ONLY, and that is the contract, not an accident of where the
+  // lines happened to sit:
+  //   IN   the life / homingDelay / armed decrements, the specialTimer
+  //        countdown, the seek, the curve, the wiggle, the integrate, and the
+  //        report that the round left the arena.
+  //   OUT  every CALL. It does not explode a round, spawn a child, burst, or
+  //        touch a particle. It RETURNS a terminal reason and the CALLER
+  //        decides — because explodeEnemyBullet spawns up to seven children and
+  //        a client may never derive a spawn (O2.1). A step that could spawn
+  //        would make the client's store manufacture ordnance the server never
+  //        fired.
+  //   OUT  the seek TARGET. The client has no pilots to target and never
+  //        enters that branch; the kernel passes its own `pilotAt`. It is
+  //        passed as a FUNCTION rather than a value because the original order
+  //        asks for the target AFTER homingDelay is decremented, and this
+  //        function's whole safety argument is that the order does not move.
+  //
+  // Returns "split" | "expire" | "wall" | null.
+  function flyRound(b, dt, time, seekAt) {
+    b.life -= dt;
+    b.homingDelay = Math.max(0, (b.homingDelay || 0) - dt);
+    b.armed = Math.max(0, (b.armed || 0) - dt);
+    if (b.specialTimer > 0) {
+      b.specialTimer -= dt;
+      if (b.specialTimer <= 0 && (b.kind === "spitOrb" || b.kind === "splitter")) return "split";
+    }
+    if (b.life <= 0) return "expire";
+    if (b.team === "enemy") {
+      // AIMED, and the aimer is the ROUND rather than a body: a seeker in
+      // flight has left whoever fired it, so it asks D18 from its OWN
+      // position and re-asks every tick. `targetOf` is not available here
+      // and must not be — updateBullets is a phase of its own and there is
+      // no body slice to be inside.
+      //
+      // The mask on PILOT_POLICY is SHIP, which is also D25's own rule for
+      // what homing may take. The two agree by construction rather than by
+      // two lists that have to be kept the same.
+      const seek = b.homing && b.homingDelay <= 0 && seekAt ? seekAt(b.x, b.y) : null;
+      if (seek && seek.alive) {
+        if (b.acceleration) {
+          b.speed = Math.min(b.maxSpeed, b.speed + b.acceleration * dt);
+        }
+        const desired = Math.atan2(delta(b.y, seek.y, H), delta(b.x, seek.x, W));
+        const current = Math.atan2(b.vy, b.vx);
+        const angle = rotateToward(current, desired, b.homing * dt);
+        b.vx = Math.cos(angle) * b.speed;
+        b.vy = Math.sin(angle) * b.speed;
+      } else if (b.curve) {
+        const speed = Math.hypot(b.vx, b.vy);
+        const angle = Math.atan2(b.vy, b.vx) + b.curve * dt;
+        b.vx = Math.cos(angle) * speed;
+        b.vy = Math.sin(angle) * speed;
+      }
+      if (b.wiggle) {
+        const speed = Math.hypot(b.vx, b.vy);
+        const angle = Math.atan2(b.vy, b.vx) + Math.sin(time * 8 + b.id * 0.71) * b.wiggle * dt;
+        b.vx = Math.cos(angle) * speed;
+        b.vy = Math.sin(angle) * speed;
+      }
+    }
+    if (WORLD_BOUNDED) {
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      if (b.x < -64 || b.x > ARENA_W + 64 || b.y < -64 || b.y > ARENA_H + 64) return "wall";
+    } else {
+      b.x = wrap(b.x + b.vx * dt, W);
+      b.y = wrap(b.y + b.vy * dt, H);
+    }
+    return null;
+  }
+
+  // ...and the ORB's drift, the same way and for the same reason (O3): an orb
+  // nobody is pulling is a scatter velocity and this damping, so the client
+  // derives it from the spawn batch rather than being told sixty times a second.
+  function dampOrb(o, dt) {
+    o.vx *= Math.pow(0.982, dt * 60);
+    o.vy *= Math.pow(0.982, dt * 60);
+  }
+
   function updateBullets(dt) {
     const bulletCount = S.bullets.length;
     for (let i = 0; i < bulletCount; i++) {
       const b = S.bullets[i];
       if (b.dead) continue;
       setPrevious(b);
-      b.life -= dt;
-      b.homingDelay = Math.max(0, (b.homingDelay || 0) - dt);
-      b.armed = Math.max(0, (b.armed || 0) - dt);
-      if (b.specialTimer > 0) {
-        b.specialTimer -= dt;
-        if (b.specialTimer <= 0 && (b.kind === "spitOrb" || b.kind === "splitter")) {
-          explodeEnemyBullet(b, "timer");
-          continue;
-        }
-      }
-      if (b.life <= 0) {
-        if (b.kind === "grenade" || b.kind === "spitOrb" || b.kind === "splitter") explodeEnemyBullet(b, "expiry");
-        else b.dead = true;
+      // THE STEP MOVES IT; THIS LOOP DECIDES WHAT THAT MEANS. Both terminal
+      // arms stay here, byte for byte, because both call out of the step.
+      const end = flyRound(b, dt, S.time, pilotAt);
+      if (end === "split") {
+        explodeEnemyBullet(b, "timer");
         continue;
       }
-      if (b.team === "enemy") {
-        // AIMED, and the aimer is the ROUND rather than a body: a seeker in
-        // flight has left whoever fired it, so it asks D18 from its OWN
-        // position and re-asks every tick. `targetOf` is not available here
-        // and must not be — updateBullets is a phase of its own and there is
-        // no body slice to be inside.
-        //
-        // The mask on PILOT_POLICY is SHIP, which is also D25's own rule for
-        // what homing may take. The two agree by construction rather than by
-        // two lists that have to be kept the same.
-        const seek = b.homing && b.homingDelay <= 0 ? pilotAt(b.x, b.y) : null;
-        if (seek && seek.alive) {
-          if (b.acceleration) {
-            b.speed = Math.min(b.maxSpeed, b.speed + b.acceleration * dt);
-          }
-          const desired = Math.atan2(delta(b.y, seek.y, H), delta(b.x, seek.x, W));
-          const current = Math.atan2(b.vy, b.vx);
-          const angle = rotateToward(current, desired, b.homing * dt);
-          b.vx = Math.cos(angle) * b.speed;
-          b.vy = Math.sin(angle) * b.speed;
-        } else if (b.curve) {
-          const speed = Math.hypot(b.vx, b.vy);
-          const angle = Math.atan2(b.vy, b.vx) + b.curve * dt;
-          b.vx = Math.cos(angle) * speed;
-          b.vy = Math.sin(angle) * speed;
-        }
-        if (b.wiggle) {
-          const speed = Math.hypot(b.vx, b.vy);
-          const angle = Math.atan2(b.vy, b.vx) + Math.sin(S.time * 8 + b.id * 0.71) * b.wiggle * dt;
-          b.vx = Math.cos(angle) * speed;
-          b.vy = Math.sin(angle) * speed;
-        }
+      if (end === "expire") {
+        if (b.kind === "grenade" || b.kind === "spitOrb" || b.kind === "splitter") explodeEnemyBullet(b, "expiry");
+        // r7b (O2.3): a CONSTRUCT's end of life crosses; a DERIVED kind's does
+        // not, because the client runs the same `life` countdown itself. The
+        // test is on `homing` and not on a kind list, so the fifth homing kind
+        // lights this with no code change and a derived kind never does.
+        else { if ((b.homing || 0) > 0) cueRoundDeath(b, DEATH_REASON_WIRE.expiry); b.dead = true; }
+        continue;
       }
-      if (WORLD_BOUNDED) {
-        b.x += b.vx * dt;
-        b.y += b.vy * dt;
-        if (b.x < -64 || b.x > ARENA_W + 64 || b.y < -64 || b.y > ARENA_H + 64) b.dead = true;
-      } else {
-        b.x = wrap(b.x + b.vx * dt, W);
-        b.y = wrap(b.y + b.vy * dt, H);
-      }
+      if (end === "wall") b.dead = true;
       b.trail = (b.trail || 0) - dt;
       if (b.team === "enemy" && b.trail <= 0) {
         b.trail = b.kind === "heavy" || b.kind === "serpentFire" || b.kind === "darkFire" || b.kind === "kineticLance" ? 0.018 : 0.04;
@@ -4590,6 +4701,7 @@
     const fake = { id: tracer.id, ownerId: tracer.id, x: orb.x, y: orb.y, vx: orb.vx * 0.2, vy: orb.vy * 0.2, r: 0, orbit: tracer.orbit };
     const base = Math.atan2(orb.vy, orb.vx);
     for (let i = 0; i < 4; i++) spawnEnemyBullet(fake, base + (i - 1.5) * 0.27, "flame");
+    cueRoundDeath(orb, "reaped");   // r7b: an EXTERNAL early end no client can derive
     orb.dead = true;
     orb.exploded = true;
     emitShockwave(orb.x, orb.y, "green", 8, 48, 0.38);
@@ -4598,6 +4710,13 @@
 
   function explodeEnemyBullet(b, reason) {
     if (!b || b.dead || b.exploded) return;
+    // r7b (O2.3), and the guard is a CONDITION on this one line. `shot` (which
+    // arrives only through production's door, js/encounter-host.js's
+    // damageKernelRound -> explodeRound) and `impact` cross for EVERY kind;
+    // `timer` and `expiry` cross for CONSTRUCTS only, because a derived kind's
+    // split and expiry are the client's own derivation and its children's
+    // roundSpawns mark the moment.
+    if (reason === "shot" || reason === "impact" || (b.homing || 0) > 0) cueRoundDeath(b, DEATH_REASON_WIRE[reason]);
     b.dead = true;
     b.exploded = true;
     const owner = findEnemy(b.ownerId);
@@ -4825,6 +4944,7 @@
           // childStaging is still up around this whole walk, so the aura's
           // BODY kills keep their contract unchanged; there is simply nothing
           // left for a round death to stage here.
+          cueRoundDeath(o, "aura");   // r7b: the DENIAL — a bare death, NO children
           o.dead = true;
           burst(o.x, o.y, o.color, 4, 62);
         }
@@ -4933,6 +5053,7 @@
             // its CAP SLOT is freed — commit B's freed-slot rule, with no code
             // of its own because reading the live count is all it ever needed.
             // A destroyed round is never "evicted"; it simply stops being live.
+            cueRoundDeath(o, "shot");   // r7b: D10's destruction tell
             o.dead = true;
             burst(o.x, o.y, o.color, 4, 62);
           }
@@ -4953,7 +5074,10 @@
           // them would re-key every round in every tick for no behaviour at all.
           damagePlayer(p, b.damage, b.x, b.y, SRC_SHOT);
           if (b.kind === "grenade" || b.kind === "spitOrb" || b.kind === "splitter") explodeEnemyBullet(b, "impact");
-          else b.dead = true;
+          // r7b: the BARE arm only. The `if` above reaches explodeEnemyBullet,
+          // which raises its own `contact` cue — cueing at the top of the fork
+          // would double-cue every splitting kind.
+          else { cueRoundDeath(b, DEATH_REASON_WIRE.impact); b.dead = true; }
           break;
         }
       }
@@ -5247,6 +5371,10 @@
       const value = Math.floor(xpTotal / count) + (i < xpTotal % count ? 1 : 0);
       spawnOrb(e.x, e.y, i, count, value);
     }
+    // r7b (O3/O2.11): ONE event per KILL, not one per orb — a 16-kill tick is
+    // 16 events and not 128. A drone's xpTotal is 0, so it drops nothing and
+    // emits nothing.
+    if (count > 0) cueOrbSpawn(e.x, e.y, count);
     // ...AND ITS DEATH, for the same reason. A body's death fires the generic
     // set — two bursts, fragments, a shockwave and a shake. A mine's detonation
     // has always been the GOLD PAIR and nothing else, and it never shook the
@@ -5359,7 +5487,10 @@
       }
       for (let i = 0; i < S.bullets.length; i++) {
         const bullet = S.bullets[i];
-        if (bullet.team === "enemy" && bullet.ownerId === e.id) bullet.dead = true;
+        if (bullet.team === "enemy" && bullet.ownerId === e.id) {
+          cueRoundDeath(bullet, "reaped");   // r7b: the second EXTERNAL early end
+          bullet.dead = true;
+        }
       }
       S.banner = 3.2;
       S.bannerText = (st.label || e.type.toUpperCase()) + "  //  DESTROYED";
@@ -5499,8 +5630,7 @@
         const ty = delta(o.y, t.y, H);
         if ((Math.hypot(tx, ty) || 1) < ORBRING) { taker = t; break; }
       }
-      o.vx *= Math.pow(0.982, dt * 60);
-      o.vy *= Math.pow(0.982, dt * 60);
+      dampOrb(o, dt);
       if (WORLD_BOUNDED) {
         o.x = clamp(o.x + o.vx * dt, 0, ARENA_W);
         o.y = clamp(o.y + o.vy * dt, 0, ARENA_H);
@@ -5517,6 +5647,7 @@
         // across the sink.
         o.dead = true;
         sink.cue("pickup", { x: taker.x, y: taker.y, seat: seats().indexOf(taker) });
+        cueOrbPickup(o, seats().indexOf(taker));   // r7b (O3): the RELIABLE half
         particle(taker.x, taker.y, fxRange(-30, 30), fxRange(-30, 30), "gold", 0.35, 2, "spark");
       }
       // ...AND A CAPTURED ORB NEVER EXPIRES. It has been paid for; sweeping it
@@ -5917,7 +6048,19 @@
     // ...and the ATOMIC RESET's second half (FIX 10): apply a banked pose to
     // the record NOW, for a host that has just reset this kernel from inside
     // production's tick and cannot wait for a step to land the mirror.
-    applyPoseNow: applyPoseNow
+    applyPoseNow: applyPoseNow,
+    // ---- THE BALLISTIC SPLIT'S ONE COPY OF THE ARITHMETIC (R7 / O2.2) ------
+    // Published so the NET CLIENT's derived-round and derived-orb stores can
+    // run the same step the sim runs. Sixteen of the ladder's twenty round
+    // kinds have a flight fixed at spawn, so the wire sends a spawn event and
+    // the client runs THIS to know where the round is. Two copies would be two
+    // answers to one question, one of them on the player's screen.
+    //   flyRound is MOVEMENT ONLY and calls nothing: it returns
+    // "split" | "expire" | "wall" | null and the CALLER decides. The client's
+    // store DROPS a round on any of the three and NEVER SPAWNS — the children
+    // of a split arrive as their own spawn events (O2.1).
+    flyRound: flyRound,
+    dampOrb: dampOrb
   };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (typeof window !== "undefined") window.DemoKernel = API;

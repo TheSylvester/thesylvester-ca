@@ -381,6 +381,44 @@ MATRIX.aura[CLASS.AURA][CLASS.SHIP] = 0;     // OFF, and PENDING rather than
 // child spawned inside a burning comet dies the tick after it spawns instead of
 // landing. D26 calls that "part of the ruling"; §2.11 calls it "the law".
 
+// ---- THE PER-PRIMITIVE LAG POLICY (R4.4, VALUES BY OWNER RULING O7) --------
+// A PARALLEL TABLE, keyed by the SEVEN top-level kinds, declared BESIDE MATRIX
+// and published beside it. It is DATA ONLY: the sim reads nothing here and R7
+// builds NO COMPENSATION. What it records is which lag rule each primitive
+// takes, so the round that pays for them (R8a) edits a declaration rather than
+// deciding again.
+//
+// WHY A TABLE OF ITS OWN AND NOT A COLUMN ON MATRIX — measured three ways at
+// this tip, and each one on its own is decisive:
+//   sed -n '233,268p' js/engine.js   -> 7 top-level kinds: ram shot blast chain
+//                                       beam hit aura
+//   grep -c '^MATRIX\.' js/engine.js -> 30 lines: 11 namespace inits (= {})
+//                                       and 19 CELLS
+//   js/engine.js applyEffect         -> `const f = mayHit(...); amount *= f;`
+// A CELL IS A NUMBER the sim MULTIPLIES INTO `amount`. A key written there is
+// NaN in the sim and moves the golden. And tests/wave1-checks.js walks
+// `Object.keys(Engine.MATRIX)` reading `MATRIX[k][C.AURA]`, asserting exactly
+// one kind carries an aura row — a parallel table leaves that shipped leg
+// untouched; a key inside MATRIX would not.
+const LAG = {
+  ram:   "none",              // BODY CONTACT is live-time: neither side owns the
+                              // clock. The star eater's TAIL is a BODY->SHIP
+                              // contact, so it is this row and not `hit`'s.
+  shot:  "projectileRebate",  // the SHIP->SHIP arm that ALREADY EXISTS and is
+                              // capped — js/encounter.js's rebate -> applyRebateHits.
+  blast: "hitscanRewind",     // O7, in the owner's words: "the rules for this
+  chain: "hitscanRewind",     // Halo should be the same as the rules for a
+  beam:  "hitscanRewind",     // hitscan weapon". An INSTANT or AREA source
+  hit:   "none",              // resolves against the TARGET'S REWOUND POSE —
+  aura:  "hitscanRewind",     // once for a shot, EVERY TICK for an aura.
+};
+// O7 SUPERSEDES R4.4's earlier `aura: none`, and R8a is the round that pays
+// this table. In R7 the comet's contact stays live-time and S-jj3vd5's sentinel
+// is untouched.
+//   `blocksRewind` is DROPPED from the contract (R4.4): it had no subject at
+// this tip — PARRYABLE_KINDS has zero sim readers — and R8a re-declares it with
+// the parry. The pose ring stays {x, y, alive}; R7 adds no field to it.
+
 // D1 IN FULL (owner-ruled): player -> player splash is ON at factor 1.0. A
 // splashed rival is treated exactly like an enemy body by the blast, and then
 // walks through hitPlayer's own gates (invuln, the comet negation, dead) like
@@ -957,9 +995,9 @@ function substream(runSeed, waveId, spawnOrdinal, entityId, attackSequence, purp
 // ---- THE KIND REGISTRY (P2 `unit-list`, P9 `present-class`) ----------------
 // The declaration plane for every entity the two simulations field. One row per
 // KIND, seven obligations per row, and the row is the place a later round reads
-// instead of re-deriving. R7 compiles its codec from here. PORT-S was to
-// compile the merged list from here and instead DELETED three of the four
-// arrays — see the block below.
+// instead of re-deriving. R7's codec is js/wire.js; this registry NAMES which
+// schema row each kind crosses under. PORT-S was to compile the merged list
+// from here and instead DELETED three of the four arrays — see the block below.
 //
 // ---- WHAT THIS WAS NOT, AND THE DEBT THAT IS NOW DISCHARGED ---------------
 // The plan's sentence is *"the four arrays (bullets, enemies, missiles, orbs)
@@ -1018,8 +1056,8 @@ function substream(runSeed, waveId, spawnOrdinal, entityId, attackSequence, purp
 //               registry-driven hash consumer would have folded P1's block out
 //               of existence and nothing would have said so. The pointer oracle
 //               validates every name in the list.
-//   wire        the wire row encoder, by name, or null for a kind that does not
-//               replicate. R7 compiles from this column.
+//   wire        the SCHEMA ROW a kind crosses under, by name, or null for one
+//               that does not. js/wire.js is NAMED by it, never built from it.
 //   present     P9. The presentation lane the kind is drawn through — which
 //               PRES cache on production, which draw pass in the demo.
 //   clear       `{ store, onRestart }` — the collection the kind lives in, and
@@ -1059,7 +1097,7 @@ function substream(runSeed, waveId, spawnOrdinal, entityId, attackSequence, purp
 //                 contents consumer was to be PORT-S's merged fold; there is
 //                 no merged fold, so this column STAYS DESCRIPTIVE and R7's
 //                 codec is the next round that could read it.
-//     wire      — R7 compiles the codec from this column. Nothing reads it now.
+//     wire      — the schema ROW name js/wire.js carries. READ since commit 13.
 //     present   — the retirement's own readers cross at `Encounter.mapState()`
 //                 rather than at this column, so it is still descriptive. R7.
 //     ownerDeath— still nothing reads it, and the two divergences it already
@@ -1187,7 +1225,7 @@ const CLEAR_ROLE = { BLOCKER: "blocker", NEVER: "never", UNTIL_ATTACK: "untilAtt
 function kernelBody(present, clearRole, spentState) {
   return {
     hash: { where: "test/tools/demo-serial.js", fields: "INCLUDED S.enemies (whole record, keys sorted)", guarded: [] },
-    wire: null,
+    wire: "bodies",
     present: present,
     clear: { store: "S.enemies", onRestart: "cleared" },
     cap: UNCAPPED,
@@ -1202,7 +1240,14 @@ function kernelBody(present, clearRole, spentState) {
 function kernelRound(hp) {
   return {
     hash: { where: "test/tools/demo-serial.js", fields: "INCLUDED S.bullets (whole record, keys sorted)", guarded: [] },
-    wire: null,
+    // R7 (r7a commit 13): the schema ROW this kind crosses under, and it is
+    // `rounds` for ALL TWENTY-ONE — but only the FOUR HOMING kinds ride that
+    // row per tick. The other sixteen have a flight FIXED AT SPAWN, so they
+    // cross as a reliable `roundSpawn` event and the client DERIVES them from
+    // the kernel's own exported step (O2, THE BALLISTIC SPLIT). The column
+    // names the row, not the cadence; js/wire.js's CONSTRUCT_KINDS names which
+    // kinds ride it, and it is pinned to spawnEnemyBullet's own `homing`.
+    wire: "rounds",
     present: "demo-render drawBullet",
     clear: { store: "S.bullets", onRestart: "cleared" },
     // 280 SHARED, and it is the kernel's one cap. It was the contract's only
@@ -1240,13 +1285,22 @@ const KINDS = {
     // PORT-S's rather than this round's.
     bolt: {
       hash: { where: "js/game.js", fields: "BULLET_HASH", guarded: ["BULLET_HASH_GUARDED", "BULLET_ORDNANCE_GUARDED"] },
-      wire: "server/snapshot.mjs encodeBullet",
+      // R7 (r7a commit 13): THE ROW, not a function name. This said
+      // "server/snapshot.mjs encodeBullet" — a symbol that existed NOWHERE, in
+      // a column the registry's own doc block listed as having no consumer. It
+      // has one now, and the both-directions leg below reds if a row names a
+      // schema row js/wire.js does not carry.
+      wire: "bullets",
       present: "PRES.bullets",
       clear: { store: "G.bullets", onRestart: "cleared" },
       // BMAX 20 (PORT-F / OPEN 2, WAS 15), OWNER-SCOPED so one seat can never
       // starve another. A HAND MIRROR of js/game.js BMAX: engine.js loads before
-      // game.js, so it cannot read the live value; R7a's registry<->schema leg pins
-      // the pair. The ONLY other hand mirror in the tree is server.js DAMP_STOCK.
+      // game.js, so it cannot read the live value. PORT-F's own leg in
+      // test/node-golden.mjs pins the pair ("the registry's bolt cap is the SAME
+      // number as js/game.js BMAX — the hand mirror cannot drift"), so r7a adds
+      // no second copy of that check: a second copy would be a second thing to
+      // keep in step, which is the failure both legs exist to prevent. The ONLY
+      // other hand mirror in the tree is server.js DAMP_STOCK.
       cap: capped(CAP.OWNER, 20, "js/game.js BMAX / fire()",
         "rejectNewest: conforms — fire() returns and nothing is evicted. " +
         "DEBT, two clauses: the attempted cooldown is NOT billed (P.cool is set " +
@@ -1261,7 +1315,7 @@ const KINDS = {
     // (the harrier's seeker RETIRED at commit D4 with the plane that fired it)
     orb: {
       hash: { where: "js/encounter.js", fields: "ORB_HASH", guarded: [] },
-      wire: "server/snapshot.mjs encodeOrb",
+      wire: "orbs",   // ...and the second dangling string (it named `encodeOrb`)
       present: "PRES.orbs",
       clear: { store: "E.orbs", onRestart: "cleared" },
       cap: UNCAPPED,
@@ -1334,7 +1388,7 @@ const KINDS = {
     // and it is uncapped — today's truth, and commit F does not change it.
     bolt: {
       hash: { where: "test/tools/demo-serial.js", fields: "INCLUDED S.bullets (whole record, keys sorted)", guarded: [] },
-      wire: null,
+      wire: "rounds",
       present: "demo-render drawBullet",
       clear: { store: "S.bullets", onRestart: "cleared" },
       cap: UNCAPPED,
@@ -1354,7 +1408,9 @@ const KINDS = {
     // declaration and not balance — PORT-S tunes it with the rest.
     mine: {
       hash: { where: "test/tools/demo-serial.js", fields: "INCLUDED S.enemies (whole record, keys sorted)", guarded: [] },
-      wire: null,
+      // a BODY since R6 — spawnEnemyBullet THROWS on `mine` — so it crosses on
+      // the bodies row and is in js/wire.js's BODY_TYPES, not ROUND_KINDS.
+      wire: "bodies",
       present: "demo-render drawEnemy",
       clear: { store: "S.enemies", onRestart: "cleared" },
       // THIS IS A LAY-ATTEMPT THRESHOLD, NOT A LIVE-POPULATION CEILING, and
@@ -1457,7 +1513,10 @@ const KINDS = {
     // ---- the pickup --------------------------------------------------------
     orb: {
       hash: { where: "test/tools/demo-serial.js", fields: "INCLUDED S.orbs (whole record, keys sorted)", guarded: [] },
-      wire: null,
+      // ...and an orb crosses on `orbs` — but only while PULLED (O3). Same
+      // rule as a round: the column names the ROW, and js/wire.js decides the
+      // cadence.
+      wire: "orbs",
       present: "demo-render drawOrb",
       clear: { store: "S.orbs", onRestart: "cleared" },
       cap: UNCAPPED,
@@ -1625,8 +1684,8 @@ const Engine = {
   applyEffect,
   mayHit,
   // The registry, published on the MATRIX's footing: a declaration plane is only
-  // a plane if something can read it. The completeness leg walks it, commit F's
-  // cross-check reads its `hp` column, and R7 compiles its codec from `wire`.
+  // a plane if something can read it. The completeness leg walks it and reads
+  // `hp`; `wire` NAMES the schema row a kind crosses under in js/wire.js.
   KINDS,
   OBLIGATIONS,
   OWNER_DEATH,
@@ -1658,6 +1717,11 @@ const Engine = {
   // sabotage, and it is also the demonstration that the row is CONSULTED
   // rather than decorative. Nothing in the shipped game writes here.
   MATRIX,
+  // ...and the LAG table on MATRIX's own footing, for MATRIX's own reason: a
+  // declaration plane is only a plane if something can read it. The
+  // both-directions leg in test/node-golden.mjs walks it against MATRIX's top
+  // level, so a kind added to one and not the other reds by name.
+  LAG,
   acquire,
   // ...and the acquire masks, published on the MATRIX's footing and for the
   // same reason: D25's whole cost argument is that reversing it must be a
