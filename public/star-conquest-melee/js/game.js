@@ -11,7 +11,7 @@
 // x2.5 with the field, and D50 (PORT-F) then took it to the demo's own
 // numbers: top speed 4.0833 px/tick (245 px/s — the slider drives it live),
 // gains 0.005/0.005 against KEYTHRUST 14.5 (0.0830125 px/tick², ~91 ticks
-// from rest to top), a per-tick velocity retention of 0.985, and a
+// from rest to top), a per-tick velocity retention of 0.995, and a
 // flick curve that amplifies fast deltas — a quick flick snaps the heading
 // while slow motion stays precise. Impulses split against the current heading:
 // ACCEL drives the along component (speed up / brake), TURN the across one
@@ -102,11 +102,16 @@ let TURN = 0.005;       // D50 (PORT-F): TURN MOVES WITH ACCEL, always. WAS 0.03
 let FLICK = 0.01;       // flick curve — gain × (1 + |delta| × FLICK); a 100-count flick doubles its push.
                         // No slider — a let only so the measurement harness (__test.setFlick) can
                         // isolate the curve from the heading resample; the default never moves here
-let DAMP = 0.985;       // per-tick velocity retention — the demo's own drag, not 1.
+let DAMP = 0.995;       // per-tick velocity retention — the demo's own drag, not 1.
                         // ---- A DIAL WHOSE DEFAULT THE OWNER HAS MOVED (D50, PORT-F) ----
                         // It was a `const 1`, became a `let` with a slider at the SAME 1 in
-                        // PORT-S S5 commit G, and D50 takes it to 0.985 = Math.pow(0.985,
-                        // dt*60) at dt = 1/60 (demo-v2/sim.js:852, js/demo-kernel.js:2943).
+                        // PORT-S S5 commit G, D50 took it to 0.985 = Math.pow(0.985,
+                        // dt*60) at dt = 1/60 (demo-v2/sim.js and the kernel's own drag line),
+                        // and D65 (PORT-P) takes it to 0.995 — the FIRST flight value moved
+                        // OFF the reference by FEEL, on the owner's word at PORT-P's fly.
+                        // The shipped ship no longer matches the reference ship on this dial:
+                        // a STATED DEPARTURE, not a defect. demo-v2 and js/demo-kernel.js both
+                        // keep 0.985 and both are still the replay authority they always were.
                         //
                         // THE PROGRAM'S PREMISE ABOUT IT WAS INVERTED, which is why the
                         // dial existed at all. The port program carried "production damps
@@ -115,16 +120,21 @@ let DAMP = 0.985;       // per-tick velocity retention — the demo's own drag, 
                         // hard cap; production had NO friction whatever, which is what a
                         // retention of exactly 1 means. A comet that never slows is a comet
                         // whose only brake is the wall — and that is the comet this default
-                        // has now retired: after D50 a released comet halves its speed every
-                        // 45.86 ticks (0.764 s) and is back to ordinary cruise 1.43 s later.
+                        // has now retired: after D65 a released comet halves its speed every
+                        // 138.28 ticks (2.30 s) and is back to ordinary cruise 4.33 s later.
                         //
                         // MOVING THE DEFAULT WAS A 13-TRACE RECAPTURE PLUS SELFCHECK, and it
                         // WAS the OWNER'S ruling at the gate, not a lane's. He made it on
                         // 2026-08-27 — "the playfeel of the last demo that I could play,
                         // based off demo-v2, felt a LOT better" — and PORT-F's own freeze
-                        // session pays that bill in one commit. The key drag-terminal
-                        // a*d/(1-d) = 5.4722 px/tick still exceeds VMAX, so the radial clamp
-                        // in integrateSlice() still binds (slider, flight tab)
+                        // session paid that bill in one commit, and D65's retune pays it
+                        // again at PORT-P's freeze. The key drag-terminal, RECOMPUTED from a =
+                        // KEYTHRUST 14.5 x ACCEL 0.005 x (1 + 14.5 x FLICK 0.01) = 0.0830125:
+                        // a*d/(1-d) = 0.0830125 x 199 = 16.52 px/tick, which still exceeds
+                        // VMAX, so the radial clamp in integrateSlice() still binds. (The
+                        // figure that stood here was NEVER the shipped 0.985 terminal — that
+                        // was 5.4512. It was 0.0833333 x 65.6667, the demo's IDEAL gain, so
+                        // it must be RECOMPUTED from a and never scaled.) (slider, flight tab)
 let KEYTHRUST = 14.5;   // D50 (PORT-F): the GRID half of the pair. 14.5 x ACCEL 0.005 x
                         // (1 + 14.5 x FLICK 0.01) = 0.0830125 px/tick². WAS 16. The exact
                         // pair (16 / 0.004489942528735632) hits 0.0833333 with zero error but
@@ -151,12 +161,16 @@ let INPUTLAG = 0;        // ms of artificial input delay — the playability pro
                          // never the render, the audio or the enemies. Tick mode only —
                          // a tick delay is a ring of per-tick sums, and an OS event has
                          // no tick to be late against, so event mode disables the slider
-let BCOOL = 130;        // ms between shots — D50 / OPEN 2 (PORT-F) takes the demo's own cadence.
-                        // The demo's p.fire is 0.13 s (js/demo-kernel.js:2998, demo-v2/sim.js:873)
-                        // and its kernel decrements THEN tests, so it fires every 8 ticks. Here
-                        // `max(1, round(130/16.6667))` = round(7.8) = 8 ticks = 133.33 ms =
-                        // 7.500 shots/s. WAS 400 -> 24 ticks -> 2.500 shots/s. 130 is on the
-                        // cool rail's grid ((130-50)/10 = 8). One gate for click fire and autofire
+let BCOOL = 230;        // ms between shots. D50 / OPEN 2 (PORT-F) took the demo's own cadence;
+                        // D65 (PORT-P) moved it OFF that number by FEEL — the second PORT-F
+                        // value to leave the reference on the owner's hands, beside DAMP.
+                        // The demo's p.fire is 0.13 s (js/demo-kernel.js, demo-v2/sim.js:873)
+                        // and its kernel decrements THEN tests, so IT fires every 8 ticks. Here
+                        // `max(1, round(230/16.6667))` = round(13.8) = 14 ticks = 233.33 ms =
+                        // 4.286 shots/s. WAS 400 -> 24 ticks -> 2.500, then 130 -> 8 -> 7.500.
+                        // 230 is on the cool rail's grid ((230-50)/10 = 18), and it is the
+                        // LOWEST BCOOL whose six RAPID LOADER ranks are all DISTINCT —
+                        // 14 12 11 10 9 8, no dead rank. One gate for click fire and autofire
 let AUTOFIRE = true;    // hold LEFT to keep firing at the cooldown rate
 let BMODE = "off";      // bullet physics — off | newtonian (adds ship vel × factor) | cq-scale (ship speed × factor); code-only, no menu knob
 let BSPEED = 650 / 60;  // = 10.833333333333334 px/tick. D50 / OPEN 2 (PORT-F): the demo's own
@@ -166,10 +180,12 @@ let BSPEED = 650 / 60;  // = 10.833333333333334 px/tick. D50 / OPEN 2 (PORT-F): 
                         // bullet speed, px per tick (off and newtonian modes)
 let BFACTOR = 1;        // the ship-velocity factor — newtonian adds it, cq-scale multiplies by it
 let BMAX = 20;          // max live bullets (the original capped at 5). D50 / OPEN 2 (PORT-F):
-                        // WAS 15, and at BCOOL 130 a RAPID LOADER rank-5 pilot fires every 4
-                        // ticks against a ttl of 63, so he wants ceil(63/4) = 16 rounds in
-                        // flight. At 15 the sixteenth is REFUSED, silently (:2867 pays no
-                        // cooldown and makes no cue), on a row he paid 124 XP for. 20 covers it
+                        // WAS 15, and at BCOOL 130 a RAPID LOADER rank-5 pilot fired every 4
+                        // ticks against a ttl of 63, so he wanted ceil(63/4) = 16 rounds in
+                        // flight. At 15 the sixteenth was REFUSED, silently (fire() pays no
+                        // cooldown and makes no cue), on a row he paid 124 XP for. D65's BCOOL
+                        // 230 puts rank 5 at 8 ticks and ceil(63/8) = 8 rounds, so 20 is now
+                        // HEADROOM and it stays there deliberately, against a later weapon
 let BLIFE = 1.05;       // bullet lifetime, seconds. D50 / OPEN 2 (PORT-F): the demo's own 1.05
                         // (js/demo-kernel.js:3031). ttl = max(1, round(1050/16.6667)) = 63, so
                         // reach is 63 x 10.8333 = 682.5 px. WAS 0.5 -> ttl 30 -> 1125 px.
@@ -179,17 +195,42 @@ let BLIFE = 1.05;       // bullet lifetime, seconds. D50 / OPEN 2 (PORT-F): the 
                         // decrements, tests, THEN moves, so 1.05 s buys it 62 moves where
                         // production's move-then-decrement buys 63. Production's round reaches
                         // 1.6 % further than the demo it copies. Stated, not corrected.)
-let MUZZLE = 0;         // D60 / OPEN 12 (PORT-P): px along the SIM NOSE (P.heading, the hashed
+let MUZZLE = 17.5;      // D60 / OPEN 12 (PORT-P): px along the SIM NOSE (P.heading, the hashed
                         // number) that the round is BORN at, on BOTH spawns. Slider, weapons
-                        // tab, 0-30 step 0.5. IT SHIPS AT 0 — the round is still born at the
-                        // ship's CENTRE and every fixture is byte-identical, because
-                        // `x + 0 * cos(h)` is exactly `x` for any finite pose (0 * finite = +-0,
-                        // x + 0 = x, and a pose clamped to [SHIP_R, WW - SHIP_R] is never -0).
-                        // The MECHANISM is here and only the DEFAULT is open: OPEN 12 asks the
-                        // owner to fly it. Moving the default off 0 MOVES
-                        // tests/fixtures/golden.json — measured at 10: node-golden 226/233,
-                        // seven records over three traces — so it is the FREEZE commit's
-                        // licensed recapture, never this one's.
+                        // tab, 0-30 step 0.5. IT SHIPS AT 17.5 — the OWNER'S answer to
+                        // OPEN 12, given on the deployed slider and landed by PORT-P's FREEZE.
+                        // 17.5 is exactly SHIP_R (:79), so the round is born ON THE HULL EDGE
+                        // along the converged nose, which is where the pilot sees it leave.
+                        //   P-SIM batch 2 shipped the MECHANISM at 0 and proved it inert
+                        // there: `x + 0 * cos(h)` is exactly `x` for any finite pose
+                        // (0 * finite = +-0, x + 0 = x, and a pose clamped to
+                        // [SHIP_R, WW - SHIP_R] is never -0). The freeze spends the DEFAULT.
+                        //   THE FIXTURE BILL IS THE FREEZE'S. D60's route already moved
+                        // tests/fixtures/golden.json by seven records over three traces with
+                        // MUZSIDE alone; the NOSE offset adds to that, and it moves two EVENT
+                        // TICKS the route alone does not — pvp-duel @killed 79 -> 83 and
+                        // @respawned 678 -> 682, measured at the WHOLE freeze set (D65's
+                        // BCOOL 230 nearly doubles the shot gap, so the kill lands LATER and
+                        // the respawn clock rides it). The one licensed recapture covers both.
+let MUZINH = 0.22;      // D60 (PORT-P): the fraction of the SHIP'S OWN velocity a round
+                        // inherits at birth, on BOTH spawns. The reference is
+                        // demo-v2/sim.js's `p.vx * 0.22`, and the number transcribes 1:1
+                        // because both sides of that ratio are per-second there and both
+                        // sides are per-tick here. Slider, weapons tab, 0-1 step 0.01.
+                        // LIVE at 0.22: unlike MUZZLE this ships at its ruled value, and it
+                        // is why duo-flight @crossfire moves — the only committed trace that
+                        // fires while moving. NET-LOCKED: vx/vy are BULLET_HASH fields.
+let MUZSIDE = 4.2;      // D60 (PORT-P): px of alternation ACROSS the nose normal, keyed on
+                        // the firing seat's OWN shot counter (`P.shots`), on both spawns.
+                        // demo-v2/sim.js:891-892 is the reference and it keys on tick
+                        // parity; that spelling is DEAD here twice over — simTick is frozen
+                        // on a net client, and at BCOOL 230 the gap is round(13.8) = 14
+                        // ticks, an EVEN number (it was 8 at BCOOL 130 and 24 at 400 — even
+                        // every time), so tick parity would hold ONE side forever even in
+                        // solo. A per-seat shot counter is strictly more alternating than the
+                        // thing being ported, and that is the ruling, not a drift from it.
+                        // Slider, weapons tab, 0-10 step 0.1. NET-LOCKED: x/y/px/py are all
+                        // four BULLET_HASH fields.
 let BROUND = 5.5;       // D67 / OPEN 9 (PORT-P): the bolt aperture, promoted from the spawn
                         // literal so the owner can fly it. r x2.5, WAS 2.2. The rail's own
                         // spawn radius (js/abilities.js) is pinned EQUAL to this number by
@@ -235,9 +276,10 @@ let BLASTGAIN = 20;     // x2.5, WAS 8. px the radius grows per rank past the fi
 // index, not "no key held" — so a held comet bills two terms and a coasting one
 // bills one. That is why the ratio is 25.1528 and not 50.
 //   WHAT THE RULING CANNOT HOLD, AND THE OWNER WAS TOLD: the release coast.
-// DAMP 0.985 is a D50 base value and nothing in this block can undo it. A
-// released comet now halves its speed every 0.764 s and is back to ordinary
-// cruise 1.43 s later; the dive-out has stopped existing, in every column.
+// DAMP 0.995 is a D50/D65 base value and nothing in this block can undo it. A
+// released comet now halves its speed every 2.30 s and is back to ordinary
+// cruise 4.33 s later; the dive-out has stopped existing, in every column —
+// and D65 (PORT-P) made the coast 3.0x longer still than D50 left it.
 //   AND NOT EVERY AFTERBURNER RANK AT ONCE. Holding rank 0 at 15 RAISES rank 1
 // from 22.5 to 24.1837 and rank 2 from 30 to 33.3675, because the additive
 // +2.5 px/tick is a larger fraction of a smaller VMAX. Rank 0 is the rank held:
@@ -280,9 +322,9 @@ let COMETAOEDMG = 22.5; // PORT-S S5 commit D, D40's first-pass value: px the co
                         // THE HALO THE PILOT SEES IS THE CIRCLE THAT COLLIDES: `auraRadiusOf`
                         // is the one derivation and draw, light and the kernel all read it.
                         // (slider, comet tab)
-let ORBLIFE = 8;        // D67's XP-orb dials. Each is production's number, and the kernel's
-let ORBMAGNET = 185;    // matching literal was promoted to a `var` beside `auraDamage`; they
-let ORBRING = 15;       // cross the seam through EncounterHost the same way COMETAURA does,
+let ORBLIFE = 30;       // D67's XP-orb dials. Each is production's number, and the kernel's
+let ORBMAGNET = 420;    // matching literal was promoted to a `var` beside `auraDamage`; they
+let ORBRING = 25;       // cross the seam through EncounterHost the same way COMETAURA does,
 let ORBPULL = 720;      // once per tick from poseKernelSeats and once more on the row's own
                         // input. (sliders, combat tab)
 let COMETAURA = 0.5;    // D26's AURA DAMAGE, per tick, to every hp-bearing BODY and enemy ROUND
@@ -480,9 +522,11 @@ const FLAME_MAX = 20;   // flame length cap, px
 // D43 (PORT-L) — THE STANDARD ROUND'S BOLT, from demo-v2/sim.js:3014-3027.
 // Render-only, in no hash and in no tunable record. The demo draws a bolt as a
 // 1.25 px SEGMENT 1.8 ticks long and NO body; the ±4.2 px is the demo's spawn
-// alternation (js/demo-kernel.js:3022), which the sim may not move here, so the
-// DRAW translates the whole flight line by it instead — perpendicular to v, so
-// every projection is unchanged by it exactly.
+// alternation (the kernel's own spawn lines), which the sim COULD not move
+// when this was written and DOES move now — D60 (PORT-P) put MUZSIDE 4.2 into
+// the hashed spawn. The DRAW's translation is therefore a SECOND copy of the
+// same offset; it is perpendicular to v, so every projection is still unchanged
+// by it exactly, but the two are no longer independent. R8a owns the reconcile.
 //   1.8 ticks is 19.5 px at the shipped BSPEED of 650/60 — D50 / OPEN 2
 // (PORT-F) landed the demo's own 650 px/s, and it was 67.5 px at the retired
 // BSPEED 37.5. It is written as TICKS, so it followed with no edit here.
@@ -544,6 +588,12 @@ function makePlayer(id) {
                   // SIM value and never a render one, because both readers run
                   // inside the tick.
     cool: 0, // ticks until the next shot is allowed
+    shots: 0, // D60: the FIRING seat's own shot counter. Its PARITY decides which side of
+              // the nose the next round is born on. UNHASHED on purpose — it is a pure
+              // function of the input stream and the hashed x/y already carry the result;
+              // folding it into hashShip's per-seat loop costs 41 records, not the 7 the
+              // route costs. An INITIALISER, not a reset: makePlayer runs only on seat
+              // GROWTH, so the respawn/restart reset lives where the ship is re-stamped.
     comet: false, // right-hold's sim-visible ACTIVE half — HASHED. The button states a
                   // WANT (input.cometWant below); energyStep is the only site in the sim
                   // that turns a want into this flag, so a seat with an empty pool holds
@@ -644,7 +694,9 @@ const heldAbilityKeys = new Map();
 // commit, and D31's SHIFT branch — which lands its bit through heldAbilityKeys
 // below, exactly as Space does — is what supplies the comet's level now.
 // LMB keeps its term: the fire button is still hard-wired, and only the right
-// button was ruled free.
+// button was ruled free — and that freedom was SPENT by D59: the button's
+// RAILSHOT rides the loop below like every key, so this function still has
+// exactly one hard-wired term.
 function heldAbilityMask() {
   let m = G.leftHeld ? AB_FIRE : 0;
   for (const id of heldAbilityKeys.values()) m |= Abilities.bit(id);
@@ -2932,16 +2984,25 @@ function fire(seat = 0) {
       vy += P.vel.y * BFACTOR;
     }
   }
+  // D60 — THE ROUND CARRIES SOME OF THE SHIP. BMODE ships "off", so BFACTOR's
+  // own inheritance above is dead code and MUZINH is the only one that runs.
+  vx += P.vel.x * MUZINH;
+  vy += P.vel.y * MUZINH;
   const em = termsOf(seat); // the FIRING seat's own terms — the tuner values stay untouched
   // THE MUZZLE OFFSET, along the SIM NOSE and not the shot bearing. `P.heading`
   // is the CONVERGED nose (hashed unconditionally at hashShip) and `d` is the
   // aim; headingStep turns one toward the other at a bounded rate, so they part
   // company on every turning frame. The nose is what the pilot SEES the round
-  // leave, so the nose is what it leaves. At the shipped MUZZLE 0 both are the
-  // same exact zero and no fixture can tell them apart — the choice is made
-  // HERE, before the freeze, because it decides the record hashes the day the
-  // default moves.
-  const mx = MUZZLE * Math.cos(P.heading), my = MUZZLE * Math.sin(P.heading);
+  // leave, so the nose is what it leaves. THE CHOICE IS ALREADY SPENT: D60's
+  // BOTH terms are nonzero since the freeze, so this block moves the fixture and
+  // the record hashes the freeze recaptures are the `P.heading` set. A `d` set
+  // would be a different set of bytes and it is dead.
+  //   AND THE SIDE TERM IS SQUARE ACROSS THE NOSE: (-sin, +cos) is the nose
+  // normal, MUZSIDE px along it, and the sign alternates with the seat's own
+  // shot parity — the two barrels of demo-v2's gun.
+  const hc = Math.cos(P.heading), hs = Math.sin(P.heading);
+  const alt = (P.shots & 1) ? 1 : -1;
+  const mx = MUZZLE * hc - hs * alt * MUZSIDE, my = MUZZLE * hs + hc * alt * MUZSIDE;
   // one id SPACE across bullets and bodies — a replication layer keys by id
   // alone and cannot disambiguate by owning array; a page without the
   // encounter has nothing to replicate, so 0 stands in there
@@ -2952,15 +3013,18 @@ function fire(seat = 0) {
   // see the contract above it): it describes where the round came from, never
   // what the simulation will do next, and the wire never carries it either.
   //   The muzzle is the NOSE — centre + SHIP_R along the fire direction — so
-  // the tail and the glow leave the nozzle, not the cockpit. The HASHED spawn
-  // x/y stays the CENTRE AT THE SHIPPED `MUZZLE` 0: the nose is a look, not yet
-  // a sim fact. `MUZZLE` is a DIAL (weapons tab, 0-30) threaded into all four
-  // hashed coordinates below, and at 0 the arithmetic is EXACT — so the sentence
-  // above holds by measurement, and holds only until OPEN 12 moves the default.
-  // The day it does, that sentence is the first thing to become false, and so is
-  // the next one: at MUZZLE 0 the ox/oy origin is AHEAD of the round at spawn,
-  // which is why every streak clamp is a signed projection along the velocity
-  // and never a bare distance — and that stays true only while MUZZLE < SHIP_R.
+  // the tail and the glow leave the nozzle, not the cockpit. THE HASHED SPAWN
+  // x/y IS THE CENTRE DISPLACED MUZZLE ALONG THE NOSE AND MUZSIDE ACROSS IT:
+  // both are DIALS (weapons tab) threaded into all four hashed coordinates
+  // below, and since the freeze NEITHER term is at 0 — 17.5 and 4.2.
+  //   THE ox/oy ORIGIN IS STILL AHEAD OF THE ROUND, and that is now an ARGUMENT
+  // rather than arithmetic: the side term is ORTHOGONAL to the nose, so once the
+  // nose has converged its projection on the round's own velocity is exactly
+  // zero and the signed projection every streak clamp computes is unchanged.
+  // MUZINH tilts the velocity by at most 0.22 x |vel| against BSPEED, which is
+  // bounded and small. The argument weakens on a hard-turning frame, where
+  // P.heading lags `d` — it does not break, and it is why the clamps are signed
+  // projections and never bare distances.
   G.bullets.push({ id: window.Encounter ? Encounter.nextId() : 0,
                    x: P.ship.x + mx, y: P.ship.y + my, px: P.ship.x + mx, py: P.ship.y + my, vx, vy,
                    ox: P.ship.x + d.x * SHIP_R, oy: P.ship.y + d.y * SHIP_R,
@@ -2989,6 +3053,10 @@ function fire(seat = 0) {
     const delta = Math.max(0, Math.min(21, P.input.fireDelta || 0));
     if (delta > 0) Encounter.rebate(G.bullets[G.bullets.length - 1], delta, seat);
   }
+  // D60: the shot is COMMITTED here, after every refusal gate above — a refused
+  // shot must not flip the side, or the client's parity drifts from the
+  // server's for the rest of the run.
+  P.shots = (P.shots + 1) >>> 0;
   P.cool = Math.max(1, Math.round(BCOOL * (em ? em.cool : 1) / TICK));
   if (window.Encounter) Encounter.emit("fire", P.ship, undefined, seat); // after every gate above —
                                           // a refused shot is silent. Pinned on the firing seat's
@@ -3039,10 +3107,17 @@ function abilityFire(seat, id) {
   for (const b of G.bullets) if (bulletSeat(b) === seat) mine++;
   const base = Math.atan2(dir.y, dir.x);
   // ONE muzzle, two spawns: the ability round leaves the same nose the basic gun
-  // does. Loop-invariant, so it is computed once here — and it reads P.heading,
-  // NOT `d`: in THIS function `d` is Abilities.def(id) and `dir` is the aim, so
-  // `MUZZLE * d.x` would be NaN, at 0 as loudly as at 14.
-  const amx = MUZZLE * Math.cos(P.heading), amy = MUZZLE * Math.sin(P.heading);
+  // does, on the same side of it, carrying the same fraction of the ship.
+  // Loop-invariant, so it is computed once here — and it reads P.heading, NOT
+  // `d`: in THIS function `d` is Abilities.def(id) and `dir` is the aim, so
+  // `MUZZLE * d.x` would be NaN, at the shipped 17.5 as loudly as it was at 0.
+  //   LOOP-INVARIANT IS A DECISION HERE, NOT A CONVENIENCE. One abilityFire call
+  // spends ONE side for the whole volley, so a spread pattern leaves the same
+  // barrel; the counter advances once per call, after the `if (!spawned) return;`
+  // guard below, so a capped-out volley that spawns nothing does not flip it.
+  const aalt = (P.shots & 1) ? 1 : -1;
+  const ahc = Math.cos(P.heading), ahs = Math.sin(P.heading);
+  const amx = MUZZLE * ahc - ahs * aalt * MUZSIDE, amy = MUZZLE * ahs + ahc * aalt * MUZSIDE;
   let spawned = 0;
   for (let i = 0; i < sp.n; i++) {
     if (mine + spawned >= BMAX) break; // the FIRING seat's own cap, owner-scoped
@@ -3059,7 +3134,8 @@ function abilityFire(seat, id) {
                                  // record that wants that inheritance will say so
     G.bullets.push({ id: window.Encounter ? Encounter.nextId() : 0,
                      x: P.ship.x + amx, y: P.ship.y + amy, px: P.ship.x + amx, py: P.ship.y + amy,
-                     vx: Math.cos(a) * spd, vy: Math.sin(a) * spd,
+                     vx: Math.cos(a) * spd + P.vel.x * MUZINH,
+                     vy: Math.sin(a) * spd + P.vel.y * MUZINH,
                      ox: P.ship.x + dir.x * SHIP_R, // the muzzle, at the NOSE —
                      oy: P.ship.y + dir.y * SHIP_R, // render-only, and out of
                                     // BULLET_HASH like every other round's
@@ -3095,6 +3171,9 @@ function abilityFire(seat, id) {
   // answer "is this seat capped out?" — that is the round that gives each
   // primitive its own refusal and lag contract, not this one.
   if (!spawned) return; // a capped-out seat makes no sound either
+  // D60: the volley is COMMITTED — one side spent per call, and never on a
+  // refusal. See the muzzle block above.
+  P.shots = (P.shots + 1) >>> 0;
   // the RECORD's cue, not the standard gun's. A rifle that sounded exactly
   // like the basic round was a shot the ear could not find, which is half of
   // why the ability was undiscoverable at all. Abilities.cueFor answers "fire"
@@ -5009,8 +5088,13 @@ function drawImpacts() { // draw-only — reads burst state, never mutates it
 // aim", "release to aim again". None of that happens any more. The copy now says
 // the four things that are true — the cursor aims, WSAD thrusts (ship-relative
 // by default, T toggles), LMB fires, SHIFT is the reflex hold — and it says
-// nothing about the right button, because the right button does nothing. A page
-// that still taught the swap would be teaching a build nobody can run.
+// nothing about the right button. THAT IS A COPY DECISION NOW, NOT A FACT ABOUT
+// THE BUTTON: D59 spent the freedom D30 reserved and the right button FIRES THE
+// RAIL, exactly as Space does. It is left out here because these two lines are
+// the FLIGHT copy and the rail is a weapon — the canvas aria strings are where
+// both of its buttons are named, and one binding taught in two places is one
+// copy that goes stale. A page that still taught the swap would be teaching a
+// build nobody can run.
 function pauseLines() {
   if (guideEligible()) {
     return ["cursor aims · left fires · wsad thrust · qezc add diagonals",
@@ -5054,6 +5138,10 @@ const drawn = {
   star: { x: 0, y: 0 },                       // the base camera the star pass scrolled by
   mm: { x: 0, y: 0 },                         // the camera the minimap viewport rect framed
   aim: { seen: false, x: 0, y: 0 },           // the anchor pose the aim marker orbited
+  // D60's presentation-seam probe. The FIRST live round, as DRAWN — the own
+  // ship is EXTRAPOLATED and a round is INTERPOLATED, so the two poses solve
+  // for different instants and the seam leg reads the gap here.
+  bullet: { id: -1, x: 0, y: 0, px: 0, py: 0, seen: false },
 };
 let PROBE_ENEMY = -1; // -1 = the field's first body; the rig designates by id
 let PROBE_PT = false; // armed by the rig only — see drawn.pt
@@ -5080,6 +5168,13 @@ function recordDrawnFrame() {
       : foes.find((b) => b.id === PROBE_ENEMY) || null;
   drawn.enemy.seen = !!e;
   if (e) { drawn.enemy.id = e.id; drawn.enemy.x = e.x; drawn.enemy.y = e.y; }
+  // ...and the first live ROUND, read from the same FRAME view for the same
+  // reason: this is the pose the draw really painted.
+  const rds = FRAME.bullets || G.bullets;
+  const rb = rds && rds.length ? rds[0] : null;
+  drawn.bullet.seen = !!rb;
+  if (rb) { drawn.bullet.id = rb.id; drawn.bullet.x = rb.x; drawn.bullet.y = rb.y;
+            drawn.bullet.px = rb.px; drawn.bullet.py = rb.py; }
 }
 // ---- the presentation frame ------------------------------------------------
 // ONE coherent instant per animation frame: every world-pass body and the
@@ -5556,6 +5651,14 @@ function render() {
         // backward streak through the hull — the exact defect the clamp exists
         // to prevent. Negative clamps to zero: no tail until the round clears
         // its own nozzle.
+        //   D60 LEFT THAT PREMISE STANDING AS AN ARGUMENT RATHER THAN AS
+        // ARITHMETIC. The spawn is now MUZSIDE px off the centre line, but the
+        // side term is SQUARE ACROSS the nose, so once the nose has converged
+        // its projection on the round's own velocity is exactly zero; and
+        // MUZINH tilts the velocity by at most 0.22 x |vel| against BSPEED,
+        // which is bounded and small. The argument weakens on a hard-turning
+        // frame, where P.heading lags the aim — it does not break, and it is
+        // why this is a signed projection and never a bare distance.
         const len = Math.min(b.streak,
           Math.max(0, ((b.x - b.ox) * b.vx + (b.y - b.oy) * b.vy) / h));
         if (len > 0) {
@@ -5581,8 +5684,9 @@ function render() {
     // the demo's bolt has no body but its own line. The COLLISION radius is
     // untouched — b.r is still 5.5 and is simply not read here, which is what
     // "the draw radius is decoupled from r" means.
-    //   PARITY KEYS ON `id`, NOT ON THE TICK. BCOOL/TICK is 8 since D50 / OPEN 2
-    // (PORT-F) and was 24 before it — an EVEN number either way, so a tick key
+    //   PARITY KEYS ON `id`, NOT ON THE TICK. BCOOL/TICK is 14 since D65
+    // (PORT-P), was 8 at D50 / OPEN 2 (PORT-F) and 24 before that — an EVEN
+    // number every time, so a tick key
     // is CONSTANT between two shots of this gun and the claim survives the
     // retune untouched. `id` comes from
     // Encounter.nextId(), which orbs also mint from, so consecutive rounds
@@ -6182,24 +6286,47 @@ canvas.addEventListener("mousedown", (e) => {
     if (e.button === 0) requestLock(true, !lockedMode());
     return;
   }
-  // **THE RIGHT BUTTON IS UNBOUND — D30, and unbound is the whole ruling.** It
-  // is not re-bound to something else here and it is not left doing a quieter
-  // version of what it did: it is a free weapon button, reserved for a later
-  // binding, and reserving it means this branch has nothing in it to keep. What
-  // went: the comet arm (setRightHeld's, and heldAbilityMask's hard-wired bit),
-  // the pointer-lock cycling that entered and left mouse-flight, and push mode's
-  // enterAim. Locked mode's branch was already empty — "the lock never cycles on
-  // the buttons in this mode" — so that mode loses nothing at all.
-  //   `canvas.contextmenu`'s preventDefault STAYS: an unbound button must still
-  // not raise the OS menu over a live field, which is a page concern and never
-  // was a binding.
+  // **THE RIGHT BUTTON FIRES THE RAIL — D59, and it is the LATER BINDING D30
+  // RESERVED.** D30 emptied this branch on purpose rather than leaving the
+  // button doing a quieter version of what it did: out went the comet arm
+  // (setRightHeld's, and heldAbilityMask's hard-wired bit), the pointer-lock
+  // cycling that entered and left mouse-flight, and push mode's enterAim — so
+  // that whatever came next would arrive on a CLEAN button. What came next is
+  // RAILSHOT, and it arrives the way every other ability does: the catalog id,
+  // the press edge through inputAbility, and the held level through
+  // heldAbilityKeys.
+  //   RIDING THE MAP IS THE WHOLE IMPLEMENTATION CHOICE. A module boolean for
+  // the button's held level would have needed THREE clear sites — here, pause()'s clearing
+  // block and the blur handler — and the D31 blur defect is what happens when a
+  // held level is added to one of them and not the other. Both wholesale sites
+  // already call heldAbilityKeys.clear(), so an entry in that map inherits the
+  // pause release and the blur release for free, adds no line to either, and
+  // keeps the "the two sites are one list" contract a list of one thing. No
+  // KeyboardEvent.code is ever "Mouse2", so the keyup delete can never collide.
+  //   THE COMET IS NOT HERE AND MUST NEVER BE: D31 put it on SHIFT, and a right
+  // button that armed it too would drain COMETDRAIN every held tick in the local
+  // predictor — the exact double-arm D30 unwound.
+  //   Locked mode's branch was already empty — "the lock never cycles on the
+  // buttons in this mode" — so that mode GAINS the binding and loses nothing.
+  // The branch ABOVE still swallows a right press while the lock is LOST in a
+  // non-mouse mode (it returns for every button and only button 0 re-arms), so
+  // the first RMB after a lost lock fires nothing: inherited LMB behaviour,
+  // named here because a burst weapon's swallowed first press reads as a dead
+  // button.
+  //   `canvas.contextmenu`'s preventDefault STAYS, and so does this handler's
+  // own e.preventDefault(): they were a page concern while the button was
+  // unbound and they are a page concern now — neither was ever the binding.
   if (e.button === 0) {
     G.leftHeld = true;
     inputFire();
+  } else if (e.button === 2) {
+    inputAbility(Abilities.ABILITY.RAILSHOT);
+    heldAbilityKeys.set("Mouse2", Abilities.ABILITY.RAILSHOT);
   }
 });
 document.addEventListener("mouseup", (e) => {
   if (e.button === 0) G.leftHeld = false;
+  if (e.button === 2) heldAbilityKeys.delete("Mouse2");
 });
 // the 8-way ring — QWE/ADZXC around S, by e.code so any layout works; S
 // doubles as down, same as X. The keys snap the aim while the mouse
@@ -6492,8 +6619,8 @@ function closeDev() {
 }
 function syncAimUi() {
   canvas.setAttribute("aria-label", lockedMode()
-    ? "Ship playground — a drawn cursor aims; W A S D thrust and Q E Z C add diagonals, along the ship's nose by default with T to flip to screen-relative; left fires and Space fires the rail shot, which costs energy and a cooldown; hold Shift for energy-powered comet mode: fast, and able to ram enemies; Escape pauses"
-    : "Ship playground — the visible pointer aims; W A S D thrust and Q E Z C add diagonals, along the ship's nose by default with T to flip to screen-relative; left fires and Space fires the rail shot, which costs energy and a cooldown; hold Shift for energy-powered comet mode: fast, and able to ram enemies; Escape pauses");
+    ? "Ship playground — a drawn cursor aims; W A S D thrust and Q E Z C add diagonals, along the ship's nose by default with T to flip to screen-relative; left fires; Space and the right button both fire the rail shot, which costs energy and a cooldown; hold Shift for energy-powered comet mode: fast, and able to ram enemies; Escape pauses"
+    : "Ship playground — the visible pointer aims; W A S D thrust and Q E Z C add diagonals, along the ship's nose by default with T to flip to screen-relative; left fires; Space and the right button both fire the rail shot, which costs energy and a cooldown; hold Shift for energy-powered comet mode: fast, and able to ram enemies; Escape pauses");
 }
 // the audition readout's gain, guarded: Sfx.state() is js/audio.js's and this
 // file's caller may be skewed against it — a cached OLD audio.js beside this
@@ -6517,7 +6644,8 @@ function showTuner() {
   // THE DRAG-AWARE CLOSED FORM (D50, PORT-F). This line divided the cap by the
   // per-tick gain, which is the time to the top ONLY in a game with no
   // friction. At DAMP 0.985 it printed "0.8 s to top" against a measured
-  // 1.52 s — and this is the string the owner reads while turning the dial at
+  // 1.52 s; at D65's 0.995 the frictionless print is STILL "0.8 s" and the
+  // truth is 0.94 s — and this is the string the owner reads while turning at
   // the feel gate, so it is the one readout that had to become true first.
   //   v(n) = a*d*(1-d^n)/(1-d), so the tick that first reaches `cap` is
   //   n = ln(1 - cap*(1-d)/(a*d)) / ln d
@@ -6546,7 +6674,8 @@ function showTuner() {
     : "W is UP on the screen · T toggles");
   // THE QUANTISED TRUTH (D50, PORT-F). `1000 / BCOOL` is the rate the slider
   // asks for; the sim fires on a TICK COUNT, max(1, round(BCOOL / TICK)), so at
-  // BCOOL 130 the panel said 7.7 shots/s while the ship fired 7.500. The gate
+  // BCOOL 230 the panel would say 4.348 shots/s while the ship fires 4.286;
+  // at the retired BCOOL 130 it said 7.7 against 7.500. The gate
   // it states is the gate the ship uses.
   out("cool-out", (() => {
     const ct = Math.max(1, Math.round(BCOOL / TICK));
@@ -6556,8 +6685,12 @@ function showTuner() {
   out("bfactor-out", BFACTOR.toFixed(2));
   out("bdmg-out", BDMG.toFixed(1) + " damage per bolt");
   out("bround-out", BROUND.toFixed(1) + " px radius");
-  out("muzzle-out", MUZZLE === 0 ? "0 px — the round is born at the ship CENTRE"
+  out("muzzle-out", MUZZLE === 0 ? "0 px along the nose — born MUZSIDE across it, the side alternating every shot"
     : MUZZLE.toFixed(1) + " px along the nose · SHIP_R is " + SHIP_R);
+  out("muzinh-out", MUZINH === 0 ? "0 — the round leaves with none of the ship's own velocity"
+    : MUZINH.toFixed(2) + "\u00d7 the ship's velocity, added to the muzzle speed");
+  out("muzside-out", MUZSIDE === 0 ? "0 — every round leaves on the centre line"
+    : "\u00b1" + MUZSIDE.toFixed(1) + " px across the nose, alternating every shot");
   out("bmax-out", String(BMAX));
   out("blife-out", BLIFE.toFixed(2) + " s");
   out("fxint-out", FXINT.toFixed(1) + "× burst intensity · 0 = off");
@@ -6696,7 +6829,7 @@ const INPUTDESC = {
 // prediction from the server's sim. View, camera, fx and audio rows stay
 // live; the ONE gate sits here so no slider needs its own guard.
 const NET_LOCKED_IDS = new Set(["vmax", "accel", "turn", "keythrust",
-  "wallloss", "damp", "cool", "autofire", "bspeed", "bfactor", "bdmg", "bround", "muzzle", "bmax", "blife",
+  "wallloss", "damp", "cool", "autofire", "bspeed", "bfactor", "bdmg", "bround", "muzzle", "muzinh", "muzside", "bmax", "blife",
   "bounce", "contactcd", "pvp-rewind", "blastr", "blastgain",
   // BLASTR and BLASTGAIN were the LAST two enc.tunables() keys with a control
   // and no lock. Both size a splash the fixtures pin, and a client dragging
@@ -6708,9 +6841,13 @@ const NET_LOCKED_IDS = new Set(["vmax", "accel", "turn", "keythrust",
   "comet-cd", "pvp-orbs",
   "energy-max", "energy-regen", "energy-delay", "energy-arm", "energy-orb",
   "energy-cell", "energy-rech",
-  // D67's four XP-orb dials. LOCKED: they move hashed kernel state (ORB_HASH,
-  // the `orbs` census key, and SEAT_HASH xp/score through the credit), so a
-  // client dragging the magnet in a live room diverges the predictor. There is
+  // D67's four XP-orb dials. LOCKED: they move hashed kernel state (the `orbs`
+  // census key, and SEAT_HASH xp/score through the credit), so a client
+  // dragging the magnet in a live room diverges the predictor. NOT ORB_HASH:
+  // that list folds production's own E.orbs — the PvP-death payout — and the
+  // kernel's XP orbs never enter it. The cite was false when it was written and
+  // D55, which adds a field to the very record this sentence describes, is
+  // where it is corrected. There is
   // no server `tune` arm for any of them and none is added — the server runs
   // the kernel at its SOURCE defaults, which is exactly what these rows ship
   // at, so in ?mp the panel refuses the drag and both surfaces agree.
@@ -6745,6 +6882,8 @@ bind("bfactor", (v) => { BFACTOR = v; }).value = String(BFACTOR);
 bind("bdmg", (v) => { BDMG = v; }).value = String(BDMG);
 bind("bround", (v) => { BROUND = v; }).value = String(BROUND);
 bind("muzzle", (v) => { MUZZLE = v; }).value = String(MUZZLE);
+bind("muzinh", (v) => { MUZINH = v; }).value = String(MUZINH);
+bind("muzside", (v) => { MUZSIDE = v; }).value = String(MUZSIDE);
 bind("bmax", (v) => { BMAX = v; }).value = String(BMAX);
 bind("blife", (v) => { BLIFE = v; }).value = String(BLIFE);
 bind("bounce", (v) => { BOUNCE = v; }).checked = BOUNCE;
@@ -6770,14 +6909,16 @@ bind("stardens", (v) => { STARDENS = v; render(); }).value = String(STARDENS); /
 // stardens idiom: they are render-only and reach no sim value, so a client may
 // drag them in a live room exactly as it may drag the shake pair.
 bind("glow", (v) => { if (window.FX) FX.setGlow(v); render(); })
-  .value = String(window.FX ? FX.snapshot().glow : 1.2);
+  .value = String(window.FX ? FX.snapshot().glow : 0.6);
 // D67's two WORLD rows, same idiom. THE FALLBACK LITERAL IS A SECOND COPY of
-// js/fx.js's own `let`: js/game.js loads BEFORE js/fx.js (index.html:564 vs
-// :568), so `window.FX` is undefined while these lines run and the `:` arm is
+// js/fx.js's own `let`: the `<script src="js/game.js">` tag precedes the
+// `<script src="js/fx.js">` tag in index.html, so `window.FX` is undefined
+// while these lines run and the `:` arm is
 // ALWAYS the one taken. Keep 1.4 equal to js/fx.js's `let BLOOM_INT = 1.4` and
 // 0.4 equal to its `let PLAYER_HALO_A = 0.4`, or the slider opens on a number
-// the draw is not using — the trap `glow`'s `: 1.2` already carries against
-// `let GLOW = 1.2`. Move a default and you move BOTH copies, in one commit.
+// the draw is not using — the trap `glow`'s `: 0.6` already carries against
+// `let GLOW = 0.6` (D57 / OPEN 7b, the owner's 0.60). Move a default and you
+// move BOTH copies, in one commit.
 bind("bloom", (v) => { if (window.FX) FX.setBloom(v); render(); })
   .value = String(window.FX ? FX.snapshot().bloomInt : 1.4);
 bind("player-halo-a", (v) => { if (window.FX) FX.setPlayerHaloA(v); render(); })

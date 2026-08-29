@@ -222,14 +222,20 @@
     // was 2+1 = 3 and became 5+1 = 6 where scale-preserving is 5+2.5 = 7.5, and
     // rank 2 was 4 and became 7 where it should be 10. The DESC is the shop
     // card's own text and moves with the number it describes.
-    // ---- AND WHAT A RANK IS ACTUALLY WORTH SINCE D50 (PORT-F) --------------
-    // The CAP rises by 2.5 per rank, uncapped. What a KEYBOARD pilot reaches
-    // does not: with DAMP 0.985 the keys' drag-terminal is a*d/(1-d) = 5.4512
-    // px/tick, so against a rank-1 cap of 6.5833 he gets 1.3679 of the 2.5
-    // (55 %), and rank 2 and above deliver NOTHING at all until the comet
-    // multiplies the cap out from under the drag. The card says "cap" now
-    // because "max speed" is the thing a pilot cannot get. NO NUMBER MOVED
-    // HERE: the re-price is R8a's, on the record, not this lane's.
+    // ---- AND WHAT A RANK IS ACTUALLY WORTH SINCE D65 (PORT-P) --------------
+    // The CAP rises by 2.5 per rank, uncapped, and the ROW IS HONEST AGAIN.
+    // D50 left it broken: at DAMP 0.985 the keys' drag-terminal was
+    // a*d/(1-d) = 5.4512 px/tick, so rank 1 delivered 1.3679 of its 2.5 (55 %)
+    // and ranks 2-5 delivered NOTHING until the comet multiplied the cap out
+    // from under the drag. D65's DAMP 0.995 puts the terminal at
+    // 0.0830125 x 199 = 16.5195, above the rank-4 cap of 14.0833: RANKS 1-4
+    // NOW DELIVER THEIR FULL 2.5, and rank 5 delivers 2.4362 of 2.5 (97.4 %) —
+    // the terminal is 99.615 % of that rank's 16.5833 cap. That arithmetic is
+    // why S-n5xhb5 closed. IT IS AN ASYMPTOTE, not a tick count: rank 5 is at
+    // 98.5 % of its CAP by tick 900 and crosses 99 % of it only at tick 1015,
+    // so it never MEETS its cap in any playable run. The card still says "cap"
+    // because the last rank is still not fully reachable on keys alone.
+    // NO NUMBER MOVED HERE.
     { name: "AFTERBURNER", desc: "top-speed cap +2.5 px/tick", base: 4, curve: "double",
       icon: "afterburner.png" },  // the CAP is uncapped — the doubling price is
                                   // the brake, and since D50 the drag is a second one
@@ -347,11 +353,14 @@
   //            commit C's rescale (1280/512), and it is written as a literal
   //            here for the same reason every other row in that table is: a
   //            modifier on a px-dimensioned base is itself px-dimensioned.
-  //            SINCE D50 IT RAISES A CEILING THE KEYS CANNOT REACH: the
-  //            keyboard drag-terminal is 5.4512 px/tick against a rank-1 cap
-  //            of 6.5833, so rank 1 delivers 55 % of its 2.5 and rank 2+
-  //            delivers none of it. It is still the whole story under COMET,
-  //            where the cap is multiplied and the drag is outrun. R8a's row.
+  //            D50 RAISED A CEILING THE KEYS COULD NOT REACH: the keyboard
+  //            drag-terminal was 5.4512 px/tick against a rank-1 cap of
+  //            6.5833, so rank 1 delivered 55 % of its 2.5 and rank 2+ none of
+  //            it. D65 (PORT-P) FIXED IT: at DAMP 0.995 the terminal is
+  //            16.5195, so ranks 1-4 deliver in full and rank 5 delivers
+  //            97.4 % of its 2.5 (99.615 % of the cap, asymptotically). It is
+  //            still the whole story under COMET, where the cap is multiplied
+  //            and the drag is outrun. R8a's row.
   //   blast  — the BLAST CHARGE rank, 0-3: 0 is off; the radius each rank
   //            reaches is BLASTR + BLASTGAIN × (rank − 1) off game.js's sliders
   //   enCell/enRech/fury — the ENERGY pool's stored RANKS: game.js turns them
@@ -2776,6 +2785,8 @@
       pl.vel.x = 0;
       pl.vel.y = 0;
       pl.cool = 0;
+      pl.shots = 0; // D60 (PORT-P): the muzzle alternation's parity goes back to rest with
+                    // the ship, so a re-stamped seat starts on the same barrel every time.
       if (window.Abilities) Abilities.reset(pl); // ability 0's cooldown is pl.cool
                      // above; every other ability's whole slot record goes back
                      // to rest with it, so a restart cannot carry a cooldown,
@@ -3726,11 +3737,19 @@
       // short-circuits, spawnEnemy's push-out skips dead seats and makeBody
       // stamps every body tgtSeat -1, so left to run the pack parks
       // off-screen and converges on the first player to click back in — 3
-      // darts per present seat. Nothing is done about it HERE. The schedule
-      // hold at the top of encStep is what holds it, and it holds every tick
-      // the field is empty rather than sliding once by a guess at the return:
-      // this block has no idea when — or whether — anybody comes back, and it
-      // must not pretend to.
+      // darts per present seat. Nothing is done about it HERE, and since D66
+      // there IS somewhere it is done — three corrections to the sentence this
+      // block used to carry. LOCATION: the hold is in the KERNEL, in
+      // `updateDirector`, above its drain — not "at the top of encStep"; the
+      // hold that sentence named went with the old dealer. CONDITION: PRESENCE,
+      // not an empty field — somebody present and nobody alive, so an UNCLAIMED
+      // room still deals (D8/D14). RELEASE: the thing that sentence refused.
+      // Every remaining `due` moves by the MEASURED held duration rather than
+      // "sliding once by a guess at the return", so the stagger this deal was
+      // dealt with survives the wait instead of arriving all at once behind the
+      // first pilot back. This block still has no idea when anybody comes back,
+      // and still does not pretend to: it is the kernel that counts the
+      // seconds.
       emit("wipe");        // the RUN's discontinuity marker. Every symptom of a wipe is
                            // a value a client already adopts — wave 1, an empty field,
                            // a board of zeroes — so this is the only fact on the wire
@@ -5574,7 +5593,7 @@
   // normalisation runs on this table — so a hull can never be offered here
   // under a name or an id
   // the field does not know. (Classic scripts share one global lexical
-  // environment and js/game.js loads first — index.html:496 — so HULLS is a
+  // environment and js/game.js's `<script>` tag precedes this file's — so HULLS is a
   // plain read here, as C and SHIP_R already are.)
   const SKINGLYPHS = [
     { id: 0, pts: [[1, 0], [-0.470588, -0.529412], [-0.176471, -0.176471], [-0.764706, 0], [-0.176471, 0.176471], [-0.470588, 0.529412]] },

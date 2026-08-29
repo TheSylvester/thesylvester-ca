@@ -1094,8 +1094,9 @@
     // predictor up throughout (pred.on, !idle, unacked 0) and tracers 0 against
     // BMAX 15, which excludes both the stand-down and the budget-refusal paths.
     // (Those are the numbers AS MEASURED, on a page whose BCOOL was 400 and
-    // whose BMAX was 15. D50 / OPEN 2 (PORT-F) moved them to 130 and 20, so the
-    // 0.40 s gaps become 0.133 s and the measurement is not re-runnable as
+    // whose BMAX was 15. D50 / OPEN 2 (PORT-F) moved them to 130 and 20 and
+    // D65 (PORT-P) took BCOOL to 230, so the 0.40 s gaps become 0.233 s and
+    // the measurement is not re-runnable as
     // written — the finding it supports is unchanged and the fix is shipped.)
     //   The old rejection measured a back-fill that spawned a TRACER, where an
     // over-cue is a visible broken promise. This one calls ownCue alone: no

@@ -1029,8 +1029,10 @@ function substream(runSeed, waveId, spawnOrdinal, entityId, attackSequence, purp
 //               when whatever spawned it dies.
 //   hp          D10's SEVENTH obligation. 0 (the default) means NEVER SHOOTABLE
 //               and the collision pass skips the kind entirely, which is what
-//               buys those kinds zero runtime, zero wire and zero cap
-//               interaction. A string names an external authority for a kind
+//               bought those kinds their whole cost argument: no runtime in the
+//               collision pass, no death event on the wire, no cap interaction.
+//               D61 (PORT-P) SPENT MOST OF IT — the tier is two kinds now, so
+//               the saving is small. A string names an external authority for a kind
 //               whose hp is table-driven rather than per-kind constant.
 //
 // EFFECTS AND BUFFS ARE NOT ENTITIES and get no row. They stay plain records —
@@ -1196,7 +1198,7 @@ function kernelBody(present, clearRole, spentState) {
   };
 }
 // A kernel enemy ROUND. Every one of the 21 shares six answers; only `hp`
-// differs, and that column is D10's table plus D27.
+// differs, and that column is D10's table plus D27 AND D61.
 function kernelRound(hp) {
   return {
     hash: { where: "test/tools/demo-serial.js", fields: "INCLUDED S.bullets (whole record, keys sorted)", guarded: [] },
@@ -1287,25 +1289,28 @@ const KINDS = {
     // (the count is 20 `kernelRound` rows; this header said 21 and nothing
     //  derives from either number)
     // `hp` is D10's owner-ruled table (.ai-reference/ordnance-taxonomy.md §4)
-    // AS AMENDED BY D27. Radius predicts the default and the encounter
-    // overrides it: kineticLance is r 10 and stays at 0, because at 720 px/s it
-    // is the fastest thing in the game and a boss signature that "must be
-    // dodged, not answered". That row is the whole argument against a flat rule.
+    // AS AMENDED BY D27 AND THEN BY D61 (PORT-P), which moved five kinds —
+    // broadside, flame, retaliation, arc and omegaSide — off the hp-0 tier at
+    // hp 2 apiece, because a player who can see a round should be able to
+    // answer it. TWO ROWS SURVIVE ON 0, and each is its own argument against a
+    // flat rule: kineticLance is r 10 and stays at 0 because at 720 px/s it is
+    // the fastest thing in the game and a boss signature that "must be dodged,
+    // not answered", and `lightning` stays with it on the same reasoning.
     heavy: kernelRound(4),
-    broadside: kernelRound(0),
+    broadside: kernelRound(2),
     plasma: kernelRound(4),
-    flame: kernelRound(0),
+    flame: kernelRound(2),
     // `mine` IS NOT HERE. D10 promotes it out of the round plane entirely and
     // it is declared below as an ENTITY, on the drone precedent.
     grenade: kernelRound(4),
     rocket: kernelRound(2),
-    retaliation: kernelRound(0),
-    arc: kernelRound(0),
+    retaliation: kernelRound(2),
+    arc: kernelRound(2),
     spitOrb: kernelRound(6),
     serpentFire: kernelRound(2),
     kineticLance: kernelRound(0),
     omegaSphere: kernelRound(6),
-    omegaSide: kernelRound(0),
+    omegaSide: kernelRound(2),
     darkFire: kernelRound(2),
     vortex: kernelRound(2),
     splitter: kernelRound(6),

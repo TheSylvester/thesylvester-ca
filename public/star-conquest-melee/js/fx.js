@@ -67,7 +67,10 @@
   // `gl` is sampled ONCE per composite, so setGlow is live on the next frame
   // with no plumbing. It is render-only: it is in no tunable record, no
   // snapshot state and no hash.
-  let GLOW = 1.2;          // halo radius/alpha multiplier
+  let GLOW = 0.6;          // halo radius/alpha multiplier — D57 / OPEN 7b (PORT-P):
+                           // the owner flew the deployed slider and answered 0.60, "the
+                           // free stop". js/game.js carries a SECOND copy of this
+                           // literal as its bind fallback; both move in one commit.
   let PLAYER_HALO_A = 0.4; // D57's ratio lever, made a dial by D67: the player
                            // halo's own alpha, the ONE blob in this file the
                            // owner tunes apart from GLOW. It multiplies g1
@@ -207,7 +210,11 @@
     respawn:    { hue: "bright", big: false, flash: 0.8,  ring: 0.8, parts: 0 },
     wall:       { hue: "dim",    big: false, flash: 0.2,  ring: 0,   parts: 0.15 },
     thud:       { hue: "dim",    big: false, flash: 0.2,  ring: 0,   parts: 0 },
-    fire:       { hue: "clay",   big: false, flash: 0.3,  ring: 0,   parts: 0 },
+    // D60: `ride` says the flash is anchored to a SEAT and not to a point.
+    // A muzzle flash is on the gun; without this the flash freezes at the world
+    // point the cue carried and the ship flies out from under it over the nine
+    // frames the flash lives.
+    fire:       { hue: "clay",   big: false, flash: 0.3,  ring: 0,   parts: 0, ride: true },
     // THE CAP REJECTION (PORT-S S8). js/engine.js's cap contract says it in
     // writing: "IT EMITS A capDenied CUE. A refusal a player cannot perceive
     // is indistinguishable from a bug." The event has crossed this whole
@@ -811,7 +818,11 @@
       // distance, because the muzzle sits at the NOSE, ahead of the spawn
       // pose: a distance reads ~SHIP_R on a newborn round and paints a tail
       // BEHIND the hull; the projection reads negative there and clamps to
-      // zero. A round that folds must still re-stamp its origin at the fold,
+      // zero. D60's side offset does not disturb that: MUZSIDE is square
+      // across the nose, so its projection on a converged velocity is zero,
+      // and MUZINH's tilt is bounded by 0.22 x |vel| against BSPEED. An
+      // argument now, not arithmetic — see js/game.js's twin of this clamp.
+      // A round that folds must still re-stamp its origin at the fold,
       // which is what the BOUNCE branch of the bullet integrator does.
       //   THE COLOUR IS AN ARGUMENT since D43: the smear behind the standard
       // round is the round's own bolt colour, and the ship trails and the
@@ -880,16 +891,26 @@
       }
     }
 
+    // D60: a RIDING flash draws at its seat's PRESENTED pose, the same one
+    // drawShip receives — the idiom this file already uses twice. A flash with
+    // no seat, or a seat that has left, keeps its own frozen world point.
+    const ridePose = (F) => {
+      if (F.seat === undefined) return F;
+      const P = players[F.seat];
+      if (!P) return F;
+      return (view && view.ships && view.ships[P.id]) || P.ship;
+    };
     // explosion flashes: a small white core inside a much wider COLORED ball,
     // re-derived from (age) alone so a repeated render paints the same pixels
     for (const F of flashes) {
       if (F.flash > 0 && F.age < 9) {
         const hue = hueHex(F.hue) || PAL.clay;
         const ff = 1 - F.age / 9;
-        blob(F.x, F.y, (F.big ? 26 : 14) * (0.4 + 0.6 * (1 - ff)) * Math.min(1.4, gl + 0.4),
+        const fp = ridePose(F);
+        blob(fp.x, fp.y, (F.big ? 26 : 14) * (0.4 + 0.6 * (1 - ff)) * Math.min(1.4, gl + 0.4),
              PAL.bright, 0.8 * ff * F.flash);
-        blob(F.x, F.y, (F.big ? 48 : 26) * (0.5 + 0.5 * (1 - ff)), hue, 0.5 * ff * F.flash);
-        blob(F.x, F.y, (F.big ? 85 : 44) * (0.6 + 0.4 * (1 - ff)), hue, 0.35 * ff * F.flash);
+        blob(fp.x, fp.y, (F.big ? 48 : 26) * (0.5 + 0.5 * (1 - ff)), hue, 0.5 * ff * F.flash);
+        blob(fp.x, fp.y, (F.big ? 85 : 44) * (0.6 + 0.4 * (1 - ff)), hue, 0.35 * ff * F.flash);
       }
     }
     // ...and one crisp expanding ring each, on FRESH so there is never a
@@ -901,7 +922,8 @@
       g.strokeStyle = hueHex(F.hue) || PAL.clay;
       g.lineWidth = (F.big ? 3 : 2) * (1 - rf) + 0.5;
       g.beginPath();
-      g.arc(F.x, F.y, (F.big ? 3.1 : 2.2) * F.age + 3, 0, TAU);
+      const rp = ridePose(F);
+      g.arc(rp.x, rp.y, (F.big ? 3.1 : 2.2) * F.age + 3, 0, TAU);
       g.stroke();
     }
 
@@ -942,7 +964,10 @@
     if (K.flash > 0 || K.ring > 0) {
       if (flashes.length >= FLASH_MAX) flashes.shift();
       flashes.push({ x, y, hue: K.hue, big: !!K.big, age: 0,
-                     life: K.big ? 55 : 34, flash: K.flash, ring: K.ring });
+                     life: K.big ? 55 : 34, flash: K.flash, ring: K.ring,
+                     // D60: a RIDING flash remembers whose gun it left, so the
+                     // draw can resolve that seat's PRESENTED pose per frame.
+                     seat: K.ride && typeof ev.seat === "number" ? ev.seat : undefined });
     }
     if (K.parts > 0) spawnBurst(x, y, K, seed);
     // a returning seat starts a new track: the ring is cut HERE rather than

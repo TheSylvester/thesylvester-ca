@@ -161,7 +161,50 @@
   // still gets called; the route is additive. Two different questions — "what
   // did the kernel pay" and "where did the money go" — and a host that muted one
   // by supplying the other would have no way to observe the first.
-  function clearLedger() { routed = []; routedDropped = 0; }
+  // ---- D55's PICKUP STAGGER (PORT-P P-SIM batch 2) ------------------------
+  // Three orbs taken on ONE tick used to be three `pickup` cues in one audio
+  // instant, which the mixer hears as one louder pickup. D55 wants a RUN of
+  // notes, so the cues are queued per seat and released one every
+  // PICKUP_STAGGER ticks.
+  //   THE NUMBER IS STRUCTURAL, NOT A DIAL (D67 class 4). It exists only to
+  // clear js/audio.js's own per-seat gate, which is 45 ms: 4 ticks is 66.7 ms
+  // at 60 Hz and clears it with margin, while 3 ticks is 50.0 ms — 5 ms of
+  // margin against an audio layer that coalesces up to five sim ticks into one
+  // instant. It is not a play number, so it gets no panel row. The read
+  // accessor `pickupStagger()` publishes it, so a leg asserts the pacing
+  // against the constant rather than against a restated literal.
+  //   THE CLOCK IS `stepped`, the host's own tick counter, so the pacing is
+  // deterministic and carries no wall clock.
+  var PICKUP_STAGGER_TICKS = 4;
+  var PICKUP_Q_MAX = 24;
+  var pickupQ = [];
+  var pickupNext = [];
+  function queuePickup(at) {
+    // demo-play.html steps the kernel DIRECTLY and never calls step(), so on
+    // that page nothing would ever drain this queue. There is no production
+    // there either, routeCue is already a no-op, and the page's own sink still
+    // hears every pickup at the landing tick.
+    if (!productionEncounter()) return;
+    var a = at || null;
+    var s = a && typeof a.seat === "number" && isFinite(a.seat)
+      && Math.floor(a.seat) === a.seat && a.seat >= 0 && a.seat <= SEAT_MAX ? a.seat : -1;
+    if (s < 0) { routeCue("pickup", a); return; }
+    if (!pickupQ[s]) pickupQ[s] = [];
+    if (pickupQ[s].length >= PICKUP_Q_MAX) pickupQ[s].shift();
+    pickupQ[s].push({ x: a.x, y: a.y, seat: s });
+  }
+  function drainPickupCues() {
+    for (var s = 0; s < pickupQ.length; s++) {
+      var q = pickupQ[s];
+      if (!q || !q.length) continue;
+      if (stepped < (pickupNext[s] || 0)) continue;
+      routeCue("pickup", q.shift());
+      pickupNext[s] = stepped + PICKUP_STAGGER_TICKS;
+    }
+  }
+  // ...AND THE STAGGER QUEUE CLEARS WITH THE LEDGER. A queue that survived a
+  // restart would sound a pickup for an orb from the room before it.
+  function clearLedger() { routed = []; routedDropped = 0; pickupQ = []; pickupNext = []; }
 
   function routeCredit(seat, value) {
     var enc = productionEncounter();
@@ -444,13 +487,18 @@
   // wanted. `Engine` is a global here — js/engine.js:1675 publishes it and
   // js/demo-kernel.js:425 already calls it bare — and the Node host loads
   // engine, kernel and this file into ONE vm context.
-  //   THE DEATH IS BARE, matching the kernel's own player-round pass
-  // (:4813-4814) rather than the aura's `explodeEnemyBullet`. The two idioms
-  // disagree today — burning a grenade fans seven clusters and shooting the
-  // same grenade fans none — and reconciling them is a balance decision that
-  // does not belong inside D51's arm. Bare also cannot move a kernel gameplay
-  // draw: the compaction at the end of the kernel's own updateBullets takes
-  // the corpse on ITS next step, so THE HOST NEVER SPLICES.
+  //   THE DEATH DETONATES, and D62 (PORT-P) IS THAT DECISION. This used to be
+  // a BARE death, matching the kernel's own player-round pass rather than the
+  // aura's `explodeEnemyBullet`; the two idioms disagreed — burning a grenade
+  // fanned seven clusters and shooting the same grenade fanned none — and
+  // reconciling them was called a balance decision that did not belong inside
+  // D51's arm. The owner made it, the other way round: THE GUN DETONATES, THE
+  // AURA DENIES. So the split happens HERE now, and the halo's death is bare
+  // for every kind. It goes through the kernel's `explodeRound`, which stages
+  // the children, so a gun-born child never enters the live array the sweep at
+  // js/encounter.js is walking. Neither branch splices: the compaction at the
+  // end of the kernel's own updateBullets takes the corpse on ITS next step,
+  // so THE HOST NEVER SPLICES.
   //   AND NO `burst`: the kernel's death FX is kernel-internal, so a host-side
   // kill is visually silent. Named, not worked around from outside.
   //   The AMOUNT guards are `damageKernelBody`'s, for its reason: a floor and
@@ -465,7 +513,11 @@
       source: { cls: Engine.CLASS.SHIP }, baseAmount: amount
     });
     if (dealt === null) return false; // the matrix refused: a SKIP, nothing happened
-    if (round.hp <= 0) round.dead = true;
+    if (round.hp <= 0) {
+      // D62 (PORT-P) — THE POLARITY IS INVERTED. The gun detonates.
+      if (kernel && typeof kernel.explodeRound === "function") kernel.explodeRound(round, "shot");
+      else round.dead = true;
+    }
     return true;
   }
 
@@ -872,7 +924,8 @@
       // cue the pilot is standing next to. The kernel's payload carries `x`,
       // `y` and `seat`; a payload with neither coordinate crosses as undefined.
       cue: function (name, at) {
-        routeCue(name, at);
+        // D55: `pickup` is STAGGERED per seat; every other cue routes at once.
+        if (name === "pickup") queuePickup(at); else routeCue(name, at);
         sink.cue(name, at);
       },
       credit: function (seat, value, at) {
@@ -881,13 +934,17 @@
         // handler runs, production's wallet has already moved, so a handler that
         // reads `Encounter.kingSeat()` sees the answer this payment produced
         // rather than the one before it.
-        // ...AND THE PICKUP CUE RIDES WITH IT (commit D4). Production's own
-        // `stepOrbs` raised `pickup` AT THE ORB and its audio layer attenuates
-        // and pans by distance, so the position is what makes the cue audible
-        // at all. It is raised only when the payment LANDED — a refused
-        // payment is not a pickup, and sounding one would tell a pilot money
-        // arrived that did not.
-        if (routeCredit(seat, value) && at) routeCue("pickup", { x: at.x, y: at.y, seat: seat });
+        // ...AND THE PICKUP CUE NO LONGER RIDES WITH IT. It used to: the cue
+        // was raised here, at the orb, and ONLY when the payment landed, so a
+        // refused payment was silent. D55 (PORT-P) split the two moments — the
+        // money moves at magnet entry and the orb is still in flight — so the
+        // cue now leaves through the kernel's OWN cue channel at the LANDING,
+        // at the taker's hull, and reaches this file through the staggered
+        // `pickup` route above.
+        //   IT COSTS ONE THING, NAMED: the cue and the payment are decoupled,
+        // so an orb that lands after production DECLINED the payment (a
+        // roster-size mismatch) still sounds. R7 owns that question.
+        routeCredit(seat, value);
         sink.credit(seat, value, at);
       },
       // ---- THE HURT ROUTE (S3b lane 3, commit A) -------------------------
@@ -1036,6 +1093,7 @@
     if (!kernel) return false;
     kernel.step(kernel.STEP);
     stepped += 1;
+    drainPickupCues();
     return true;
   }
 
@@ -1499,6 +1557,10 @@
       if (!kernel || typeof kernel.orbDials !== "function") return null;
       return kernel.orbDials();
     },
+    // D55's stagger, READ-ONLY. It is a structural constant, not a dial, and
+    // the leg that proves the pacing reads its value here rather than restating
+    // it — so the day the number moves, the leg moves with it.
+    pickupStagger: function () { return PICKUP_STAGGER_TICKS; },
     flushKernelChildren: function () {
       if (!kernel || typeof kernel.flushChildren !== "function") return 0;
       return kernel.flushChildren();

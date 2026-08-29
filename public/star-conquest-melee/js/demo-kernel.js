@@ -1665,6 +1665,23 @@
     // and the alternative is arithmetic nobody ruled.
     return Math.max(1, n);
   }
+  // ---- THE UNFLOORED HEADCOUNT (D66 / OPEN 8) -----------------------------
+  // `presentCount()` above FLOORS AT ONE and that floor is a RULING, not an
+  // implementation detail: node-golden asserts that an UNCLAIMED room still
+  // receives the successor plane's arc (D8/D14). So `presentCount() > 0` is a
+  // TAUTOLOGY, and a hold written on it degrades to the bare living-pilot test
+  // D66 forbids by name.
+  //
+  // THE DEFAULT STAYS PRESENT. `present[i] !== false` is `presentCount`'s own
+  // predicate: a seat nobody has pushed for counts as PRESENT, which is what
+  // keeps every harness that never calls `setSeatPresent` out of a permanent
+  // hold. This is `presentCount`'s body minus its last line and nothing else.
+  function presentRaw() {
+    const list = seats();
+    let n = 0;
+    for (let i = 0; i < list.length; i++) if (present[i] !== false) n++;
+    return n;
+  }
   function threatFactor() {
     return (1 + THREAT_SLOPE * (presentCount() - 1)) * escalation();
   }
@@ -1690,6 +1707,13 @@
     childRounds.length = 0;
     childBodies.length = 0;
     S.time = 0;
+    // ...AND D66's HELD DURATION, on the same line as the clock it shifts
+    // against. The WIPE reaches this function through production's own
+    // `resetKernel`, and `startWave(1)` on the very next line of that block
+    // stamps a FRESH absolute `due` off `S.time` — so without this clear a room
+    // that wiped mid-hold would shift the new run's wave-1 schedule by the OLD
+    // run's accumulation.
+    holdAccum = 0;
     S.tick = 0;
     S.wave = 1;
     S.waveTime = 0;
@@ -2482,12 +2506,64 @@
   // THE NEXT DEAL, zero when no break is running.
   var CLEAR_HOLD = 8;   // seconds — 480 ticks, the owner's ruling S-bpzbzy
 
+  // ---- D66's HELD DURATION, AND WHY IT IS NOT A FIELD OF `S` --------------
+  // The serializer's census THROWS on any own key of the state it has never
+  // heard of, and that file is not this lane's to touch, so an own key on the
+  // state record would be a hard error on both bounded manifests. The LAZY
+  // spelling — an own key created on first use with a `|| 0` — is the WORSE
+  // half of that trap rather than an escape from it: the key does not exist
+  // until the hold first
+  // arms, so it passes every manifest today and throws on whichever run first
+  // arms. A closure costs nothing, and `resetRun` clears it.
+  var holdAccum = 0;
+
   function updateDirector(dt) {
     S.waveTime += dt;
-    for (let i = S.schedule.length - 1; i >= 0; i--) {
-      if (S.schedule[i].due <= S.time) {
-        queueGroup(S.schedule[i]);
-        S.schedule.splice(i, 1);
+    // ---- THE WIPE'S HOLD (D66 / OPEN 8) ----------------------------------
+    // A room where SOMEBODY IS THERE and NOBODY IS ALIVE does not deal. The
+    // predicate is two different questions and both halves are load-bearing:
+    //
+    //   PRESENCE is `presentRaw()`, the UNFLOORED count — never
+    //   `presentCount()`, whose floor at one makes the test a tautology and
+    //   collapses this into the bare living-pilot test D66 forbids. An
+    //   UNCLAIMED room (every seat parked) has `presentRaw() === 0`, does not
+    //   hold, and still gets its arc: D8/D14.
+    //
+    //   LIVENESS is the kernel's own mirror of production's `hull > 0`, written
+    //   from the pose production pushes.
+    //
+    // IT ACCUMULATES ONLY WHILE A SCHEDULE IS PENDING, and that is a seat
+    // amendment to the ruling's own sentence ("the tick's dt while held"). The
+    // hold does not stop the rest of this function: with the field and the
+    // schedule both empty the room reads CLEAR, the break runs, and
+    // `startWave` stamps FRESH absolute dues off the still-running clock —
+    // which would then take the whole pre-startWave accumulation on release, an
+    // over-delay of eight seconds or more. Gating on a pending schedule costs
+    // one token and is gate-neutral.
+    //
+    // AND THE RELEASE SHIFTS EVERY REMAINING `due`, NOT ONLY THE OVERDUE ONES.
+    // `S.time` NEVER STOPS — it is the global clock and four other sites key on
+    // it (the AUTO wander, the star-eater anchor, the round wiggle), so
+    // freezing it would re-key all of them for the rest of the run. `due` is
+    // ABSOLUTE, so the held duration is added back to the whole schedule:
+    // shifting only the overdue rows would compress wave 1's stagger into a
+    // single ambush the moment somebody respawns, which is the case this ruling
+    // exists to prevent.
+    const roster = seats();
+    let living = 0;
+    for (let i = 0; i < roster.length; i++) if (roster[i] && roster[i].alive) living++;
+    if (presentRaw() > 0 && living === 0) {
+      if (S.schedule.length > 0) holdAccum += dt;
+    } else {
+      if (holdAccum > 0) {
+        for (let i = 0; i < S.schedule.length; i++) S.schedule[i].due += holdAccum;
+        holdAccum = 0;
+      }
+      for (let i = S.schedule.length - 1; i >= 0; i--) {
+        if (S.schedule[i].due <= S.time) {
+          queueGroup(S.schedule[i]);
+          S.schedule.splice(i, 1);
+        }
       }
     }
     // THE BREAK RUNS FIRST, and it runs to completion: a room that cleared has
@@ -4327,8 +4403,12 @@
     const shape = shapeRand(id);
     let hp = 0; // D10's SEVENTH registry obligation. 0 = never shootable, and
                 // the collision pass skips the kind entirely — which is what
-                // buys the undestructible kinds zero runtime, zero wire and
-                // zero cap interaction. The eleven destructible kinds and D27's
+                // bought the tier its whole cost argument: no runtime in the
+                // collision pass, no death event on the wire, no cap interaction.
+                // D61 (PORT-P) SPENT MOST OF IT. broadside, flame, retaliation,
+                // arc and omegaSide are hp 2 now, so the tier is `kineticLance`
+                // and `lightning` and nothing else, and the saving that argument
+                // bought is small. The sixteen destructible kinds and D27's
                 // two chaff kinds set it in their own branches below, and a leg
                 // in test/node-golden.mjs cross-checks every one of them
                 // against the registry's declaration. The registry is the
@@ -4352,11 +4432,11 @@
       curve = e.orbit * rangeOf(shape, 0.16, 0.27);
     } else if (kind === "broadside") {
       speed = 82; maxSpeed = 355; acceleration = 390;
-      r = 4.5; life = 2.35; damage = 8; color = "magenta"; homing = 1.2;
+      r = 4.5; life = 2.35; damage = 8; color = "magenta"; homing = 1.2; hp = 2;
     } else if (kind === "plasma") {
       speed = 102; r = 10; life = 3.2; damage = 10; color = "green"; hp = 4;
     } else if (kind === "flame") {
-      speed = 305; r = 4.5; life = 2.35; damage = 7; color = "orange"; wiggle = 0.45;
+      speed = 305; r = 4.5; life = 2.35; damage = 7; color = "orange"; wiggle = 0.45; hp = 2;
     } else if (kind === "grenade") {
       speed = 68; maxSpeed = 265; acceleration = 175; homing = 1.1;
       r = 9; life = 3.1; damage = 12; color = "blue"; homingDelay = 0.32; hp = 4;
@@ -4364,9 +4444,9 @@
       speed = 115; maxSpeed = 335; acceleration = 250; homing = 0.82;
       r = 5; life = 2.8; damage = 9; color = "violet"; homingDelay = 0.18; hp = 2;
     } else if (kind === "retaliation") {
-      speed = 285; r = 4.5; life = 2.5; damage = 8; color = "orange";
+      speed = 285; r = 4.5; life = 2.5; damage = 8; color = "orange"; hp = 2;
     } else if (kind === "arc") {
-      speed = 225; r = 4; life = 3; damage = 7; color = "orange"; curve = (e.orbit || 1) * 0.18;
+      speed = 225; r = 4; life = 3; damage = 7; color = "orange"; curve = (e.orbit || 1) * 0.18; hp = 2;
     } else if (kind === "spitOrb") {
       speed = 108; r = 13; life = 2.4; damage = 12; color = "orange"; specialTimer = 1.45; hp = 6;
     } else if (kind === "serpentFire") {
@@ -4376,7 +4456,7 @@
     } else if (kind === "omegaSphere") {
       speed = 148; r = 11; life = 3.4; damage = 12; color = "cyan"; hp = 6;
     } else if (kind === "omegaSide") {
-      speed = 325; r = 3.6; life = 2.6; damage = 6; color = "cyan";
+      speed = 325; r = 3.6; life = 2.6; damage = 6; color = "cyan"; hp = 2;
     } else if (kind === "darkFire") {
       speed = 255; r = 5; life = 3.5; damage = 8; color = "red"; wiggle = 0.28; hp = 2;
     } else if (kind === "vortex") {
@@ -4538,6 +4618,13 @@
           child.r = Math.max(4.5, b.r * 0.68);
           child.damage = Math.max(4, b.damage - 2);
           child.specialTimer = child.generation > 0 ? 0.72 : 0;
+          // OPEN 6 (PORT-P) — THE CHILD DECAYS 6 -> 4 -> 2. A generation-2
+          // parent bears generation-1 children at hp 4 and generation-0
+          // grandchildren at hp 2, so the chain gets cheaper to answer at every
+          // step. The ternary is deliberate: an `hp - 2` spelling would read the
+          // parent's POST-KILL hp, which is 0 on an exact kill and negative on an
+          // overkill (js/abilities.js ships a dmg-5 round through this door).
+          child.hp = child.generation > 0 ? 4 : 2;
         }
       }
       emitShockwave(b.x, b.y, "magenta", 7, 45, 0.34);
@@ -4627,12 +4714,18 @@
   // D67'S FOUR ORB DIALS. Same seam as `auraDamage`, one difference that
   // matters: these default to the SHIPPED numbers, not to zero, because every
   // surface that never pushes them (the Node replay, the bounded harness,
-  // demo-play) must keep flying today's orb. A life of 0 is not a quiet dial,
-  // it is every orb dead on its spawn tick — so a non-finite push is REFUSED
-  // and the current value stands, rather than being coerced to 0.
-  var ORBLIFE = 8;
-  var ORBMAGNET = 185;
-  var ORBRING = 15;
+  // demo-play) must keep flying today's orb — so they move WITH js/game.js's
+  // own `let ORBLIFE` / `ORBMAGNET` / `ORBRING`, never alone: production's
+  // pushOrbDials() writes those over these on EVERY tick, so a kernel-only
+  // edit is INERT in play. (DE-NUMBERED at FIX 1, standing rule 15: this line
+  // carried their LINE NUMBERS, and the same commit's prose edits above them
+  // grew the file by 19 lines, so the cite went stale inside the commit that
+  // wrote it. The SYMBOL is the pin.) A life of 0 is not a quiet dial, it is every
+  // orb dead on its spawn tick — so a non-finite push is REFUSED and the
+  // current value stands, rather than being coerced to 0.
+  var ORBLIFE = 30;
+  var ORBMAGNET = 420;
+  var ORBRING = 25;
   var ORBPULL = 720;
   function setOrbLife(n) {
     ORBLIFE = Number.isFinite(n) && n > 0 ? n : ORBLIFE;
@@ -4719,23 +4812,21 @@
         if (auraBite(B, o, Engine.targetClassOf(o.kind)) && o.hp <= 0) {
           // DENIAL ONLY — D10's REWARD rule, and it is a reward rule: no orb,
           // no xp, no score, no entry (js/engine.js, the ordnance taxonomy).
-          // IT IS NOT A DESCENDANT RULE. A `grenade`, a `spitOrb` and a
-          // generation-bearing `splitter` each carry 7/3/3 children that are
-          // part of the round's identity, not part of its payout, and a killer
-          // that suppressed them would be deciding balance by accident. So the
-          // death takes the file's OWN impact idiom, copied from the
-          // enemy-round-vs-hull branch below: the three splitting kinds go
-          // through `explodeEnemyBullet`, everything else dies bare.
+          // D62 (PORT-P) MADE IT A DESCENDANT RULE TOO, and inverted the
+          // polarity that used to live here. A `grenade`, a `spitOrb` and a
+          // generation-bearing `splitter` each carry 7/3/3 children, and this
+          // arm used to fan them: the halo made the same children the gun
+          // could not. The owner ruled the opposite way round — THE GUN
+          // DETONATES, THE AURA DENIES — so the halo's death is now bare for
+          // every kind, and the split moved to production's own door at
+          // js/encounter-host.js's `damageKernelRound`, through the kernel's
+          // staged `explodeRound` wrapper.
           //
-          // The children are STAGED (childStaging is up around this whole
-          // walk) and land through `flushKernelChildren` after production's
-          // combat window, standing still, first eligible next tick — the
-          // same contract the aura's BODY kills already have.
-          if (o.kind === "grenade" || o.kind === "spitOrb" || o.kind === "splitter") explodeEnemyBullet(o, "aura");
-          else {
-            o.dead = true;
-            burst(o.x, o.y, o.color, 4, 62);
-          }
+          // childStaging is still up around this whole walk, so the aura's
+          // BODY kills keep their contract unchanged; there is simply nothing
+          // left for a round death to stage here.
+          o.dead = true;
+          burst(o.x, o.y, o.color, 4, 62);
         }
       }
     }
@@ -4767,8 +4858,10 @@
     // 280 x 280 at a full board and four times that per seat at PORT-S. Testing
     // `hp > 0` per PAIR would pay that price for the fourteen kinds that can
     // never be hit; building the list ONCE pays it only for the ones that can.
-    // That is what buys the hp-0 tier its "zero runtime" — the promise D10
-    // costed the tier on.
+    // That is what bought the hp-0 tier its "zero runtime" — the promise D10
+    // costed the tier on. D61 (PORT-P) spent most of it: the tier is two kinds
+    // now (`kineticLance` and `lightning`), so the saving is small and the
+    // list-building argument above is what still holds the cost down.
     //
     // IT IS A SNAPSHOT, AND THE mineShard BIRTH-TICK TRAP IS WHY. This function
     // reads S.bullets' LIVE length, so a round born during it — the eight
@@ -5297,6 +5390,7 @@
     S.orbs.push({
       id: id, x: x, y: y, px: x, py: y,
       vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
+      captured: false,
       life: ORBLIFE, phase: rangeOf(gen, 0, TAU), value: value || 1, dead: false
     });
   }
@@ -5338,6 +5432,14 @@
   // would race the sweep it is meant to serve. `life` is suspended for the
   // break and resumes with it, so nothing is banked that a player did not earn
   // and nothing is lost to a clock that started before the room stood still.
+  //
+  // THERE ARE TWO SUSPENSIONS NOW AND THEY ARE DIFFERENT SUSPENSIONS. This one
+  // is the SWEEP's: temporary, room-wide, and it ends when the break does.
+  // D55 (PORT-P) added the CAPTURE's: permanent and per orb. A captured orb has
+  // been paid for, so its clock stops for good and the expiry can no longer
+  // take it — see `!o.captured` on the decay and on the expiry below. A reader
+  // who knows only the sweep will read the second guard as a duplicate of the
+  // first, and it is not.
   var CLEAR_SWEEP_ACCEL = 27000;   // px/s^2 — production's clearPull 7.5/tick^2
   var CLEAR_SWEEP_VMAX = 3600;     // px/s   — production's clearVmax 60/tick
 
@@ -5347,12 +5449,27 @@
     for (let i = 0; i < S.orbs.length; i++) {
       const o = S.orbs[i];
       setPrevious(o);
-      if (!sweeping) o.life -= dt;
+      if (!sweeping && !o.captured) o.life -= dt;
       o.phase += dt * 5;
       const p = pilotAt(o.x, o.y);
       const dx = delta(o.x, p.x, W);
       const dy = delta(o.y, p.y, H);
       const d = Math.hypot(dx, dy) || 1;
+      // D55 (PORT-P) — THE CREDIT IS AT CAPTURE, and the gate is HOISTED OUT
+      // of the branch below on purpose. The magnet arm is the ELSE of the
+      // between-wave sweep, and while the sweep runs it is never reached — so a
+      // capture test living inside it would miss every sweep collection, which
+      // is most of them. Sweep or no sweep, an orb crosses the band between
+      // ORBMAGNET and ORBRING at no more than CLEAR_SWEEP_VMAX, so it is
+      // sampled inside the magnet before it can land.
+      //   THE PAYEE IS `p` — `pilotAt`, the NEAREST living seat. The ring's
+      // ascending-seat tie-break retires with the ring credit: one payee rule,
+      // and at four seats an orb equidistant between two of them can now be
+      // paid to a different seat than it would have been.
+      if (p.alive && !o.captured && d < ORBMAGNET) {
+        o.captured = true;
+        creditPickup(o.value || 1, p, o);
+      }
       if (p.alive && sweeping) {
         // WORLD-WIDE, and capped rather than accumulated: production's sweep
         // clamps the speed the same way, so an orb crosses the room at a
@@ -5369,9 +5486,11 @@
         o.vx += dx / d * pull * dt;
         o.vy += dy / d * pull * dt;
       }
-      // Taken BEFORE the move, because the pickup test reads the orb's
+      // Taken BEFORE the move, because the landing test reads the orb's
       // pre-move point and the move is two lines below. Same numbers, and the
       // reader does not have to hold a stale `d` in their head to see it.
+      // D55: the block this guards is the LANDING — removal and the cue — and
+      // no longer the credit, which was paid at magnet entry above.
       let taker = null;
       for (let s = 0; s < list.length; s++) {
         const t = list[s];
@@ -5390,11 +5509,20 @@
         o.y = wrap(o.y + o.vy * dt, H);
       }
       if (taker !== null) {
+        // D55 — THE LANDING. The money moved at magnet entry; what happens here
+        // is the removal and the SOUND, at the hull, on the tick the orb
+        // arrives. The seat travels as an INDEX, never as a live record: the
+        // host's routeCue refuses a non-numeric seat and would route the cue to
+        // nobody, and creditPickup's own prose forbids handing a seat record
+        // across the sink.
         o.dead = true;
-        creditPickup(o.value || 1, taker, o);
+        sink.cue("pickup", { x: taker.x, y: taker.y, seat: seats().indexOf(taker) });
         particle(taker.x, taker.y, fxRange(-30, 30), fxRange(-30, 30), "gold", 0.35, 2, "spark");
       }
-      if (o.life <= 0) o.dead = true;
+      // ...AND A CAPTURED ORB NEVER EXPIRES. It has been paid for; sweeping it
+      // off the field before it lands would delete a flight the player already
+      // owns.
+      if (o.life <= 0 && !o.captured) o.dead = true;
     }
     S.orbs = S.orbs.filter(function (o) { return !o.dead; });
   }
@@ -5436,6 +5564,13 @@
   // credit channel carried the seat and the value and nothing else, so a host
   // routing it into that queue could only raise a POSITIONLESS pickup — which
   // `att()` reads as "nobody is near it" and silences.
+  //
+  // D55 (PORT-P) MOVED THE CUE OFF THIS PAYMENT, so the paragraph above is
+  // history rather than contract. The credit is paid at MAGNET ENTRY now and
+  // the cue is raised at the LANDING, in the ring block of `updateOrbs`, at the
+  // taker's hull — the position the audio layer wants. `at` is therefore the
+  // CAPTURE point: it is what a host that wants to know where the orb was
+  // caught should read, and it is NOT where anything sounds.
   //
   // BEHAVIOUR-FREE HERE. No state is written, the sink leaves this file, and a
   // host that ignores the argument is exactly where it was.
@@ -5633,6 +5768,22 @@
     setOrbRing: setOrbRing,
     setOrbPull: setOrbPull,
     orbDials: orbDials,
+    // D62 (PORT-P) — THE SPLIT'S ONE PUBLIC DOOR. `explodeEnemyBullet` stays
+    // private; this wrapper is what production's `damageKernelRound` calls on
+    // a round it has just killed. It raises `childStaging` for the call, so a
+    // gun-born child rides the SAME queue the aura's children ride and lands
+    // through `flushKernelChildren` after production's combat window — never
+    // into the live `S.bullets` array the sweep at js/encounter.js is walking,
+    // where it would be born with px === x and be a candidate for the very
+    // next bullet of the same tick.
+    explodeRound: function (round, reason) {
+      if (!round || round.dead || round.exploded) return false;
+      var was = childStaging;
+      childStaging = true;
+      explodeEnemyBullet(round, reason);
+      childStaging = was;
+      return true;
+    },
     flushChildren: flushChildren,
     pendingChildren: pendingChildren,
     poseDriven: poseDriven,
