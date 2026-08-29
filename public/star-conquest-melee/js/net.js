@@ -2583,6 +2583,10 @@
     // js/demo-render.js and outlives this client, so a list left behind here is
     // a list some later page draws.
     if (window.DemoRender && DemoRender.setNetRounds) DemoRender.setNetRounds(null);
+    // ...and the BODY handle with it, for the identical reason (S-fxg8ts): it
+    // is module-level in js/demo-render.js and outlives this client, so a list
+    // left behind here is a list some later page draws.
+    if (window.DemoRender && DemoRender.setNetBodies) DemoRender.setNetBodies(null);
   }
 
   let starving = false; // set by present()'s starvation branch for the frame it
@@ -3015,13 +3019,19 @@
       const bodyLead = pol.project > 0
         ? Math.min(lead * pol.project, e0.t > 0 ? e0.t : Infinity) : 0;
       const pose = presentBody(pol, e0, e1, k, h, cap, held, bodyLead, stats.r);
+      // HOISTED, because each is now read TWICE and a second expression is a
+      // second thing to keep in step: `t` is both the wire's own key and the
+      // renderer's `timer`, and the presented heading is both `face` and the
+      // renderer's `angle`/`pangle`. One computation, two names.
+      const tNow = e1 && !held ? lerp(e0.t, e1.t, k) : e0.t;
+      const faceNow = e1 && !held ? alerp(e0.face, e1.face, k) : e0.face;
       return {
         id: e0.id, type,
         x: pose.x, y: pose.y,
         vx: 0, vy: 0, r: stats.r, hp: e0.hp | 0, stats, orbDrop: 0,
         mode, cd: 0,
-        t: e1 && !held ? lerp(e0.t, e1.t, k) : e0.t,
-        face: e1 && !held ? alerp(e0.face, e1.face, k) : e0.face,
+        t: tNow,
+        face: faceNow,
         lockA: 0,   // R1.12: lockA is not on the v11 wire — it was a hardcoded
                     // zero at server/sim-host.mjs and the encoder's conditional
                     // triple that read it was unreachable
@@ -3037,13 +3047,84 @@
         // BIT — and lerping any of them across a mode change manufactures a
         // value the sim never held, which is the same refusal `t` and the
         // boundary hold above already make. They ride s0 as they arrived.
-        //   NO DRAW IS ADDED HERE. js/demo-render.js's body loop still walks
-        // the kernel's own S.enemies and there is no setNetBodies seam — the
-        // wire half is R7's and the draw half is the look plane's (the same
-        // split DRAW-2 was refused under at r7a commit 8). What lands here is
-        // that the fields ARRIVE and are named; nothing new paints.
+        //   AND NOW THEY PAINT (S-fxg8ts). What stood here said "NO DRAW IS
+        // ADDED HERE ... there is no setNetBodies seam — the wire half is R7's
+        // and the draw half is the look plane's". The draw half landed: the
+        // seam exists, js/demo-render.js's body loop reads the list this map
+        // builds, and the fields below are what it reads. Still NO NEW DRAW —
+        // the shipped `drawEnemy` is handed this body unedited, which is the
+        // same rule DRAW-2 was refused under.
         lance: e0.lance, lanceAngle: e0.lanceA,
         dashAngle: e0.dashA, phase: e0.phase, enraged: !!e0.rage,
+        // ---- THE RENDERER'S OWN NAMES (S-fxg8ts) ---------------------------
+        // MEASURED, NOT GUESSED. The subject is the union of `e.<key>` reads
+        // over js/demo-render.js's body draw (drawEnemy and everything it
+        // calls): type state timer phase lance enraged emerge emergeMax angle
+        // pangle x y px py shieldPulse shield pphase lanceAngle id hit
+        // weakPulse vulnerable supportTarget shieldHeat r dashAngle
+        // chargeAngle brokenNodes. Everything above already answers part of
+        // it; this block answers the rest, IN THE SAME LITERAL — a second
+        // object built per body per frame would be a second allocation and a
+        // second place for the two name sets to drift.
+        //
+        //   `state` is the biggest miss of the set: 36 reads, and `drawEnemy`
+        // BRANCHES on it for every telegraph. It is the same string `mode`
+        // carries — the gather calls the kernel's `state` "mode" and the wire
+        // calls it `state`; the renderer calls it `state` too, so it gets both.
+        state: mode,
+        //   THE HEADING, under the two names the draw rotates by. `angle` is
+        // the pose it draws at and `pangle` the previous one; the successor
+        // field renders at ALPHA 1 (js/game.js drawSuccessorField:
+        // `DemoRender.render(..., 1)`), so `lerpAngle(pangle, angle, 1)` is
+        // `angle` and the pair is the presented heading twice. VERIFIED at the
+        // gather rather than assumed: server/sim-host.mjs maps `face: e.angle`
+        // — the wire's `face` IS the kernel body's `angle`.
+        angle: faceNow, pangle: faceNow,
+        //   THE PREVIOUS POSE, for the same reason: `renderPos` reads `o.px`
+        // and `o.py` and at alpha 1 returns `px + (x - px) * 1`. The presented
+        // pose twice is exact there, and leaving them undefined is a NaN
+        // position rather than a wrong one.
+        px: pose.x, py: pose.y,
+        //   THE PER-STATE CLOCK, in SECONDS, and the unit was verified at both
+        // ends. server/sim-host.mjs's gather maps `t: e.timer`, and the kernel
+        // counts that field down with `e.timer -= dt` in SECONDS
+        // (js/demo-kernel.js: 1.35, 1.8, 5.8, 0.95 ...). Every renderer read is
+        // `1 - e.timer / <a seconds constant>`, so the wire's `t` needs no
+        // conversion at all: `t / 60` would be wrong by sixty and a fold to 0
+        // would pin every telegraph at FULL CHARGE for its whole life.
+        //   THE QUANTUM IS A KNOWN LOSS AND IT IS FILED, NOT PAPERED OVER.
+        // js/wire.js's ROW_BODY spells `["t", U(16)]`, and `putField`'s `u`
+        // arm ROUNDS — so a 1.35 s charge crosses as 1 and a 0.12 s one as 0.
+        // The clock is the right clock in the right unit at a one-second
+        // quantum. The bracket lerp above ramps it between the integer stops,
+        // so a telegraph sweeps rather than steps; a `Q(16, 1/60)` row would
+        // make it exact and costs no bits, and that is a WIRE change, which
+        // this seam is not allowed to make. Filed with the state ENUM as R8a
+        // debt, beside the row it belongs to.
+        timer: tNow,
+        //   THE HIT TINT, which the wire already carries. `drawEnemy` reads
+        // `e.hit > 0` for its stroke colour and width; the gather sends
+        // `flash: (e.hit || 0) * 60` and the decode names it `flash` above, so
+        // the value is in hand and the divide gives it back under the
+        // renderer's name. `fl` is U(8), a whole tick, and the tint is a
+        // boolean read — the quantum cannot be seen.
+        hit: (e0.fl || 0) / 60,
+        //   ...AND THE ZERO FOLDS. Every remaining key the draw reads, present
+        // and false, so no branch reads `undefined`. These are NOT on the wire
+        // and this is not a claim that they are: an absent shield is no
+        // shield, an absent emergence is a body already emerged, an absent
+        // node count is an unbroken hull. `emergeMax: 1` rather than 0 because
+        // the draw divides by it on the arm `emerge > 0` guards — a fold that
+        // can never divide by zero even if the guard moves.
+        //   `supportTarget: null` is safe at its reader: `findEnemy` is the
+        // kernel's and its first line is `if (!id) return null`, and
+        // `drawSupportLink` returns on a null target. Checked, not assumed.
+        //   `pphase` mirrors `phase` for the star-eater's segment lerp, the
+        // same alpha-1 identity `pangle` rides.
+        emerge: 0, emergeMax: 1,
+        shield: 0, shieldPulse: 0, shieldHeat: 0,
+        weakPulse: 0, vulnerable: false, brokenNodes: 0,
+        supportTarget: null, chargeAngle: 0, pphase: e0.phase,
         // the radar latch's PING is a PAST world point, draw-only: it is held
         // from s0 and never interpolated, never projected, never fed to any
         // interpolator. prT joins the hold column explicitly here.
@@ -3237,6 +3318,16 @@
     // demo's BOLT" red on the first full gate). A dormant store is not a
     // private draw buffer. The setter owns a list of its own.
     if (window.DemoRender && DemoRender.setNetRounds) DemoRender.setNetRounds(NETV.rounds);
+    // ...AND THE BODIES, THE SAME HAND-OFF (S-fxg8ts). `NETV.enemies` was
+    // filled by the body map above, in this same function and above this line,
+    // so the list handed over is this tick's. One setter, no new draw code:
+    // js/demo-render.js's body loop walks ONE list and it is handed this one,
+    // exactly as the round loop is handed `NETV.rounds`.
+    //   THIS IS WHY THE ENEMIES WERE HITTABLE AND INVISIBLE. The decode has
+    // filled this list since r7a commit 6 and `Encounter.mapState()` has fed it
+    // to the hit tests and the edge arrows ever since — but nothing gave it to
+    // the DRAW, so the renderer walked the dormant kernel's empty `S.enemies`.
+    if (window.DemoRender && DemoRender.setNetBodies) DemoRender.setNetBodies(NETV.enemies);
 
     // --- spawn groups: the portals and the incoming markers draw from the
     // same fields the sim's own groups carry
@@ -3650,7 +3741,7 @@
       clearInterval(pingTimer); // the RTT probe stands down with the socket
       pendingInputs.length = 0;
       if (ws) ws.close(1000);
-      clearDerived();  // ...and the renderer's round handle with the stores
+      clearDerived();  // ...and the renderer's round AND body handles with the stores
       note("NET closed by the client", false);
     },
     // test seam, nothing shipped calls it: feed one decoded snapshot into the

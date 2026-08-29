@@ -308,6 +308,20 @@
   let netRounds = null;
   function setNetRounds(list) { netRounds = list || null; }
 
+  // ...and the BODIES, the same seam one plane over (S-fxg8ts). The wire has
+  // decoded bodies into `Net.view().enemies` since r7a commit 6, and
+  // js/encounter.js's mapState() has handed that list to the hit tests and the
+  // edge arrows since — but the DRAW read the dormant kernel's own S.enemies,
+  // which is empty on a net client. So in `?mp` the enemies were hittable and
+  // INVISIBLE. The round loop's own note names this split ("the wire half is
+  // R7's and the draw half is the look plane's"); this is the draw half.
+  //   ONE SETTER, no new draw code, exactly as setNetRounds: the body loop
+  // already walks a list and it is handed this one. `null` means "read the
+  // kernel's own store", which is every solo page and every suite that does
+  // not set it, so the shipped path pays one null test.
+  let netBodies = null;
+  function setNetBodies(list) { netBodies = list || null; }
+
   function setKernel(k) {
     kernel = k;
     S = k.S;
@@ -1608,6 +1622,14 @@
   }
 
   function drawConstructorGrid(ctx, e, pos, glowPass) {
+    // THE ONE OTHER `S.enemies` WALK, AND IT STAYS ON THE KERNEL (S-fxg8ts).
+    // It IS a draw read — the grid lines to a constructor's turrets — so the
+    // body loop's net arm was measured against it and REFUSED: the walk keys
+    // on `parent`, and `parent` is on NO wire row (js/wire.js ROW_BODY). A
+    // decoded body carries no such key, so pointing this at the net list would
+    // find `undefined === e.id` for every body and draw exactly what it draws
+    // now, which is nothing. A constructor's grid reaching a net client needs
+    // the FIELD on the wire first; that is a wire round's, not this seam's.
     const children = [];
     for (let i = 0; i < S.enemies.length; i++) if (!S.enemies[i].dead && S.enemies[i].parent === e.id && S.enemies[i].type === "turret") children.push(S.enemies[i]);
     if (!children.length) return;
@@ -2132,9 +2154,21 @@
       drawBullet(wx, rounds[i], alpha, false);
       if (lit) drawBullet(lx, rounds[i], alpha, true);
     }
-    for (let i = 0; i < S.enemies.length; i++) {
-      drawEnemy(wx, S.enemies[i], alpha, false);
-      if (lit) drawEnemy(lx, S.enemies[i], alpha, true);
+    // THE SAME `netLive` CONDITION the round loop above reads, and the same
+    // fallback: a net client draws the wire's bodies, every other page draws
+    // the kernel's. Both arms walk ONE list through the SAME drawEnemy — a
+    // second body draw inside js/net.js is DRAW-2, and it stays refused.
+    const bodies = (netLive && netBodies && netBodies.length) ? netBodies : S.enemies;
+    for (let i = 0; i < bodies.length; i++) {
+      // A KIND THE WIRE COULD NOT NAME decodes with `type: null` (js/net.js,
+      // the BODY_R_UNKNOWN block), and STATS has no row for it — drawEnemy's
+      // second line reads `STATS[e.type].r` and a throw there takes the WHOLE
+      // frame, not one body. Skipped instead. On the solo path this is a
+      // proven no-op: every kernel body's `type` is a STATS key by
+      // construction, so the test is true for all of them.
+      if (!STATS[bodies[i].type]) continue;
+      drawEnemy(wx, bodies[i], alpha, false);
+      if (lit) drawEnemy(lx, bodies[i], alpha, true);
     }
     drawFragments(wx, alpha);
     drawParticles(wx, alpha, false);
@@ -2154,6 +2188,9 @@
     // kernel's own store", which is every solo page and every suite that does
     // not set it — so this costs the shipped path one null test.
     setNetRounds: setNetRounds,
+    // ...and the net client's BODY list, presented, under the same contract
+    // (S-fxg8ts). null means "read the kernel's own store".
+    setNetBodies: setNetBodies,
     render: render,
     getCamOrigin: getCamOrigin,
     // Kept EXPORTED AND UNCHANGED for compatibility. New callers want
