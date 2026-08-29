@@ -458,7 +458,12 @@
   //   It exists for the contact-violation sentinel (D28): a burning pilot must
   // never take BODY-CONTACT damage, and without the kind the server sees a
   // legitimate beam hit and a defective ram hit as the same event.
-  function emit(kind, at, gain, seat, termSeq, srcKind) {
+  // `col` (D64, PORT-P) is a KERNEL COLOUR NAME on a destruction cue, and it is
+  // SERVER-SIDE ONLY by the SAME construction as srcKind above: the encoder's
+  // allow-list never learns it, and js/net.js re-builds an inbound cue as four
+  // keys, so a ?mp client draws the row's own fallback hue. Widening either is
+  // R7's wire question, not this lane's.
+  function emit(kind, at, gain, seat, termSeq, srcKind, col) {
     // (THE STALL SIGNATURE'S DAMAGE TERM IS NOT COUNTED HERE — fix 11. It was,
     // and the scoped check found what a cue stream admits: a `hit` on a wall, a
     // PvP `blast` and a shot into a nonblocking mine are all emitted here and
@@ -467,7 +472,8 @@
     // `damageEnemy`'s own funnel where the role and the credit both are.)
     EVENTS.push({ kind, at: at ? { x: at.x, y: at.y } : null, gain, seat,
                   ...(termSeq !== undefined ? { termSeq } : {}),
-                  ...(srcKind !== undefined ? { srcKind } : {}) });
+                  ...(srcKind !== undefined ? { srcKind } : {}),
+                  ...(col !== undefined ? { col } : {}) });
   }
   // Ordered: index 0 fired first. events() is a readonly view of the events
   // queued this tick; drainEvents() hands them over and clears the queue.
@@ -1990,11 +1996,24 @@
         //     would put an unrepresented event on a channel. The body branch's
         //     cue rule is untouched.
         //   - NO IMPACT FX and no splash: see the arm's own block above.
-        //   - THE DEATH IS THE DOOR'S, and it is BARE. The host sets
-        //     `o.dead = true` and the KERNEL'S OWN next step compacts the
-        //     corpse out of `S.bullets`. This file never splices that array.
+        //   - THE DEATH IS THE DOOR'S, and it is BARE — WITH D64'S ONE
+        //     EXCEPTION. The host sets `o.dead = true` and the KERNEL'S OWN
+        //     next step compacts the corpse out of `S.bullets`; this file never
+        //     splices that array. What D64 adds is a LOOK and nothing else: one
+        //     `roundDeath` cue on the kill, carrying the round's own colour. It
+        //     changes no counter, no hp and no array.
         b.dead = true; // consumed exactly once — the game sweep removes it
         if (EncounterHost.damageKernelRound(kr, b.dmg)) E.missilesShot++;
+        //   D64 (PORT-P) — THE DESTRUCTION SPARK, and its condition is
+        // `kr.dead` READ AFTER THE DOOR. damageKernelRound returns true on
+        // DAMAGE, not on a kill, so hanging this off the call's own value
+        // sparks ceil(hp / dmg) times per kill — three on an hp-6 round at the
+        // shipped BDMG 2. The position is the ROUND'S OWN, not the intercept:
+        // `ix`/`iy` are declared inside the BODY branch above and are NOT in
+        // scope here (a measured ReferenceError that aborts the suite with zero
+        // FAIL lines). `kr.color` is the kernel colour NAME and js/fx.js
+        // resolves it through PAL.kernel.
+        if (kr.dead) emit("roundDeath", { x: kr.x, y: kr.y }, undefined, shooter, undefined, undefined, kr.color);
         continue;
       }
       if (vs >= 0) {

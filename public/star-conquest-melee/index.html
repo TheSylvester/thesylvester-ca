@@ -195,6 +195,21 @@
           <input id="bfactor" type="range" min="0" max="4" step="0.05">
           <output id="bfactor-out" for="bfactor"></output>
         </div>
+        <div class="row">
+          <label for="bdmg">bolt damage</label>
+          <input id="bdmg" type="range" min="0.5" max="10" step="0.5">
+          <output id="bdmg-out" for="bdmg"></output>
+        </div>
+        <div class="row">
+          <label for="bround">bolt aperture</label>
+          <input id="bround" type="range" min="1" max="12" step="0.5">
+          <output id="bround-out" for="bround"></output>
+        </div>
+        <div class="row">
+          <label for="muzzle">muzzle</label>
+          <input id="muzzle" type="range" min="0" max="30" step="0.5">
+          <output id="muzzle-out" for="muzzle"></output>
+        </div>
       </div>
       <div class="col">
         <div class="row">
@@ -325,6 +340,16 @@
           <output id="starlit-out" for="starlit"></output>
         </div>
         <div class="row">
+          <label for="bloom">bloom</label>
+          <input id="bloom" type="range" min="0" max="3" step="0.1">
+          <output id="bloom-out" for="bloom"></output>
+        </div>
+        <div class="row">
+          <label for="player-halo-a">player halo</label>
+          <input id="player-halo-a" type="range" min="0" max="1" step="0.05">
+          <output id="player-halo-a-out" for="player-halo-a"></output>
+        </div>
+        <div class="row">
           <label for="reseed">starfield</label>
           <span class="slot"><button id="reseed" type="button">reseed</button></span>
           <output for="reseed">deal a new sky</output>
@@ -347,6 +372,26 @@
           <label for="pvp-rewind">pvp rewind</label>
           <input id="pvp-rewind" type="range" min="0" max="200" step="1">
           <output id="pvp-rewind-out" for="pvp-rewind"></output>
+        </div>
+        <div class="row">
+          <label for="orb-life">orb life</label>
+          <input id="orb-life" type="range" min="2" max="60" step="1">
+          <output id="orb-life-out" for="orb-life"></output>
+        </div>
+        <div class="row">
+          <label for="orb-magnet">orb magnet</label>
+          <input id="orb-magnet" type="range" min="0" max="1280" step="5">
+          <output id="orb-magnet-out" for="orb-magnet"></output>
+        </div>
+        <div class="row">
+          <label for="orb-ring">orb ring</label>
+          <input id="orb-ring" type="range" min="5" max="100" step="1">
+          <output id="orb-ring-out" for="orb-ring"></output>
+        </div>
+        <div class="row">
+          <label for="orb-pull">orb pull</label>
+          <input id="orb-pull" type="range" min="0" max="3000" step="30">
+          <output id="orb-pull-out" for="orb-pull"></output>
         </div>
       </div>
     </section>
@@ -513,15 +558,15 @@
     </section>
   </div>
 </div>
-<script>window.BUILD="440a5ad";</script>
-<script src="js/palette.js?v=440a5ad"></script>
-<script src="js/abilities.js?v=440a5ad"></script>
-<script src="js/engine.js?v=440a5ad"></script>
-<script src="js/game.js?v=440a5ad"></script>
-<script src="js/encounter.js?v=440a5ad"></script>
-<script src="js/audio.js?v=440a5ad"></script>
-<script src="js/net.js?v=440a5ad"></script>
-<script src="js/fx.js?v=440a5ad"></script>
+<script>window.BUILD="6a11021";</script>
+<script src="js/palette.js?v=6a11021"></script>
+<script src="js/abilities.js?v=6a11021"></script>
+<script src="js/engine.js?v=6a11021"></script>
+<script src="js/game.js?v=6a11021"></script>
+<script src="js/encounter.js?v=6a11021"></script>
+<script src="js/audio.js?v=6a11021"></script>
+<script src="js/net.js?v=6a11021"></script>
+<script src="js/fx.js?v=6a11021"></script>
 <script>
 // THE FLIP (PORT-W, 2026-08-25). The demo pair below is DORMANT here — hosted by
 // PORT-R's reproduction gate, stepped by nothing this page runs. But the kernel
@@ -539,10 +584,10 @@
 // LITERAL is still nobody's business short of the instrument rework it forces.
 globalThis.DEMO_WORLD_BOUNDED = true;
 </script>
-<script src="js/demo-kernel.js?v=440a5ad"></script>
+<script src="js/demo-kernel.js?v=6a11021"></script>
 <!-- S3b lane 1: the adapter facade, SIM_FILES member 7. -->
-<script src="js/encounter-host.js?v=440a5ad"></script>
-<script src="js/demo-render.js?v=440a5ad"></script>
+<script src="js/encounter-host.js?v=6a11021"></script>
+<script src="js/demo-render.js?v=6a11021"></script>
 <script>
 // ---- THE FLIP (PORT-S S3b lane 3, commit C) --------------------------------
 // THE KERNEL IS THE ENCOUNTER ON THIS PAGE FROM THIS COMMIT. It was hosted

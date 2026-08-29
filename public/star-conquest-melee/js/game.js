@@ -179,14 +179,31 @@ let BLIFE = 1.05;       // bullet lifetime, seconds. D50 / OPEN 2 (PORT-F): the 
                         // decrements, tests, THEN moves, so 1.05 s buys it 62 moves where
                         // production's move-then-decrement buys 63. Production's round reaches
                         // 1.6 % further than the demo it copies. Stated, not corrected.)
+let MUZZLE = 0;         // D60 / OPEN 12 (PORT-P): px along the SIM NOSE (P.heading, the hashed
+                        // number) that the round is BORN at, on BOTH spawns. Slider, weapons
+                        // tab, 0-30 step 0.5. IT SHIPS AT 0 — the round is still born at the
+                        // ship's CENTRE and every fixture is byte-identical, because
+                        // `x + 0 * cos(h)` is exactly `x` for any finite pose (0 * finite = +-0,
+                        // x + 0 = x, and a pose clamped to [SHIP_R, WW - SHIP_R] is never -0).
+                        // The MECHANISM is here and only the DEFAULT is open: OPEN 12 asks the
+                        // owner to fly it. Moving the default off 0 MOVES
+                        // tests/fixtures/golden.json — measured at 10: node-golden 226/233,
+                        // seven records over three traces — so it is the FREEZE commit's
+                        // licensed recapture, never this one's.
+let BROUND = 5.5;       // D67 / OPEN 9 (PORT-P): the bolt aperture, promoted from the spawn
+                        // literal so the owner can fly it. r x2.5, WAS 2.2. The rail's own
+                        // spawn radius (js/abilities.js) is pinned EQUAL to this number by
+                        // test/node-golden.mjs — move one and the oracle reds. Slider, weapons tab.
 let BDMG = 2;           // D50 / OPEN 2 (PORT-F): the demo's own `damage: 2` (js/demo-kernel.js:3031).
                         // WAS 1. It is a BALANCE lever wearing a feel lever's costume and the owner
                         // was told: sustained DPS against kernel hp goes 2.5 -> 15.0 (x6), a rocket
                         // (hp 2) dies in ONE hit instead of two, and PvP time-to-kill against a hull
                         // of 3 falls from 24x3 = 72 ticks (1.20 s) to 8x2 = 16 ticks (0.27 s), 4.5x.
                         // damage one player bullet deals — encounter.js reads it for the enemy side of a body
-                        // contact, so a ram costs exactly one bullet; code-only, no menu knob (a future
-                        // Encounter.mods damage term must multiply into BOTH fire() and contactEvent)
+                        // contact, so a ram costs exactly one bullet. D67 GAVE IT A ROW: `bdmg` on the
+                        // weapons tab, NET-LOCKED like every sim-affecting slider, shipped at this same 2
+                        // (a future Encounter.mods damage term must multiply into BOTH fire() and
+                        // contactEvent)
 let CONTACTCD = 62;     // ticks before one enemy body can take contact damage again — mirrors the player's
                         // post-hit grace (ECFG.player.invuln), so a sustained overlap trades hull for hp once
                         // a second instead of melting; at the slider's 0 floor a body pays once per TICK of
@@ -263,6 +280,11 @@ let COMETAOEDMG = 22.5; // PORT-S S5 commit D, D40's first-pass value: px the co
                         // THE HALO THE PILOT SEES IS THE CIRCLE THAT COLLIDES: `auraRadiusOf`
                         // is the one derivation and draw, light and the kernel all read it.
                         // (slider, comet tab)
+let ORBLIFE = 8;        // D67's XP-orb dials. Each is production's number, and the kernel's
+let ORBMAGNET = 185;    // matching literal was promoted to a `var` beside `auraDamage`; they
+let ORBRING = 15;       // cross the seam through EncounterHost the same way COMETAURA does,
+let ORBPULL = 720;      // once per tick from poseKernelSeats and once more on the row's own
+                        // input. (sliders, combat tab)
 let COMETAURA = 0.5;    // D26's AURA DAMAGE, per tick, to every hp-bearing BODY and enemy ROUND
                         // inside the halo. D40's first pass. NOT COMETDMG — that is the ram's
                         // per-bite number, and at 3/tick an aura would be a switch rather than
@@ -2911,6 +2933,15 @@ function fire(seat = 0) {
     }
   }
   const em = termsOf(seat); // the FIRING seat's own terms — the tuner values stay untouched
+  // THE MUZZLE OFFSET, along the SIM NOSE and not the shot bearing. `P.heading`
+  // is the CONVERGED nose (hashed unconditionally at hashShip) and `d` is the
+  // aim; headingStep turns one toward the other at a bounded rate, so they part
+  // company on every turning frame. The nose is what the pilot SEES the round
+  // leave, so the nose is what it leaves. At the shipped MUZZLE 0 both are the
+  // same exact zero and no fixture can tell them apart — the choice is made
+  // HERE, before the freeze, because it decides the record hashes the day the
+  // default moves.
+  const mx = MUZZLE * Math.cos(P.heading), my = MUZZLE * Math.sin(P.heading);
   // one id SPACE across bullets and bodies — a replication layer keys by id
   // alone and cannot disambiguate by owning array; a page without the
   // encounter has nothing to replicate, so 0 stands in there
@@ -2922,13 +2953,18 @@ function fire(seat = 0) {
   // what the simulation will do next, and the wire never carries it either.
   //   The muzzle is the NOSE — centre + SHIP_R along the fire direction — so
   // the tail and the glow leave the nozzle, not the cockpit. The HASHED spawn
-  // x/y stays the CENTRE: the nose is a look, never a sim fact. This puts the
-  // origin AHEAD of the round at spawn, which is why every streak clamp is a
-  // signed projection along the velocity and never a bare distance.
+  // x/y stays the CENTRE AT THE SHIPPED `MUZZLE` 0: the nose is a look, not yet
+  // a sim fact. `MUZZLE` is a DIAL (weapons tab, 0-30) threaded into all four
+  // hashed coordinates below, and at 0 the arithmetic is EXACT — so the sentence
+  // above holds by measurement, and holds only until OPEN 12 moves the default.
+  // The day it does, that sentence is the first thing to become false, and so is
+  // the next one: at MUZZLE 0 the ox/oy origin is AHEAD of the round at spawn,
+  // which is why every streak clamp is a signed projection along the velocity
+  // and never a bare distance — and that stays true only while MUZZLE < SHIP_R.
   G.bullets.push({ id: window.Encounter ? Encounter.nextId() : 0,
-                   x: P.ship.x, y: P.ship.y, px: P.ship.x, py: P.ship.y, vx, vy,
+                   x: P.ship.x + mx, y: P.ship.y + my, px: P.ship.x + mx, py: P.ship.y + my, vx, vy,
                    ox: P.ship.x + d.x * SHIP_R, oy: P.ship.y + d.y * SHIP_R,
-                   r: 5.5, dmg: BDMG, owner: seat, dead: false, spent: false, // r x2.5, WAS 2.2
+                   r: BROUND, dmg: BDMG, owner: seat, dead: false, spent: false, // r x2.5, WAS 2.2
 
                    // THE SPLASH RADIUS, CAPTURED AT FIRE TIME (standing rule 5).
                    // blastAt used to read termsFor(seat).blast at IMPACT, so a
@@ -3002,6 +3038,11 @@ function abilityFire(seat, id) {
   let mine = 0;
   for (const b of G.bullets) if (bulletSeat(b) === seat) mine++;
   const base = Math.atan2(dir.y, dir.x);
+  // ONE muzzle, two spawns: the ability round leaves the same nose the basic gun
+  // does. Loop-invariant, so it is computed once here — and it reads P.heading,
+  // NOT `d`: in THIS function `d` is Abilities.def(id) and `dir` is the aim, so
+  // `MUZZLE * d.x` would be NaN, at 0 as loudly as at 14.
+  const amx = MUZZLE * Math.cos(P.heading), amy = MUZZLE * Math.sin(P.heading);
   let spawned = 0;
   for (let i = 0; i < sp.n; i++) {
     if (mine + spawned >= BMAX) break; // the FIRING seat's own cap, owner-scoped
@@ -3017,7 +3058,7 @@ function abilityFire(seat, id) {
                                  // gun's cq-scale/newtonian arithmetic, and a
                                  // record that wants that inheritance will say so
     G.bullets.push({ id: window.Encounter ? Encounter.nextId() : 0,
-                     x: P.ship.x, y: P.ship.y, px: P.ship.x, py: P.ship.y,
+                     x: P.ship.x + amx, y: P.ship.y + amy, px: P.ship.x + amx, py: P.ship.y + amy,
                      vx: Math.cos(a) * spd, vy: Math.sin(a) * spd,
                      ox: P.ship.x + dir.x * SHIP_R, // the muzzle, at the NOSE —
                      oy: P.ship.y + dir.y * SHIP_R, // render-only, and out of
@@ -3523,6 +3564,19 @@ function poseKernelSeats() {
   // production's dial and the kernel reads no production surface. AFTER the
   // seat loop, because it is a fact about the ROOM rather than about a seat.
   EncounterHost.setAuraDamage(COMETAURA);
+  pushOrbDials();
+}
+
+// D67's four orb dials across the same seam. Called from the tick above AND
+// from each row's own bind, so a drag lands before the next tick runs — the
+// pause panel is open on a STOPPED loop and a per-tick-only push would make
+// every one of these sliders look dead while the game is paused.
+function pushOrbDials() {
+  if (!window.EncounterHost || typeof EncounterHost.setOrbLife !== "function") return;
+  EncounterHost.setOrbLife(ORBLIFE);
+  EncounterHost.setOrbMagnet(ORBMAGNET);
+  EncounterHost.setOrbRing(ORBRING);
+  EncounterHost.setOrbPull(ORBPULL);
 }
 
 // the per-tick reset for the claim latch. Every seat, ascending, like every
@@ -6500,6 +6554,10 @@ function showTuner() {
   })());
   out("bspeed-out", BSPEED.toFixed(1) + " px/tick · " + Math.round((1000 / TICK) * BSPEED) + " px/s");
   out("bfactor-out", BFACTOR.toFixed(2));
+  out("bdmg-out", BDMG.toFixed(1) + " damage per bolt");
+  out("bround-out", BROUND.toFixed(1) + " px radius");
+  out("muzzle-out", MUZZLE === 0 ? "0 px — the round is born at the ship CENTRE"
+    : MUZZLE.toFixed(1) + " px along the nose · SHIP_R is " + SHIP_R);
   out("bmax-out", String(BMAX));
   out("blife-out", BLIFE.toFixed(2) + " s");
   out("fxint-out", FXINT.toFixed(1) + "× burst intensity · 0 = off");
@@ -6525,6 +6583,8 @@ function showTuner() {
   // StarSize 1.00 and 1.25 draw the identical 3 px mark. Saying the side out
   // loud is the only way the owner can see which notches are the same notch.
   out("glow-out", (window.FX ? FX.snapshot().glow : 0).toFixed(2) + "× halo radius and alpha");
+  out("bloom-out", (window.FX ? FX.snapshot().bloomInt : 0).toFixed(1) + "× the bloom add-back");
+  out("player-halo-a-out", (window.FX ? FX.snapshot().playerHaloA : 0).toFixed(2) + " alpha on the player's own halo");
   out("starsize-out", STARSIZE.toFixed(2) + " → " + Math.max(STAR_MIN_PX, Math.round(STARSIZE * 2 * dpr))
     + " device px at dpr " + dpr);
   out("starlit-out", STARLIT.toFixed(2) + "× the depth ladder (0.65 / 0.82 / 1.00)");
@@ -6548,6 +6608,10 @@ function showTuner() {
     : "+" + COMETAOEDMG + " px of damage reach at a full pool");
   out("comet-aura-out", COMETAURA === 0 ? "0 — the halo is drawn only, and eats nothing"
     : COMETAURA.toFixed(1) + " damage a tick to every body and enemy round inside the halo");
+  out("orb-life-out", ORBLIFE + " s before an unclaimed orb expires");
+  out("orb-magnet-out", ORBMAGNET + " px — the radius inside which an orb is pulled to a live pilot");
+  out("orb-ring-out", ORBRING + " px — the pickup ring at the hull");
+  out("orb-pull-out", ORBPULL + " px/s\u00b2 of pull at the pilot, falling to 60 at the magnet edge");
   out("comet-fury-out", "+" + Math.round(COMETFURY * 100) + "% comet damage per OVERLOAD rank at an empty pool");
   out("comet-cd-out", COMETCD + " ticks · " + (COMETCD * TICK / 1000).toFixed(2) + " s between COMET touches on one body");
   out("pvp-orbs-out", PVPORBS === 0 ? "0 — a death pays no bounty" :
@@ -6632,13 +6696,25 @@ const INPUTDESC = {
 // prediction from the server's sim. View, camera, fx and audio rows stay
 // live; the ONE gate sits here so no slider needs its own guard.
 const NET_LOCKED_IDS = new Set(["vmax", "accel", "turn", "keythrust",
-  "wallloss", "damp", "cool", "autofire", "bspeed", "bfactor", "bmax", "blife",
-  "bounce", "contactcd", "pvp-rewind",
+  "wallloss", "damp", "cool", "autofire", "bspeed", "bfactor", "bdmg", "bround", "muzzle", "bmax", "blife",
+  "bounce", "contactcd", "pvp-rewind", "blastr", "blastgain",
+  // BLASTR and BLASTGAIN were the LAST two enc.tunables() keys with a control
+  // and no lock. Both size a splash the fixtures pin, and a client dragging
+  // either in a live room would diverge the predictor exactly as a dragged
+  // VMAX would. Found by the guard leg in tests/pause-ui-checks.js, which is
+  // now the reader this Set never had.
   "comet-acc", "comet-turn", "comet-vmax", "comet-dmg", "comet-drain",
   "comet-hit", "comet-thr", "comet-aoe", "comet-aoedmg", "comet-aura", "comet-fury",
   "comet-cd", "pvp-orbs",
   "energy-max", "energy-regen", "energy-delay", "energy-arm", "energy-orb",
-  "energy-cell", "energy-rech"]);
+  "energy-cell", "energy-rech",
+  // D67's four XP-orb dials. LOCKED: they move hashed kernel state (ORB_HASH,
+  // the `orbs` census key, and SEAT_HASH xp/score through the credit), so a
+  // client dragging the magnet in a live room diverges the predictor. There is
+  // no server `tune` arm for any of them and none is added — the server runs
+  // the kernel at its SOURCE defaults, which is exactly what these rows ship
+  // at, so in ?mp the panel refuses the drag and both surfaces agree.
+  "orb-life", "orb-magnet", "orb-ring", "orb-pull"]);
 function bind(id, set) {
   const c = document.getElementById(id);
   c.addEventListener("input", () => {
@@ -6666,6 +6742,9 @@ bind("cool", (v) => { BCOOL = v; }).value = String(BCOOL);
 bind("autofire", (v) => { AUTOFIRE = v; }).checked = AUTOFIRE;
 bind("bspeed", (v) => { BSPEED = v; }).value = String(BSPEED);
 bind("bfactor", (v) => { BFACTOR = v; }).value = String(BFACTOR);
+bind("bdmg", (v) => { BDMG = v; }).value = String(BDMG);
+bind("bround", (v) => { BROUND = v; }).value = String(BROUND);
+bind("muzzle", (v) => { MUZZLE = v; }).value = String(MUZZLE);
 bind("bmax", (v) => { BMAX = v; }).value = String(BMAX);
 bind("blife", (v) => { BLIFE = v; }).value = String(BLIFE);
 bind("bounce", (v) => { BOUNCE = v; }).checked = BOUNCE;
@@ -6692,6 +6771,17 @@ bind("stardens", (v) => { STARDENS = v; render(); }).value = String(STARDENS); /
 // drag them in a live room exactly as it may drag the shake pair.
 bind("glow", (v) => { if (window.FX) FX.setGlow(v); render(); })
   .value = String(window.FX ? FX.snapshot().glow : 1.2);
+// D67's two WORLD rows, same idiom. THE FALLBACK LITERAL IS A SECOND COPY of
+// js/fx.js's own `let`: js/game.js loads BEFORE js/fx.js (index.html:564 vs
+// :568), so `window.FX` is undefined while these lines run and the `:` arm is
+// ALWAYS the one taken. Keep 1.4 equal to js/fx.js's `let BLOOM_INT = 1.4` and
+// 0.4 equal to its `let PLAYER_HALO_A = 0.4`, or the slider opens on a number
+// the draw is not using — the trap `glow`'s `: 1.2` already carries against
+// `let GLOW = 1.2`. Move a default and you move BOTH copies, in one commit.
+bind("bloom", (v) => { if (window.FX) FX.setBloom(v); render(); })
+  .value = String(window.FX ? FX.snapshot().bloomInt : 1.4);
+bind("player-halo-a", (v) => { if (window.FX) FX.setPlayerHaloA(v); render(); })
+  .value = String(window.FX ? FX.snapshot().playerHaloA : 0.4);
 bind("starsize", (v) => { STARSIZE = v; render(); }).value = String(STARSIZE);
 bind("starlit", (v) => { STARLIT = v; render(); }).value = String(STARLIT);
 bind("minimap", (v) => { MINIMAP = v; render(); }).checked = MINIMAP;
@@ -6712,6 +6802,13 @@ bind("comet-thr", (v) => { COMETTHR = v; }).value = String(COMETTHR);
 bind("comet-aoe", (v) => { COMETAOE = v; }).value = String(COMETAOE);
 bind("comet-aoedmg", (v) => { COMETAOEDMG = v; }).value = String(COMETAOEDMG);
 bind("comet-aura", (v) => { COMETAURA = v; }).value = String(COMETAURA);
+// D67's orb dials. Each bind pushes ACROSS THE SEAM as well as assigning the
+// `let`: the panel is open on a stopped loop, so the per-tick push in
+// poseKernelSeats() cannot be the only one or the drag lands nowhere.
+bind("orb-life", (v) => { ORBLIFE = v; pushOrbDials(); }).value = String(ORBLIFE);
+bind("orb-magnet", (v) => { ORBMAGNET = v; pushOrbDials(); }).value = String(ORBMAGNET);
+bind("orb-ring", (v) => { ORBRING = v; pushOrbDials(); }).value = String(ORBRING);
+bind("orb-pull", (v) => { ORBPULL = v; pushOrbDials(); }).value = String(ORBPULL);
 bind("comet-fury", (v) => { COMETFURY = v; }).value = String(COMETFURY);
 bind("pvp-orbs", (v) => { PVPORBS = v; }).value = String(PVPORBS); // the PvP bounty, on the
                        // comet tab beside the ram that most often collects it; NET-LOCKED like
@@ -7373,6 +7470,10 @@ Object.assign(window.__test, {
              // and the card table drives the real predicate rather than
              // inferring it from a seat id that reads 0 in both cases
   localPlayer,
+  // D67's orb dials get their OWN accessor. They must NOT join flightTunables():
+  // test/node-golden.mjs:3051-3053 stringify-compares that whole object against
+  // golden.json's meta, so one added key reds 232/233 with no fixture move.
+  orbTunables: () => ({ ORBLIFE, ORBMAGNET, ORBRING, ORBPULL }),
   // the flight constants beside enc.tunables() — the fixture records both, so
   // a future failure is diagnosable as "the constants moved" vs "the code moved"
   flightTunables: () => ({ VMAX, ACCEL, TURN, FLICK, DAMP, KEYTHRUST, WALLLOSS,

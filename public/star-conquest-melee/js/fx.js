@@ -68,6 +68,11 @@
   // with no plumbing. It is render-only: it is in no tunable record, no
   // snapshot state and no hash.
   let GLOW = 1.2;          // halo radius/alpha multiplier
+  let PLAYER_HALO_A = 0.4; // D57's ratio lever, made a dial by D67: the player
+                           // halo's own alpha, the ONE blob in this file the
+                           // owner tunes apart from GLOW. It multiplies g1
+                           // exactly where the 0.4 literal did, so the shipped
+                           // look is unchanged at the shipped value.
   const PARTICLES = 1.5;   // emitter density — above 1.05 the embers come in
   const TRAILS = 1;        // trail length and alpha (commit 3)
   const PERSIST = 0.1;     // per-sim-frame phosphor fade
@@ -91,6 +96,16 @@
   // surrounds. No guard is needed here: js/fx.js never loads in the headless
   // vm, and index.html loads the palette ahead of every other script.
   const PAL = PALETTE.hot;
+
+  // D64 — THE ONE HUE RESOLVER. A cue may now name a KERNEL colour ("red",
+  // "magenta", ...), and those live NESTED under PAL.kernel precisely so a demo
+  // byte cannot collide with a hot name. PAL is tried FIRST, so the two names
+  // that exist in BOTH tables (`dim`, `gold`) keep the hot byte they already
+  // had and no shipped pixel moves. A name in neither returns null and every
+  // caller falls back to PAL.clay — a name handed straight to blob() parses to
+  // rgba(0,0,0,a), invisible under "lighter", and silent.
+  const hueHex = (n) => (typeof PAL[n] === "string" ? PAL[n]
+    : (PAL.kernel && typeof PAL.kernel[n] === "string") ? PAL.kernel[n] : null);
 
   const FX_SALT = 0x7EE1A5E0; // this layer's own hash salt — never FX_SEED's
   const RING_N = 100;         // the cosmetic pose ring: a FIXED ring buffer with
@@ -208,6 +223,16 @@
     // R6 declined to make), and nothing here changes that: the player's cap
     // raises no cue to map.
     capDenied:  { hue: "dim",    big: false, flash: 0.25, ring: 0.2, parts: 0 },
+    // D64 (PORT-P) — THE DESTRUCTION SPARK, and it wears the ROUND'S OWN
+    // COLOUR. The event carries a kernel colour NAME on `col` and cue() bends
+    // this row's `hue` to it, so the flash and every particle resolve through
+    // hueHex's PAL.kernel arm. `parts` is a DENSITY, not a count:
+    // 22*PARTICLES*parts sparks + 13*PARTICLES*parts chips, so 0.076 gives
+    // round(2.508)=3 + round(1.482)=1 = FOUR particles, the count the kernel's
+    // own death burst spawns (`burst(o.x, o.y, o.color, 4, 62)`). The SPEED is
+    // NOT matchable from a row: this emitter's spark speed is frr(40, 180) and
+    // no field of a KINDS row reaches it.
+    roundDeath: { hue: "clay",   big: false, flash: 0.3,  ring: 0,   parts: 0.076 },
   };
 
   // ---- state ---------------------------------------------------------------
@@ -462,18 +487,19 @@
       // most of their path young, so their white window is the narrower one.
       const whiteLf = p.k === 0 ? 0.85 : 0.65;
       const name = (p.col === "bright" && lf < whiteLf) ? (p.hue || "clay") : p.col;
-      // HARDENED AT D44: PAL now carries a NESTED `kernel` sub-table, so a
-      // dynamic name lookup can return an OBJECT and pass a `||` truthiness
-      // test. Every one of these four sites demands a STRING, or it hands
-      // sprite() something hexRgb parses to rgba(0,0,0,a) — invisible under
-      // "lighter", and silent.
-      const hex = (v) => (typeof v === "string" ? v : null);
-      const pc = hex(PAL[name]) || PAL.clay;
+      // HARDENED AT D44, FOLDED AT D64: PAL carries a NESTED `kernel`
+      // sub-table, so a dynamic name lookup can return an OBJECT and pass a
+      // `||` truthiness test. Every one of these four sites demands a STRING.
+      // The string test and the PAL.kernel arm are now ONE function — `hueHex`
+      // at the top of this file — so a kernel colour name resolves here instead
+      // of falling to clay, and the local helper this line used to declare is
+      // gone with its second copy of the guard.
+      const pc = hueHex(name) || PAL.clay;
       if (p.k === 1) {
         const s = p.size;
         const gr = p.size * 2.2;
         g.globalAlpha = 0.3 * lf;
-        g.drawImage(sprite(hex(PAL[p.hue]) || pc), p.x - gr, p.y - gr, gr * 2, gr * 2);
+        g.drawImage(sprite(hueHex(p.hue) || pc), p.x - gr, p.y - gr, gr * 2, gr * 2);
         g.globalAlpha = 0.85 * lf;
         g.fillStyle = pc;
         g.fillRect(p.x - s / 2, p.y - s / 2, s, s);
@@ -624,7 +650,7 @@
       // and the engine's own ENG_BURN_WIND swell, which still reads cv.wind),
       // so the confirmed burn is the only thing on this screen that lights.
       const hue = typeof hullFor === "function" ? (hullFor(P.id).glow || PAL.clay) : PAL.clay;
-      blob(vp.x, vp.y, SHIP_R * 2.8, hue, 0.4 * g1);
+      blob(vp.x, vp.y, SHIP_R * 2.8, hue, PLAYER_HALO_A * g1);
       blob(vp.x, vp.y, SHIP_R * 1.5, hue, 0.22 * g1);
       blob(vp.x, vp.y, Math.min(3, 2.2 * gl), PAL.bright, 0.5 * g1);
       // the engine flame's glow, off the same smoothed thrust the flat flame
@@ -858,7 +884,7 @@
     // re-derived from (age) alone so a repeated render paints the same pixels
     for (const F of flashes) {
       if (F.flash > 0 && F.age < 9) {
-        const hue = (typeof PAL[F.hue] === "string" ? PAL[F.hue] : null) || PAL.clay;
+        const hue = hueHex(F.hue) || PAL.clay;
         const ff = 1 - F.age / 9;
         blob(F.x, F.y, (F.big ? 26 : 14) * (0.4 + 0.6 * (1 - ff)) * Math.min(1.4, gl + 0.4),
              PAL.bright, 0.8 * ff * F.flash);
@@ -872,7 +898,7 @@
       if (!(F.ring > 0) || F.age >= F.life) continue;
       const rf = F.age / F.life;
       g.globalAlpha = (1 - rf) * 0.5 * F.ring;
-      g.strokeStyle = (typeof PAL[F.hue] === "string" ? PAL[F.hue] : null) || PAL.clay;
+      g.strokeStyle = hueHex(F.hue) || PAL.clay;
       g.lineWidth = (F.big ? 3 : 2) * (1 - rf) + 0.5;
       g.beginPath();
       g.arc(F.x, F.y, (F.big ? 3.1 : 2.2) * F.age + 3, 0, TAU);
@@ -902,8 +928,12 @@
     if (!ev.at) return; // the local drain has no null-position guard of its
                         // own — a throw here fails every suite that loads
                         // the page
-    const K = KINDS[ev.kind];
+    let K = KINDS[ev.kind];
     if (!K) return; // an unmapped kind draws nothing, telegraphs included
+    // D64 — THE PER-EVENT COLOUR, and it is the ROW that bends, never the bus.
+    // `ev.col` is a kernel colour NAME; a spread copy leaves KINDS immutable and
+    // an unknown name leaves the row's own hue standing.
+    if (ev.col && hueHex(ev.col)) K = { ...K, hue: ev.col };
     cueCount = (cueCount + 1) >>> 0;
     const x = ev.at.x, y = ev.at.y;
     // the seeding idiom for id-less events, straight off spawnImpactFx: the
@@ -1136,6 +1166,9 @@
   // ...and the halo dial beside it, same shape: a non-number parks at 0 rather
   // than poisoning every radius in the file with NaN.
   function setGlow(v) { GLOW = Math.max(0, +v || 0); }
+  // ...and D67's player-halo alpha, the same shape a third time. No clamp to 1
+  // is needed here: blob() already does its own alpha guard.
+  function setPlayerHaloA(v) { PLAYER_HALO_A = Math.max(0, +v || 0); }
 
   // ---- lifecycle ----------------------------------------------------------
   function reset() {
@@ -1163,9 +1196,10 @@
              ring: rings[0] ? Math.min(rings[0].n, RING_N) : 0,
              bloom: BLOOM_INT > 0 ? (filterSupported() ? "filter" : "halving") : "off",
              nebula: NEBULA, baked: nebCache.size, bloomInt: BLOOM_INT, glow: GLOW,
+             playerHaloA: PLAYER_HALO_A,
              layers: !!glowC, w: LW, h: LH, fade: fadeKeep, cam: camHas };
   }
 
   window.FX = { on: () => ON, setOn, cue, advance, composite, resize, reset,
-                nebula, setNebula, setBloom, setGlow, snapshot };
+                nebula, setNebula, setBloom, setGlow, setPlayerHaloA, snapshot };
 })();

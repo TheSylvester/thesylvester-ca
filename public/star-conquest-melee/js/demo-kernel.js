@@ -4624,6 +4624,36 @@
     return auraDamage;
   }
 
+  // D67'S FOUR ORB DIALS. Same seam as `auraDamage`, one difference that
+  // matters: these default to the SHIPPED numbers, not to zero, because every
+  // surface that never pushes them (the Node replay, the bounded harness,
+  // demo-play) must keep flying today's orb. A life of 0 is not a quiet dial,
+  // it is every orb dead on its spawn tick — so a non-finite push is REFUSED
+  // and the current value stands, rather than being coerced to 0.
+  var ORBLIFE = 8;
+  var ORBMAGNET = 185;
+  var ORBRING = 15;
+  var ORBPULL = 720;
+  function setOrbLife(n) {
+    ORBLIFE = Number.isFinite(n) && n > 0 ? n : ORBLIFE;
+    return ORBLIFE;
+  }
+  function setOrbMagnet(n) {
+    ORBMAGNET = Number.isFinite(n) && n >= 0 ? n : ORBMAGNET;
+    return ORBMAGNET;
+  }
+  function setOrbRing(n) {
+    ORBRING = Number.isFinite(n) && n > 0 ? n : ORBRING;
+    return ORBRING;
+  }
+  function setOrbPull(n) {
+    ORBPULL = Number.isFinite(n) && n >= 0 ? n : ORBPULL;
+    return ORBPULL;
+  }
+  function orbDials() {
+    return { life: ORBLIFE, magnet: ORBMAGNET, ring: ORBRING, pull: ORBPULL };
+  }
+
   function auraBite(burner, target, cls) {
     if (cls === undefined) return false;          // an undeclared kind is not eaten
     if (target.dead || !(target.hp > 0)) return false;
@@ -5267,7 +5297,7 @@
     S.orbs.push({
       id: id, x: x, y: y, px: x, py: y,
       vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
-      life: 8, phase: rangeOf(gen, 0, TAU), value: value || 1, dead: false
+      life: ORBLIFE, phase: rangeOf(gen, 0, TAU), value: value || 1, dead: false
     });
   }
 
@@ -5334,8 +5364,8 @@
           o.vx *= CLEAR_SWEEP_VMAX / m;
           o.vy *= CLEAR_SWEEP_VMAX / m;
         }
-      } else if (p.alive && d < 185) {
-        const pull = (1 - d / 185) * 720 + 60;
+      } else if (p.alive && d < ORBMAGNET) {
+        const pull = (1 - d / ORBMAGNET) * ORBPULL + 60;
         o.vx += dx / d * pull * dt;
         o.vy += dy / d * pull * dt;
       }
@@ -5348,7 +5378,7 @@
         if (!t.alive) continue;
         const tx = delta(o.x, t.x, W);
         const ty = delta(o.y, t.y, H);
-        if ((Math.hypot(tx, ty) || 1) < 15) { taker = t; break; }
+        if ((Math.hypot(tx, ty) || 1) < ORBRING) { taker = t; break; }
       }
       o.vx *= Math.pow(0.982, dt * 60);
       o.vy *= Math.pow(0.982, dt * 60);
@@ -5595,6 +5625,14 @@
     // AFTER production's combat window. `pendingChildren` is the count, for the
     // legs that prove nothing is born on the tick that killed the parent.
     setAuraDamage: setAuraDamage,
+    // D67's orb dials, the same crossing: four production numbers this
+    // kernel may not read for itself, plus one read-half so a driven leg
+    // can prove the value ARRIVED rather than that the row was clicked.
+    setOrbLife: setOrbLife,
+    setOrbMagnet: setOrbMagnet,
+    setOrbRing: setOrbRing,
+    setOrbPull: setOrbPull,
+    orbDials: orbDials,
     flushChildren: flushChildren,
     pendingChildren: pendingChildren,
     poseDriven: poseDriven,

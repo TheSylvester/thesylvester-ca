@@ -1474,6 +1474,31 @@
       if (!kernel || typeof kernel.setAuraDamage !== "function") return 0;
       return kernel.setAuraDamage(typeof n === "number" && isFinite(n) && n > 0 ? n : 0);
     },
+    // D67'S FOUR ORB DIALS — `setAuraDamage`'s siblings, and the same refusal:
+    // the kernel holds the number, production owns it, and a surface with no
+    // kernel installed gets 0 back rather than a throw. Unlike the aura, a
+    // non-finite push is REFUSED by the kernel (it keeps its own default) — an
+    // orb life of 0 is not a quiet dial, it is every orb dead on its spawn tick.
+    setOrbLife: function (n) {
+      if (!kernel || typeof kernel.setOrbLife !== "function") return 0;
+      return kernel.setOrbLife(n);
+    },
+    setOrbMagnet: function (n) {
+      if (!kernel || typeof kernel.setOrbMagnet !== "function") return 0;
+      return kernel.setOrbMagnet(n);
+    },
+    setOrbRing: function (n) {
+      if (!kernel || typeof kernel.setOrbRing !== "function") return 0;
+      return kernel.setOrbRing(n);
+    },
+    setOrbPull: function (n) {
+      if (!kernel || typeof kernel.setOrbPull !== "function") return 0;
+      return kernel.setOrbPull(n);
+    },
+    orbDials: function () {
+      if (!kernel || typeof kernel.orbDials !== "function") return null;
+      return kernel.orbDials();
+    },
     flushKernelChildren: function () {
       if (!kernel || typeof kernel.flushChildren !== "function") return 0;
       return kernel.flushChildren();
