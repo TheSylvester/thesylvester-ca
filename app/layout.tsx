@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -21,6 +21,12 @@ export const metadata: Metadata = {
     siteName: "Sylvester Wong",
     type: "website",
   },
+};
+
+// Emitted as <meta name="color-scheme" content="dark"> so the browser paints
+// its own chrome (scrollbars, overscroll, form controls) dark before CSS lands.
+export const viewport: Viewport = {
+  colorScheme: "dark",
 };
 
 export default function RootLayout({

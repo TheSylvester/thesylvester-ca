@@ -466,23 +466,36 @@ a:hover {
   }
 }
 
-/* Browser chrome — the terminal owns its scrollbar and caret */
+/* Browser chrome — the terminal owns its scrollbar and caret.
+   color-scheme: dark keeps every native surface dark (overscroll, form
+   controls, any scroller these rules miss). scrollbar-color inherits, so the
+   root value themes every scroll container; Chrome ≥121, Firefox and Safari
+   ≥26.2 draw it natively. The ::-webkit-scrollbar rules are the fallback for
+   engines without the standard property — Chrome ignores them once
+   scrollbar-color is set, so they are gated to where they still apply. */
 html {
+  color-scheme: dark;
   scrollbar-color: #2c3447 #12151f;
 }
-::-webkit-scrollbar {
-  width: 12px;
-}
-::-webkit-scrollbar-track {
-  background: #12151f;
-}
-::-webkit-scrollbar-thumb {
-  background: #2c3447;
-  border: 3px solid #12151f;
-  border-radius: 7px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #3a4152;
+@supports not (scrollbar-color: auto) {
+  ::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #12151f;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #2c3447;
+    border: 3px solid #12151f;
+    border-radius: 7px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3a4152;
+  }
+  ::-webkit-scrollbar-corner {
+    background: #12151f;
+  }
 }
 input,
 textarea {
